@@ -4,18 +4,20 @@
 
 <p align="center">
   <a href="https://github.com/NagareWorks/nnrp-js/actions"><img alt="CI" src="https://img.shields.io/badge/CI-typescript-22c55e"></a>
-  <a href="https://nodejs.org"><img alt="Node.js" src="https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white"></a>
+  <a href="https://deno.com"><img alt="Deno" src="https://img.shields.io/badge/Deno-2.x-000000?logo=deno&logoColor=white"></a>
   <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white"></a>
+  <a href="https://nodejs.org"><img alt="Node-compatible" src="https://img.shields.io/badge/Node-compatible-64748b?logo=node.js&logoColor=white"></a>
   <a href="https://nagareworks.github.io/nnrp-doc/"><img alt="Docs" src="https://img.shields.io/badge/docs-nnrp--doc-38bdf8"></a>
   <a href="https://github.com/NagareWorks/nnrp-js/blob/main/LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-64748b"></a>
 </p>
 
 # nnrp-js
 
-TypeScript and JavaScript SDK workspace for NNRP.
+Deno-first TypeScript SDK workspace for NNRP, with Node-compatible package output.
 
-NNRP is a lightweight real-time AI application-layer protocol. This repository is the JavaScript SDK surface for Node.js
-services, browser/edge WASM integrations, and later Coding Agent orchestration experiments.
+NNRP is a lightweight real-time AI application-layer protocol. This repository is the JavaScript SDK surface for
+Deno-driven tooling, Node-compatible service packages, browser/edge WASM integrations, and later Coding Agent
+orchestration experiments.
 
 ## Packages
 
@@ -33,9 +35,13 @@ deno task test
 deno task build
 ```
 
-The first preview keeps the JavaScript layer thin: Deno drives formatting, linting, tests, and TypeScript builds, while
-the packages still emit Node/npm-compatible ESM and declaration files. Rust remains the preferred implementation for
-protocol-critical native and WASM primitives.
+The first preview keeps the JavaScript layer thin: Deno drives formatting, linting, tests, and TypeScript builds. The
+published package shape remains Node-compatible ESM with declaration files, but Node.js is treated as a compatibility
+target rather than the repository tooling base. Rust remains the preferred implementation for protocol-critical native
+and WASM primitives.
+
+`nnrp-js` uses Deno for repository tooling and keeps Node.js compatibility for package consumers. Bun is not a supported
+runtime, build tool, compatibility target, or CI axis for this SDK.
 
 ## Repository Status
 

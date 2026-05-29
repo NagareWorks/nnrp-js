@@ -6,7 +6,8 @@
     "build": "deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
     "format": "deno fmt",
     "format:check": "deno fmt --check",
-    "lint": "deno fmt --check && deno lint && deno task typecheck",
+    "lint": "deno fmt --check && deno lint && deno task runtime-policy && deno task typecheck",
+    "runtime-policy": "deno run --allow-read scripts/check-runtime-policy.ts",
     "test": "deno test --allow-env packages/*/test/*.test.ts",
     "typecheck": "deno check packages/*/src/index.ts packages/*/test/*.test.ts"
   },
