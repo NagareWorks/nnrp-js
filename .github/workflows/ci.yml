@@ -86,6 +86,9 @@ jobs:
   runtime-policy:
     name: runtime-policy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,7 +97,40 @@ jobs:
         with:
           deno-version: v2.x
       - name: Reject unsupported runtime adapters
-        run: deno task runtime-policy
+        id: runtime_policy
+        shell: bash
+        run: |
+          set +e
+          output="$(deno task runtime-policy 2>&1)"
+          status="$?"
+          {
+            echo "status=$status"
+            echo "output<<EOF"
+            echo "$output"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "$output"
+          exit "$status"
+      - name: Close unsupported runtime PR
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          POLICY_OUTPUT: ${{ steps.runtime_policy.outputs.output }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "This PR was closed automatically because it violates the JS runtime policy."
+            echo
+            echo "Unsupported runtime/tooling/adaptation entries are not accepted in this repository."
+            echo
+            echo '```text'
+            printf '%s\n' "$POLICY_OUTPUT"
+            echo '```'
+          } > runtime-policy-comment.md
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file runtime-policy-comment.md
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
 
   docs-only:
     name: docs-only
