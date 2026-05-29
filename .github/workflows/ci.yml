@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Detect docs-only changes
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          changed="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+          if [[ -n "$changed" ]] && ! grep -Ev '^(README\.md|CONTRIBUTING\.md|LICENSE|doc/|docs/|assets/.*\.(svg|png|jpg|jpeg|webp))$' <<< "$changed" >/dev/null; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  commit-policy:
+    name: commit-policy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Enforce conventional commit and single-commit PRs
+        shell: bash
+        run: |
+          set -euo pipefail
+          count="$(git rev-list --count "origin/${{ github.base_ref }}"...HEAD)"
+          if [[ "$count" -ne 1 ]]; then
+            echo "PR must contain exactly one commit before review; found $count."
+            exit 1
+          fi
+          subject="$(git log -1 --pretty=%s)"
+          if [[ ! "$subject" =~ ^(feat|fix|docs|chore|test|refactor|perf|ci|build)(\([a-z0-9._-]+\))?:\ .+ ]]; then
+            echo "Commit subject is not Conventional Commits style: $subject"
+            exit 1
+          fi
+
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Check formatting
+        run: deno task format:check
+      - name: Lint
+        run: deno lint
+      - name: Typecheck
+        run: deno task typecheck
+      - name: Test
+        run: deno task test
+      - name: Build
+        run: deno task build
+
+  docs-only:
+    name: docs-only
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'true'
+    steps:
+      - name: Acknowledge docs-only change
+        run: echo "Docs-only change; build-test skipped."
+
+  required-checks:
+    name: required-checks
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - build-test
+      - docs-only
+    if: always()
+    steps:
+      - name: Verify required checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="${{ needs.build-test.result }}"
+          docs="${{ needs.docs-only.result }}"
+          if [[ "$build" == "success" || "$docs" == "success" ]]; then
+            exit 0
+          fi
+          echo "Neither build-test nor docs-only succeeded."
+          exit 1
