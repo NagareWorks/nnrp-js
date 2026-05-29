@@ -25,7 +25,8 @@ async function scanDirectory(directory: string): Promise<void> {
       continue;
     }
 
-    if (!isTextFile(entry.name) || allowedTextFiles.has(path.replace(/^\.\//, ""))) {
+    const normalizedPath = path.replace(/^\.\//, "");
+    if (!isTextFile(entry.name) || allowedTextFiles.has(normalizedPath) || normalizedPath.startsWith("doc/todo/")) {
       continue;
     }
 
