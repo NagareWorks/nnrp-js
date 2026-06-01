@@ -168,6 +168,8 @@ jobs:
         run: deno task test
       - name: Build
         run: deno task build
+      - name: Package entrypoint smoke
+        run: deno run --allow-read scripts/check-package-entrypoints.ts
 
   runtime-policy:
     name: runtime-policy

@@ -8,21 +8,21 @@
 
 ## Export Maps and Type Declarations
 
-- [ ] Add package export map for `@nnrp/core`.
-- [ ] Add package export map for `@nnrp/native`.
-- [ ] Add package export map for `@nnrp/wasm`.
-- [ ] Add type declaration output for each package.
-- [ ] Add declaration maps if they do not bloat package artifacts.
+- [x] Add package export map for `@nnrp/core`.
+- [x] Add package export map for `@nnrp/native`.
+- [x] Add package export map for `@nnrp/wasm`.
+- [x] Add type declaration output for each package.
+- [x] Add declaration maps if they do not bloat package artifacts.
 - [ ] Add subpath export policy for future internal helpers.
-- [ ] Add tests that import built package entrypoints instead of source paths.
+- [x] Add tests that import built package entrypoints instead of source paths.
 
 ## Build Outputs
 
-- [ ] Build `@nnrp/core` to ESM.
-- [ ] Build `@nnrp/native` to Node-compatible ESM.
-- [ ] Build `@nnrp/wasm` to browser-compatible ESM.
+- [x] Build `@nnrp/core` to ESM.
+- [x] Build `@nnrp/native` to Node-compatible ESM.
+- [x] Build `@nnrp/wasm` to browser-compatible ESM.
 - [ ] Keep source maps only if package policy allows them.
-- [ ] Ensure package output is reproducible enough for CI artifact diffing.
+- [x] Ensure package output is reproducible enough for CI artifact diffing.
 - [ ] Add clean build task that removes stale output before building.
 
 ## Package Content Checks
@@ -38,11 +38,11 @@
 ## Runtime Policy CI
 
 - [x] Reject Bun files and adaptation traces.
-- [ ] Reject accidental `node:*` imports in `@nnrp/core`.
-- [ ] Reject accidental `node:*` imports in `@nnrp/wasm`.
-- [ ] Reject DOM globals in `@nnrp/native`.
-- [ ] Reject direct package-to-source imports in built packages.
-- [ ] Add Node import smoke for built `@nnrp/native`.
+- [x] Reject accidental `node:*` imports in `@nnrp/core`.
+- [x] Reject accidental `node:*` imports in `@nnrp/wasm`.
+- [x] Reject DOM globals in `@nnrp/native`.
+- [x] Reject direct package-to-source imports in built packages.
+- [x] Add Node import smoke for built `@nnrp/native`.
 - [ ] Add browser bundling smoke for built `@nnrp/wasm`.
 
 ## Release Artifact Shape

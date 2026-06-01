@@ -27,6 +27,43 @@ const bannedTextPatterns: readonly { readonly label: string; readonly pattern: R
   { label: "Bun typeof probe", pattern: /\btypeof\s+Bun\b/ },
 ];
 
+const packageBoundaryRules: readonly PackageBoundaryRule[] = [
+  {
+    packageName: "@nnrp/core",
+    prefix: "packages/core/src/",
+    bannedPatterns: [
+      { label: "Node built-in import", pattern: /\bfrom\s+["']node:/ },
+      { label: "dynamic Node built-in import", pattern: /\bimport\s*\(\s*["']node:/ },
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      { label: "WebAssembly API", pattern: /\bWebAssembly\b/ },
+      { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/native["']/ },
+      { label: "wasm package import", pattern: /\bfrom\s+["']@nnrp\/wasm["']/ },
+    ],
+  },
+  {
+    packageName: "@nnrp/native",
+    prefix: "packages/native/src/",
+    bannedPatterns: [
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      { label: "wasm package import", pattern: /\bfrom\s+["']@nnrp\/wasm["']/ },
+      {
+        label: "browser-only source import",
+        pattern: /\bfrom\s+["'][^"']*(?:browser|websocket|webtransport)[^"']*["']/i,
+      },
+    ],
+  },
+  {
+    packageName: "@nnrp/wasm",
+    prefix: "packages/wasm/src/",
+    bannedPatterns: [
+      { label: "Node built-in import", pattern: /\bfrom\s+["']node:/ },
+      { label: "dynamic Node built-in import", pattern: /\bimport\s*\(\s*["']node:/ },
+      { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/native["']/ },
+      { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
+    ],
+  },
+];
+
 const packageDependencySections = [
   "dependencies",
   "devDependencies",
@@ -125,6 +162,22 @@ function checkText(path: string, text: string): void {
       violations.push(`${path}: ${label}`);
     }
   }
+
+  checkPackageBoundaryText(path, text);
+}
+
+function checkPackageBoundaryText(path: string, text: string): void {
+  for (const rule of packageBoundaryRules) {
+    if (!path.startsWith(rule.prefix)) {
+      continue;
+    }
+
+    for (const { label, pattern } of rule.bannedPatterns) {
+      if (pattern.test(text)) {
+        violations.push(`${path}: ${rule.packageName} boundary violation: ${label}`);
+      }
+    }
+  }
 }
 
 function asStringMap(value: unknown): Record<string, string> {
@@ -151,6 +204,12 @@ function isTextFile(fileName: string): boolean {
 
 function normalizePath(path: string): string {
   return path.replace(/^\.\//, "").replaceAll("\\", "/");
+}
+
+interface PackageBoundaryRule {
+  readonly packageName: string;
+  readonly prefix: string;
+  readonly bannedPatterns: readonly { readonly label: string; readonly pattern: RegExp }[];
 }
 
 await scanDirectory(".");
