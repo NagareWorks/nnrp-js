@@ -4,7 +4,7 @@
   },
   "tasks": {
     "build": "deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
-    "package-smoke": "deno task build && deno run --allow-read scripts/check-package-entrypoints.ts",
+    "package-smoke": "deno task build && deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts",
     "format": "deno fmt",
     "format:check": "deno fmt --check",
     "lint": "deno fmt --check && deno lint && deno task runtime-policy && deno task typecheck",

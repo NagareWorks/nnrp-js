@@ -28,9 +28,9 @@
 ## Package Content Checks
 
 - [ ] Add script that runs `npm pack --dry-run` for each package.
-- [ ] Assert `@nnrp/core` package contains no native or WASM artifacts.
-- [ ] Assert `@nnrp/native` package contains no browser-only implementation files.
-- [ ] Assert `@nnrp/wasm` package contains no native loader files.
+- [x] Assert `@nnrp/core` package contains no native or WASM artifacts.
+- [x] Assert `@nnrp/native` package contains no browser-only implementation files.
+- [x] Assert `@nnrp/wasm` package contains no native loader files.
 - [ ] Assert browser package contains no server exports.
 - [ ] Assert native package contains required native artifact metadata when artifact packaging is enabled.
 - [ ] Assert README/license/package metadata are present.
