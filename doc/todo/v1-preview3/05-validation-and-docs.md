@@ -26,7 +26,7 @@
 - [x] Ensure capability claims are build-mode specific.
 - [x] Include artifact/build-mode diagnostics in adapter output.
 - [x] Add CI job that runs public suite smoke cases through the adapter.
-- [ ] Add negative conformance cases for unavailable native/WASM artifacts.
+- [x] Add negative conformance cases for unavailable native/WASM artifacts.
 
 ## Benchmarks
 

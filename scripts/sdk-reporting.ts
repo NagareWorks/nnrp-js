@@ -91,12 +91,15 @@ export function createConformanceReport(
     artifactVersion: options.artifactVersion ?? null,
     manifest: buildManifest.manifest,
     transport,
-    cases: buildManifest.manifest.capabilities.map((capability) => ({
-      id: `${buildMode}.${capability}`,
-      status: "passed",
-      capability,
-    })),
-    diagnostics: [adapterDiagnostic(buildMode)],
+    cases: [
+      ...buildManifest.manifest.capabilities.map((capability) => ({
+        id: `${buildMode}.${capability}`,
+        status: "passed" as const,
+        capability,
+      })),
+      unavailableArtifactCase(buildMode),
+    ],
+    diagnostics: [adapterDiagnostic(buildMode), unavailableArtifactDiagnostic(buildMode)],
   };
 }
 
@@ -234,6 +237,27 @@ function adapterDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic {
     code: "NNRP_JS_ADAPTER_SMOKE",
     message: `${buildMode} adapter report covers manifest-level smoke cases; runtime execution is wired later.`,
     source: "runtime",
+    retryable: false,
+  };
+}
+
+function unavailableArtifactCase(buildMode: NnrpBuildMode): SdkConformanceCaseResult {
+  return {
+    id: `${buildMode}.artifact-unavailable`,
+    status: "skipped",
+    capability: buildMode === "backend-native" ? "native.loader" : "wasm.loader",
+    diagnostic: unavailableArtifactDiagnostic(buildMode),
+  };
+}
+
+function unavailableArtifactDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic {
+  const native = buildMode === "backend-native";
+  return {
+    code: native ? "NNRP_JS_NATIVE_ARTIFACT_UNAVAILABLE" : "NNRP_JS_WASM_ARTIFACT_UNAVAILABLE",
+    message: native
+      ? "Backend native conformance execution is skipped until the native FFI artifact is connected."
+      : "Browser WASM conformance execution is skipped until the WASM primitive artifact is connected.",
+    source: native ? "native" : "wasm",
     retryable: false,
   };
 }

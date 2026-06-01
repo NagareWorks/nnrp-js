@@ -20,8 +20,10 @@ Deno.test("sdk reporting creates conformance smoke cases from capabilities", () 
   const report = createConformanceReport("backend-native");
 
   assertEquals(report.buildMode, "backend-native");
-  assertEquals(report.cases.length, report.manifest.capabilities.length);
-  assertEquals(report.cases.every((entry) => entry.status === "passed"), true);
+  assertEquals(report.cases.length, report.manifest.capabilities.length + 1);
+  assertEquals(report.cases.filter((entry) => entry.status === "passed").length, report.manifest.capabilities.length);
+  assertEquals(report.cases.at(-1)?.status, "skipped");
+  assertEquals(report.cases.at(-1)?.diagnostic?.code, "NNRP_JS_NATIVE_ARTIFACT_UNAVAILABLE");
   assertEquals(report.transport.selected, "tcp");
   assertEquals(report.transport.rejected[0]?.kind, "quic");
 });
