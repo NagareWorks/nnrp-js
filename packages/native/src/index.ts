@@ -1,5 +1,7 @@
 import {
   createBackendNativeManifest,
+  createTransportCandidates,
+  createTransportSelectionSummary,
   type NnrpCancelOptions,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
@@ -10,9 +12,12 @@ import {
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
+  type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
   normalizeSubmitRequest,
+  selectTransport,
   validateEventPollOptions,
 } from "@nnrp/core";
 import process from "node:process";
@@ -57,6 +62,11 @@ export interface NnrpConnectOptions {
 export interface NnrpListenOptions {
   readonly endpoint: string | URL;
   readonly transportPolicy?: NnrpTransportPolicy;
+}
+
+export interface NnrpTransportSelectionOptions {
+  readonly peerManifest: NnrpCapabilityManifest;
+  readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 
 export interface NativeRuntimeOptions {
@@ -142,6 +152,21 @@ export class NnrpBackendRuntime {
       runtime: this,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
     });
+  }
+
+  public selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary {
+    this.#ensureOpen();
+
+    return createTransportSelectionSummary(
+      selectTransport(
+        createTransportCandidates({
+          local: this.#binding.manifest,
+          peer: options.peerManifest,
+          ...(options.scores === undefined ? {} : { scores: options.scores }),
+        }),
+        this.#transportPolicy,
+      ),
+    );
   }
 
   public close(): Promise<void> {

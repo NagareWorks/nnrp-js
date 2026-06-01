@@ -11,6 +11,8 @@ const entrypoints: readonly PackageEntrypoint[] = [
       "createBrowserWasmManifest",
       "createCapabilityManifest",
       "createSchemaDescriptor",
+      "createTransportCandidates",
+      "createTransportSelectionSummary",
       "isStandardInputProfile",
       "normalizeCancelRequest",
       "normalizeOperationRef",

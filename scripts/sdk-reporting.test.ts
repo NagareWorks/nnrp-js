@@ -22,6 +22,8 @@ Deno.test("sdk reporting creates conformance smoke cases from capabilities", () 
   assertEquals(report.buildMode, "backend-native");
   assertEquals(report.cases.length, report.manifest.capabilities.length);
   assertEquals(report.cases.every((entry) => entry.status === "passed"), true);
+  assertEquals(report.transport.selected, "tcp");
+  assertEquals(report.transport.rejected[0]?.kind, "quic");
 });
 
 Deno.test("sdk reporting creates benchmark smoke results", () => {
@@ -30,6 +32,8 @@ Deno.test("sdk reporting creates benchmark smoke results", () => {
   assertEquals(report.buildMode, "browser-wasm");
   assertEquals(report.results[0]?.name, "capability_manifest_generation");
   assertEquals(report.results[0]?.value, report.manifest.capabilities.length);
+  assertEquals(report.results[1]?.name, "transport_candidate_count");
+  assertEquals(report.transport.selected, "websocket");
 });
 
 Deno.test("sdk reporting parses command options", () => {

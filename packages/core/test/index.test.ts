@@ -5,6 +5,8 @@ import {
   createCacheKey,
   createCapabilityManifest,
   createSchemaDescriptor,
+  createTransportCandidates,
+  createTransportSelectionSummary,
   isStandardInputProfile,
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
@@ -94,6 +96,41 @@ Deno.test("@nnrp/core applies transport policy filters", () => {
   );
 
   assertEquals(selection.selected?.kind, "tcp");
+});
+
+Deno.test("@nnrp/core creates transport candidates from local and peer manifests", () => {
+  const local = createBackendNativeManifest(["transport.tcp"]);
+  const peer = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: ["tcp"],
+    capabilities: ["client.session"],
+  });
+
+  const candidates = createTransportCandidates({
+    local,
+    peer,
+    scores: { tcp: 10, quic: 100 },
+  });
+  const selection = selectTransport(candidates);
+  const summary = createTransportSelectionSummary(selection);
+
+  assertEquals(selection.selected?.kind, "tcp");
+  assertEquals(summary.selected, "tcp");
+  assertEquals(summary.rejected, [{ kind: "quic", reason: "peer-unsupported", score: 100 }]);
+});
+
+Deno.test("@nnrp/core reports policy-rejected transport candidates", () => {
+  const selection = selectTransport(
+    [
+      { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
+      { kind: "tcp", peerSupported: true, localAvailable: true, score: 10 },
+    ],
+    "tcp-only",
+  );
+  const summary = createTransportSelectionSummary(selection);
+
+  assertEquals(selection.selected?.kind, "tcp");
+  assertEquals(summary.rejected, [{ kind: "quic", reason: "policy-rejected", score: 100 }]);
 });
 
 Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () => {

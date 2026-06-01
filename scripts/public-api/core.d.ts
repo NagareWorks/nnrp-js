@@ -37,6 +37,23 @@ export interface NnrpTransportSelection {
     readonly candidates: readonly NnrpTransportCandidate[];
     readonly policy: NnrpTransportPolicy;
 }
+export interface NnrpTransportCandidateOptions {
+    readonly local: NnrpCapabilityManifest;
+    readonly peer: NnrpCapabilityManifest;
+    readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+}
+export interface NnrpTransportSelectionSummary {
+    readonly policy: NnrpTransportPolicy;
+    readonly selected: NnrpTransportKind | null;
+    readonly rejected: readonly NnrpRejectedTransportCandidate[];
+    readonly candidates: readonly NnrpTransportCandidate[];
+}
+export interface NnrpRejectedTransportCandidate {
+    readonly kind: NnrpTransportKind;
+    readonly reason: NnrpTransportRejectionReason;
+    readonly score: number;
+    readonly diagnostic?: NnrpDiagnostic;
+}
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 export type NnrpSubmitMode = "inline" | "object-reference";
@@ -174,6 +191,8 @@ export declare function createCapabilityManifest(options: NnrpCapabilityManifest
 export declare function createBackendNativeManifest(capabilities?: readonly NnrpCapability[]): NnrpCapabilityManifest;
 export declare function createBrowserWasmManifest(capabilities?: readonly NnrpCapability[]): NnrpCapabilityManifest;
 export declare function selectTransport(candidates: readonly NnrpTransportCandidate[], policy?: NnrpTransportPolicy): NnrpTransportSelection;
+export declare function createTransportCandidates(options: NnrpTransportCandidateOptions): readonly NnrpTransportCandidate[];
+export declare function createTransportSelectionSummary(selection: NnrpTransportSelection): NnrpTransportSelectionSummary;
 export interface NormalizeSubmitRequestOptions {
     readonly copyPayloads?: boolean;
     readonly strictProfiles?: boolean;

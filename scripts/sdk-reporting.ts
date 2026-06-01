@@ -1,10 +1,15 @@
 import {
   createBackendNativeManifest,
   createBrowserWasmManifest,
+  createCapabilityManifest,
+  createTransportCandidates,
+  createTransportSelectionSummary,
   type NnrpBuildMode,
   type NnrpCapability,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
+  type NnrpTransportSelectionSummary,
+  selectTransport,
 } from "@nnrp/core";
 
 export type SdkCommandMode = NnrpBuildMode | "all";
@@ -33,6 +38,7 @@ export interface SdkConformanceReport {
   readonly artifactVersion: string | null;
   readonly manifest: NnrpCapabilityManifest;
   readonly cases: readonly SdkConformanceCaseResult[];
+  readonly transport: NnrpTransportSelectionSummary;
   readonly diagnostics: readonly NnrpDiagnostic[];
 }
 
@@ -49,6 +55,7 @@ export interface SdkBenchmarkReport {
   readonly buildMode: NnrpBuildMode;
   readonly artifactVersion: string | null;
   readonly manifest: NnrpCapabilityManifest;
+  readonly transport: NnrpTransportSelectionSummary;
   readonly results: readonly SdkBenchmarkResult[];
   readonly diagnostics: readonly NnrpDiagnostic[];
 }
@@ -74,6 +81,7 @@ export function createConformanceReport(
   options: Omit<SdkCommandOptions, "mode"> = {},
 ): SdkConformanceReport {
   const buildManifest = createBuildManifest(buildMode, { mode: buildMode, ...options });
+  const transport = createSdkTransportSelection(buildManifest.manifest);
 
   return {
     sdk: "nnrp-js",
@@ -81,6 +89,7 @@ export function createConformanceReport(
     buildMode,
     artifactVersion: options.artifactVersion ?? null,
     manifest: buildManifest.manifest,
+    transport,
     cases: buildManifest.manifest.capabilities.map((capability) => ({
       id: `${buildMode}.${capability}`,
       status: "passed",
@@ -95,6 +104,7 @@ export function createBenchmarkReport(
   options: Omit<SdkCommandOptions, "mode"> = {},
 ): SdkBenchmarkReport {
   const buildManifest = createBuildManifest(buildMode, { mode: buildMode, ...options });
+  const transport = createSdkTransportSelection(buildManifest.manifest);
 
   return {
     sdk: "nnrp-js",
@@ -102,6 +112,7 @@ export function createBenchmarkReport(
     buildMode,
     artifactVersion: options.artifactVersion ?? null,
     manifest: buildManifest.manifest,
+    transport,
     results: [
       {
         name: "capability_manifest_generation",
@@ -109,9 +120,29 @@ export function createBenchmarkReport(
         unit: "operations",
         value: buildManifest.manifest.capabilities.length,
       },
+      {
+        name: "transport_candidate_count",
+        status: "measured",
+        unit: "operations",
+        value: transport.candidates.length,
+      },
     ],
     diagnostics: [benchmarkDiagnostic(buildMode)],
   };
+}
+
+function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTransportSelectionSummary {
+  const peerManifest = createCapabilityManifest({
+    buildMode: manifest.buildMode,
+    transports: manifest.buildMode === "backend-native" ? ["tcp"] : ["websocket"],
+    capabilities: ["client.session"],
+  });
+  const candidates = createTransportCandidates({
+    local: manifest,
+    peer: peerManifest,
+  });
+
+  return createTransportSelectionSummary(selectTransport(candidates));
 }
 
 export function parseCommandOptions(args: readonly string[]): SdkCommandOptions {

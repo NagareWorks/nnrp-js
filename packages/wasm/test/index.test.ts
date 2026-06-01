@@ -1,4 +1,4 @@
-import { NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
+import { createCapabilityManifest, NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import { createWasmRuntimeBinding, NnrpWasmBindingUnavailableError, openBrowserRuntime } from "../src/index.ts";
 
@@ -36,6 +36,20 @@ Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
   assertEquals(client.transportPolicy, "score");
   assertEquals(session.options.inputProfile, "token");
   assertEquals(session.options.metadata, { app: "browser", request: "one" });
+});
+
+Deno.test("@nnrp/wasm selects browser transport slots from local and peer manifests", async () => {
+  const runtime = await openBrowserRuntime({ transportPolicy: "score" });
+  const summary = runtime.selectTransport({
+    peerManifest: createCapabilityManifest({
+      buildMode: "browser-wasm",
+      transports: ["websocket"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, "websocket");
+  assertEquals(summary.rejected, [{ kind: "webtransport", reason: "peer-unsupported", score: 90 }]);
 });
 
 Deno.test("@nnrp/wasm rejects empty endpoints", async () => {

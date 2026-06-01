@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
+import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -35,6 +35,10 @@ export interface NnrpListenOptions {
     readonly endpoint: string | URL;
     readonly transportPolicy?: NnrpTransportPolicy;
 }
+export interface NnrpTransportSelectionOptions {
+    readonly peerManifest: NnrpCapabilityManifest;
+    readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+}
 export interface NativeRuntimeOptions {
     readonly libraryPath?: string;
     readonly nativeLibrary?: NnrpNativeLibraryOptions;
@@ -61,6 +65,7 @@ export declare class NnrpBackendRuntime {
     get libraryPath(): string;
     connect(options: NnrpConnectOptions): NnrpClient;
     listen(options: NnrpListenOptions): NnrpServer;
+    selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
     close(): Promise<void>;
     get closed(): boolean;
 }

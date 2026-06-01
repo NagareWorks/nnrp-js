@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
+import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -8,6 +8,10 @@ export interface NnrpBrowserConnectOptions {
     readonly endpoint: string | URL;
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpBrowserSessionOptions;
+}
+export interface NnrpBrowserTransportSelectionOptions {
+    readonly peerManifest: NnrpCapabilityManifest;
+    readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 export interface NnrpBrowserSessionOptions {
     readonly inputProfile?: NnrpInputProfile;
@@ -34,6 +38,7 @@ export declare class NnrpBrowserRuntime {
     get manifest(): NnrpCapabilityManifest;
     get moduleUrl(): string;
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
+    selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
     close(): Promise<void>;
     get closed(): boolean;
 }

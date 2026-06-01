@@ -8,22 +8,22 @@
 
 ## Transport Selection
 
-- [ ] Represent `NnrpTransportCandidate` and `NnrpTransportSelection` in `@nnrp/core`.
+- [x] Represent `NnrpTransportCandidate` and `NnrpTransportSelection` in `@nnrp/core`.
 - [ ] Use Rust-backed scoring for native transport providers when the artifact exposes it.
 - [ ] Use WASM primitive scoring for browser provider candidates when available.
-- [ ] Keep candidate scoring stable and deterministic for tests.
-- [ ] Expose rejected candidates with reason codes.
-- [ ] Do not hard-code QUIC-first ordering.
-- [ ] Add tests for score ordering, unavailable providers, and policy rejection.
+- [x] Keep candidate scoring stable and deterministic for tests.
+- [x] Expose rejected candidates with reason codes.
+- [x] Do not hard-code QUIC-first ordering.
+- [x] Add tests for score ordering, unavailable providers, and policy rejection.
 
 ## Native Transport Binding
 
-- [ ] Discover native TCP provider capability from artifact manifest.
-- [ ] Discover native QUIC provider capability from artifact manifest.
-- [ ] Pass explicit `tcp-only`, `quic-only`, `score`, and future policies to native runtime.
+- [x] Discover native TCP provider capability from artifact manifest.
+- [x] Discover native QUIC provider capability from artifact manifest.
+- [x] Pass explicit `tcp-only`, `quic-only`, `score`, and future policies to native runtime.
 - [ ] Fail `quic-only` when QUIC is unavailable; do not silently downgrade.
-- [ ] Report selected provider in connection diagnostics.
-- [ ] Add Node tests using fake provider manifests.
+- [x] Report selected provider in connection diagnostics.
+- [x] Add Node tests using fake provider manifests.
 
 ## Browser Transport Slots
 
@@ -45,6 +45,6 @@
 
 ## Agent-Facing Reporting
 
-- [ ] Provide transport selection summary suitable for CLI/agent logs.
-- [ ] Include selected transport, rejected candidates, score inputs, and fallback reason.
-- [ ] Keep reporting structured so opencode-style integrations can render it without parsing text.
+- [x] Provide transport selection summary suitable for CLI/agent logs.
+- [x] Include selected transport, rejected candidates, score inputs, and fallback reason.
+- [x] Keep reporting structured so opencode-style integrations can render it without parsing text.

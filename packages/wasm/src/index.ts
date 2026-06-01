@@ -1,5 +1,7 @@
 import {
   createBrowserWasmManifest,
+  createTransportCandidates,
+  createTransportSelectionSummary,
   type NnrpCancelOptions,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
@@ -10,9 +12,12 @@ import {
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
+  type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
   normalizeSubmitRequest,
+  selectTransport,
   validateEventPollOptions,
 } from "@nnrp/core";
 
@@ -26,6 +31,11 @@ export interface NnrpBrowserConnectOptions {
   readonly endpoint: string | URL;
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpBrowserSessionOptions;
+}
+
+export interface NnrpBrowserTransportSelectionOptions {
+  readonly peerManifest: NnrpCapabilityManifest;
+  readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 
 export interface NnrpBrowserSessionOptions {
@@ -85,6 +95,21 @@ export class NnrpBrowserRuntime {
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
       ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
     });
+  }
+
+  public selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary {
+    this.#ensureOpen();
+
+    return createTransportSelectionSummary(
+      selectTransport(
+        createTransportCandidates({
+          local: this.#binding.manifest,
+          peer: options.peerManifest,
+          ...(options.scores === undefined ? {} : { scores: options.scores }),
+        }),
+        this.#transportPolicy,
+      ),
+    );
   }
 
   public close(): Promise<void> {

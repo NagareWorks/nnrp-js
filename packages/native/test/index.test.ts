@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
-import { NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
+import { createCapabilityManifest, NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
 import {
   createNativeRuntimeBinding,
   NnrpNativeBindingUnavailableError,
@@ -83,6 +83,20 @@ Deno.test("@nnrp/native exposes backend runtime connect and listen lifecycles", 
   await runtime.close();
   assertEquals(client.closed, true);
   assertEquals(server.closed, true);
+});
+
+Deno.test("@nnrp/native selects transports from local and peer manifests", async () => {
+  const runtime = await openBackendRuntime({ env: {}, platform: "linux", arch: "x64", transportPolicy: "quic-only" });
+  const summary = runtime.selectTransport({
+    peerManifest: createCapabilityManifest({
+      buildMode: "backend-native",
+      transports: ["tcp"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, null);
+  assertEquals(summary.rejected.map((candidate) => candidate.reason), ["peer-unsupported", "policy-rejected"]);
 });
 
 Deno.test("@nnrp/native rejects empty endpoints", async () => {

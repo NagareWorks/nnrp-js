@@ -68,6 +68,26 @@ export interface NnrpTransportSelection {
   readonly policy: NnrpTransportPolicy;
 }
 
+export interface NnrpTransportCandidateOptions {
+  readonly local: NnrpCapabilityManifest;
+  readonly peer: NnrpCapabilityManifest;
+  readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+}
+
+export interface NnrpTransportSelectionSummary {
+  readonly policy: NnrpTransportPolicy;
+  readonly selected: NnrpTransportKind | null;
+  readonly rejected: readonly NnrpRejectedTransportCandidate[];
+  readonly candidates: readonly NnrpTransportCandidate[];
+}
+
+export interface NnrpRejectedTransportCandidate {
+  readonly kind: NnrpTransportKind;
+  readonly reason: NnrpTransportRejectionReason;
+  readonly score: number;
+  readonly diagnostic?: NnrpDiagnostic;
+}
+
 export const NNRP_STANDARD_INPUT_PROFILES = ["tensor", "token", "structured_event", "tool_delta"] as const;
 
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
@@ -267,14 +287,50 @@ export function selectTransport(
   candidates: readonly NnrpTransportCandidate[],
   policy: NnrpTransportPolicy = "score",
 ): NnrpTransportSelection {
-  const eligible = candidates
-    .filter((candidate) => isTransportEligible(candidate, policy))
+  const annotatedCandidates = candidates.map((candidate) => annotateTransportCandidate(candidate, policy));
+  const eligible = annotatedCandidates
+    .filter((candidate) => candidate.rejectionReason === undefined)
     .sort((left, right) => right.score - left.score);
 
   return {
     selected: eligible[0] ?? null,
-    candidates: [...candidates],
+    candidates: annotatedCandidates,
     policy,
+  };
+}
+
+export function createTransportCandidates(
+  options: NnrpTransportCandidateOptions,
+): readonly NnrpTransportCandidate[] {
+  const kinds = uniqueTransports([...options.local.transports, ...options.peer.transports]);
+
+  return kinds.map((kind) => ({
+    kind,
+    peerSupported: options.peer.transports.includes(kind),
+    localAvailable: options.local.transports.includes(kind),
+    score: options.scores?.[kind] ?? defaultTransportScore(kind),
+  }));
+}
+
+export function createTransportSelectionSummary(
+  selection: NnrpTransportSelection,
+): NnrpTransportSelectionSummary {
+  return {
+    policy: selection.policy,
+    selected: selection.selected?.kind ?? null,
+    rejected: selection.candidates
+      .filter((
+        candidate,
+      ): candidate is NnrpTransportCandidate & { readonly rejectionReason: NnrpTransportRejectionReason } =>
+        candidate.rejectionReason !== undefined
+      )
+      .map((candidate) => ({
+        kind: candidate.kind,
+        reason: candidate.rejectionReason,
+        score: candidate.score,
+        ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
+      })),
+    candidates: [...selection.candidates],
   };
 }
 
@@ -386,20 +442,60 @@ export function validateEventPollOptions(options: NnrpEventPollOptions = {}): vo
   }
 }
 
-function isTransportEligible(candidate: NnrpTransportCandidate, policy: NnrpTransportPolicy): boolean {
+function annotateTransportCandidate(
+  candidate: NnrpTransportCandidate,
+  policy: NnrpTransportPolicy,
+): NnrpTransportCandidate {
+  const rejectionReason = transportRejectionReason(candidate, policy);
+  if (rejectionReason === undefined && candidate.rejectionReason === undefined) {
+    return { ...candidate };
+  }
+
+  const reason = candidate.rejectionReason ?? rejectionReason;
+  return {
+    ...candidate,
+    ...(reason === undefined ? {} : { rejectionReason: reason }),
+  };
+}
+
+function transportRejectionReason(
+  candidate: NnrpTransportCandidate,
+  policy: NnrpTransportPolicy,
+): NnrpTransportRejectionReason | undefined {
+  if (candidate.rejectionReason !== undefined) {
+    return candidate.rejectionReason;
+  }
+
   if (!candidate.peerSupported || !candidate.localAvailable) {
-    return false;
+    return candidate.peerSupported ? "local-unavailable" : "peer-unsupported";
   }
 
   if (policy === "tcp-only") {
-    return candidate.kind === "tcp";
+    return candidate.kind === "tcp" ? undefined : "policy-rejected";
   }
 
   if (policy === "quic-only") {
-    return candidate.kind === "quic";
+    return candidate.kind === "quic" ? undefined : "policy-rejected";
   }
 
-  return true;
+  return undefined;
+}
+
+function uniqueTransports(kinds: readonly NnrpTransportKind[]): readonly NnrpTransportKind[] {
+  return [...new Set(kinds)].sort((left, right) => defaultTransportScore(right) - defaultTransportScore(left));
+}
+
+function defaultTransportScore(kind: NnrpTransportKind): number {
+  switch (kind) {
+    case "webtransport":
+      return 90;
+    case "quic":
+      return 80;
+    case "websocket":
+      return 70;
+    case "tcp":
+      return 60;
+  }
 }
 
 function createPayloadDescriptor(descriptor: NnrpPayloadDescriptor): NnrpPayloadDescriptor {
