@@ -8,6 +8,7 @@ import {
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
   type NnrpTransportPolicy,
+  normalizeSubmitRequest,
 } from "@nnrp/core";
 import process from "node:process";
 
@@ -219,13 +220,25 @@ export class NnrpClientSession {
     return this.#state.options;
   }
 
-  public submit(_request: NnrpSubmitRequest): Promise<NnrpResult> {
-    this.#ensureOpen();
+  public submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
+    try {
+      this.#ensureOpen();
+      normalizeSubmitRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
     return Promise.reject(bindingNotConnectedError("submit"));
   }
 
-  public submitNoWait(_request: NnrpSubmitRequest): Promise<bigint> {
-    this.#ensureOpen();
+  public submitNoWait(request: NnrpSubmitRequest): Promise<bigint> {
+    try {
+      this.#ensureOpen();
+      normalizeSubmitRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
     return Promise.reject(bindingNotConnectedError("submitNoWait"));
   }
 

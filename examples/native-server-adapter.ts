@@ -13,7 +13,7 @@ try {
 
   if (event.type === "result-hint") {
     await session.sendResult({
-      frameId: event.frameId,
+      frameId: event.hint.frameId,
       payload: new Uint8Array(),
       metadata: { source: "native-server-adapter-example" },
     });

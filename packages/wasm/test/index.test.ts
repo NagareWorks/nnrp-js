@@ -1,4 +1,4 @@
-import { NnrpCapabilityError } from "@nnrp/core";
+import { NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import { createWasmRuntimeBinding, NnrpWasmBindingUnavailableError, openBrowserRuntime } from "../src/index.ts";
 
@@ -69,4 +69,17 @@ Deno.test("@nnrp/wasm session methods preserve not-instantiated diagnostics", as
   );
 
   assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
+});
+
+Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () => {
+  const runtime = await openBrowserRuntime();
+  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
+  const session = client.openSession();
+
+  const error = await assertRejects(
+    () => session.submit({ frameId: -1 }),
+    NnrpProtocolError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
 });

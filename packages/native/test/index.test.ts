@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
-import { NnrpCapabilityError } from "@nnrp/core";
+import { NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
 import {
   createNativeRuntimeBinding,
   NnrpNativeBindingUnavailableError,
@@ -114,4 +114,16 @@ Deno.test("@nnrp/native session methods preserve not-connected diagnostics", asy
   );
 
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_BINDING_NOT_CONNECTED");
+});
+
+Deno.test("@nnrp/native validates submit requests before native dispatch", async () => {
+  const client = await openNativeClient({ endpoint: "127.0.0.1:4433", env: {} });
+  const session = client.openSession();
+
+  const error = await assertRejects(
+    () => session.submit({ frameId: -1 }),
+    NnrpProtocolError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
 });

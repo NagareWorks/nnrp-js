@@ -8,6 +8,7 @@ import {
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
   type NnrpTransportPolicy,
+  normalizeSubmitRequest,
 } from "@nnrp/core";
 
 export interface NnrpWasmRuntimeOptions {
@@ -162,8 +163,14 @@ export class NnrpBrowserClientSession {
     return this.#state.options;
   }
 
-  public submit(_request: NnrpSubmitRequest): Promise<NnrpResult> {
-    this.#ensureOpen();
+  public submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
+    try {
+      this.#ensureOpen();
+      normalizeSubmitRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
     return Promise.reject(bindingNotInstantiatedError("submit"));
   }
 

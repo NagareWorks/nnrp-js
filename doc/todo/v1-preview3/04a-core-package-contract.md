@@ -40,7 +40,7 @@
 - [x] Add `NnrpResult`.
 - [x] Add `NnrpRuntimeEvent` discriminated union.
 - [x] Add `NnrpDiagnostic`.
-- [ ] Add operation id type guidance using `bigint`.
+- [x] Add operation id type guidance using `bigint`.
 - [x] Add binary payload type aliases for `Uint8Array` and `ArrayBufferView`.
 - [x] Add docs-linked type exports for client/server/native/wasm packages.
 

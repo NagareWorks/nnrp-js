@@ -1,11 +1,15 @@
-import { assertEquals, assertInstanceOf, assertThrows } from "jsr:@std/assert@1";
+import { assertEquals, assertInstanceOf, assertNotStrictEquals, assertThrows } from "jsr:@std/assert@1";
 import {
   createBackendNativeManifest,
   createBrowserWasmManifest,
+  createCacheKey,
   createCapabilityManifest,
+  createSchemaDescriptor,
+  isStandardInputProfile,
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
   NnrpProtocolError,
+  normalizeSubmitRequest,
   selectTransport,
 } from "../src/index.ts";
 
@@ -87,6 +91,71 @@ Deno.test("@nnrp/core applies transport policy filters", () => {
   );
 
   assertEquals(selection.selected?.kind, "tcp");
+});
+
+Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () => {
+  const source = new Uint8Array([1, 2, 3, 4]);
+  const normalized = normalizeSubmitRequest({
+    frameId: 7,
+    payload: source.subarray(1, 3),
+    tensors: [{ payload: new DataView(source.buffer, 2, 2), codecId: 4 }],
+    inputProfile: "tensor",
+    submitMode: "inline",
+    cacheKey: createCacheKey("tensor", "model-a", 1),
+    descriptor: {
+      profile: "tensor",
+      schema: createSchemaDescriptor({
+        id: "tensor-frame",
+        name: "TensorFrame",
+        version: "1",
+        flags: ["required", "lossless"],
+      }),
+      cache: {
+        key: createCacheKey("tensor", "model-a", 1),
+        dependencies: [createCacheKey("schema", "tensor-frame")],
+      },
+    },
+  });
+
+  assertEquals(normalized.payload, new Uint8Array([2, 3]));
+  assertNotStrictEquals(normalized.payload, source.subarray(1, 3));
+  assertEquals(normalized.tensors?.[0]?.payload, new Uint8Array([3, 4]));
+  assertEquals(normalized.descriptor?.schema?.flags, ["required", "lossless"]);
+});
+
+Deno.test("@nnrp/core can skip payload copies when ownership is explicit", () => {
+  const payload = new Uint8Array([5, 6]);
+  const normalized = normalizeSubmitRequest({ frameId: 1, payload }, { copyPayloads: false });
+
+  assertEquals(normalized.payload, payload);
+});
+
+Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () => {
+  assertThrows(
+    () => createCacheKey("tensor", -1),
+    NnrpProtocolError,
+    "Numeric cache keys must be non-negative safe integers.",
+  );
+  assertThrows(
+    () => createSchemaDescriptor({ id: "", name: "Frame", version: "1" }),
+    NnrpProtocolError,
+    "Schema id must be non-empty",
+  );
+  assertThrows(
+    () => normalizeSubmitRequest({ frameId: -1 }),
+    NnrpProtocolError,
+    "frameId must be a non-negative",
+  );
+  assertThrows(
+    () => normalizeSubmitRequest({ frameId: 1, inputProfile: "custom" as never }),
+    NnrpProtocolError,
+    "Unknown NNRP input profile",
+  );
+});
+
+Deno.test("@nnrp/core exposes strict standard profile checks", () => {
+  assertEquals(isStandardInputProfile("tool_delta"), true);
+  assertEquals(isStandardInputProfile("custom"), false);
 });
 
 Deno.test("@nnrp/core keeps diagnostics on typed errors", () => {

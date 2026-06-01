@@ -15,9 +15,10 @@
 - [ ] Add `NnrpServerSession.receive()` for server-side submit/control events.
 - [ ] Add `NnrpServerSession.sendResult(result)`.
 - [ ] Validate `frameId` uniqueness while in flight.
-- [ ] Validate payload ownership rules before calling native/WASM backends.
+- [x] Validate payload ownership rules before calling native/WASM backends.
 - [ ] Map result drops to typed JS errors with diagnostics.
-- [ ] Add tests for submit success, result drop, malformed request rejection, and close-during-submit.
+- [ ] Add tests for submit success, result drop, and close-during-submit.
+- [x] Add tests for malformed request rejection.
 
 ## Cancel and Operation Lifecycle
 
@@ -33,7 +34,7 @@
 - [ ] Add `NnrpClientSession.nextEvent(options?)`.
 - [ ] Add async iterator convenience for client session events if it does not hide backpressure.
 - [ ] Add `NnrpServerSession.receive()` event shape for server sessions.
-- [ ] Define event discriminants for result, flow update, result hint, drop, close, and diagnostic events.
+- [x] Define event discriminants for result, flow update, result hint, drop, close, and diagnostic events.
 - [ ] Support timeout/cancellation for event polling.
 - [ ] Avoid unbounded event queues.
 - [ ] Add tests for event ordering under multiple in-flight operations.
@@ -41,9 +42,9 @@
 
 ## Flow Control and Backpressure
 
-- [ ] Represent flow update metadata in `@nnrp/core`.
-- [ ] Surface available credits and recommended send pacing.
-- [ ] Expose result hint metadata in `@nnrp/core`.
+- [x] Represent flow update metadata in `@nnrp/core`.
+- [x] Surface available credits and recommended send pacing.
+- [x] Expose result hint metadata in `@nnrp/core`.
 - [ ] Preserve transport/backpressure diagnostics from native/WASM backends.
 - [ ] Ensure `submit` awaits capacity when runtime policy requires it.
 - [ ] Ensure `submitNoWait` reports backpressure rejection without losing diagnostics.
@@ -51,10 +52,10 @@
 
 ## Diagnostics and Errors
 
-- [ ] Add `NnrpDiagnostic` type with code, message, source, retryability, transport, and optional cause fields.
-- [ ] Add `NnrpError` base class that carries `NnrpDiagnostic`.
-- [ ] Add `NnrpNativeBindingUnavailableError`.
-- [ ] Add browser/WASM loading error class with the same diagnostic shape.
+- [x] Add `NnrpDiagnostic` type with code, message, source, retryability, transport, and optional cause fields.
+- [x] Add `NnrpError` base class that carries `NnrpDiagnostic`.
+- [x] Add `NnrpNativeBindingUnavailableError`.
+- [x] Add browser/WASM loading error class with the same diagnostic shape.
 - [ ] Preserve native/WASM status codes without flattening them into strings.
-- [ ] Ensure thrown errors are serializable enough for CLI/agent logs.
-- [ ] Add tests for diagnostic mapping from fake native and fake WASM errors.
+- [x] Ensure thrown errors are serializable enough for CLI/agent logs.
+- [x] Add tests for diagnostic mapping from fake native and fake WASM errors.

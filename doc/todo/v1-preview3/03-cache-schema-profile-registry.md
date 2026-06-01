@@ -8,40 +8,40 @@
 
 ## Cache Types
 
-- [ ] Add `NnrpCacheKey` to `@nnrp/core`.
-- [ ] Add cache object kind enum/union matching the canonical contract.
-- [ ] Add cache lease/version/dependency metadata types.
+- [x] Add `NnrpCacheKey` to `@nnrp/core`.
+- [x] Add cache object kind enum/union matching the canonical contract.
+- [x] Add cache lease/version/dependency metadata types.
 - [ ] Add cache put/ack/invalidate request/result types where exposed through public APIs.
-- [ ] Validate simple shape constraints in TypeScript before calling runtime backends.
+- [x] Validate simple shape constraints in TypeScript before calling runtime backends.
 - [ ] Delegate protocol-critical cache descriptor validation to Rust/WASM/native primitives.
-- [ ] Add tests for cache key normalization and invalid value rejection.
+- [x] Add tests for cache key normalization and invalid value rejection.
 
 ## Schema Registry
 
-- [ ] Add schema descriptor type to `@nnrp/core`.
-- [ ] Add schema id/name/version fields with documented limits.
-- [ ] Add descriptor flag representation.
-- [ ] Add helper to attach schema descriptor to submit requests.
-- [ ] Ensure schema descriptors are serializable without losing binary fields.
-- [ ] Add tests for schema descriptor construction and invalid descriptor rejection.
+- [x] Add schema descriptor type to `@nnrp/core`.
+- [x] Add schema id/name/version fields with documented limits.
+- [x] Add descriptor flag representation.
+- [x] Add helper to attach schema descriptor to submit requests.
+- [x] Ensure schema descriptors are serializable without losing binary fields.
+- [x] Add tests for schema descriptor construction and invalid descriptor rejection.
 
 ## Standard Profiles
 
-- [ ] Add first-round standard profile names for tensor payloads.
-- [ ] Add first-round standard profile names for token payloads.
-- [ ] Add `structured_event` profile representation.
-- [ ] Add `tool_delta` profile representation for coding-agent integrations.
-- [ ] Keep profile registry extensible without accepting arbitrary undocumented magic strings in strict mode.
-- [ ] Add tests for known profile acceptance and unknown profile policy.
+- [x] Add first-round standard profile names for tensor payloads.
+- [x] Add first-round standard profile names for token payloads.
+- [x] Add `structured_event` profile representation.
+- [x] Add `tool_delta` profile representation for coding-agent integrations.
+- [x] Keep profile registry extensible without accepting arbitrary undocumented magic strings in strict mode.
+- [x] Add tests for known profile acceptance and unknown profile policy.
 
 ## Typed Payloads
 
-- [ ] Add `NnrpTensorSection` type.
-- [ ] Add typed payload descriptor type.
-- [ ] Add binary ownership rules for typed payload frames.
-- [ ] Support `Uint8Array` and `ArrayBufferView` inputs.
-- [ ] Copy retained payloads unless ownership transfer is explicitly documented.
-- [ ] Add tests for payload normalization without extra copies where possible.
+- [x] Add `NnrpTensorSection` type.
+- [x] Add typed payload descriptor type.
+- [x] Add binary ownership rules for typed payload frames.
+- [x] Support `Uint8Array` and `ArrayBufferView` inputs.
+- [x] Copy retained payloads unless ownership transfer is explicitly documented.
+- [x] Add tests for payload normalization without extra copies where possible.
 
 ## Runtime Integration
 
