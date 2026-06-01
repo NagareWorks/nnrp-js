@@ -25,6 +25,7 @@ import {
 export interface NnrpWasmRuntimeOptions {
   readonly moduleUrl?: string | URL;
   readonly module?: WebAssembly.Module;
+  readonly artifact?: NnrpWasmArtifactOptions;
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
@@ -59,6 +60,7 @@ export interface NnrpBrowserSessionOptions {
 export interface NnrpWasmBindingOptions {
   readonly moduleUrl?: string | URL;
   readonly module?: WebAssembly.Module;
+  readonly artifact?: NnrpWasmArtifactOptions;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 
@@ -66,7 +68,30 @@ export interface NnrpWasmRuntimeBinding {
   readonly manifest: NnrpCapabilityManifest;
   readonly moduleUrl: string;
   readonly module?: WebAssembly.Module;
+  readonly artifact?: NnrpResolvedWasmArtifact;
   readonly transportProviders: readonly NnrpBrowserTransportProvider[];
+}
+
+export interface NnrpWasmArtifactOptions {
+  readonly manifest: NnrpWasmArtifactManifest;
+  readonly baseUrl?: string | URL;
+  readonly requiredExports?: readonly string[];
+}
+
+export interface NnrpWasmArtifactManifest {
+  readonly package: "nnrp-wasm";
+  readonly wasm: string;
+  readonly types: string;
+  readonly owner?: string;
+  readonly downstream_wrapper?: string;
+  readonly exports: readonly string[];
+}
+
+export interface NnrpResolvedWasmArtifact {
+  readonly manifest: NnrpWasmArtifactManifest;
+  readonly moduleUrl: string;
+  readonly typesUrl: string;
+  readonly requiredExports: readonly string[];
 }
 
 export class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
@@ -96,6 +121,10 @@ export class NnrpBrowserRuntime {
 
   public get moduleUrl(): string {
     return this.#binding.moduleUrl;
+  }
+
+  public get artifact(): NnrpResolvedWasmArtifact | undefined {
+    return this.#binding.artifact;
   }
 
   public connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient {
@@ -264,12 +293,44 @@ export class NnrpBrowserClientSession {
 }
 
 export function createWasmRuntimeBinding(options: NnrpWasmBindingOptions = {}): NnrpWasmRuntimeBinding {
+  const artifact = options.artifact === undefined ? undefined : resolveWasmArtifact(options.artifact);
+
   return {
     manifest: createBrowserWasmManifest(),
-    moduleUrl: normalizeModuleUrl(options.moduleUrl ?? "./nnrp_wasm_bg.wasm"),
+    moduleUrl: normalizeModuleUrl(options.moduleUrl ?? artifact?.moduleUrl ?? "./nnrp_wasm.wasm"),
     ...(options.module === undefined ? {} : { module: options.module }),
+    ...(artifact === undefined ? {} : { artifact }),
     transportProviders: [...(options.transportProviders ?? [])],
   };
+}
+
+export function resolveWasmArtifact(options: NnrpWasmArtifactOptions): NnrpResolvedWasmArtifact {
+  validateWasmArtifactManifest(options.manifest, options.requiredExports);
+  const baseUrl = options.baseUrl === undefined ? undefined : normalizeModuleUrl(options.baseUrl);
+
+  return {
+    manifest: options.manifest,
+    moduleUrl: resolveArtifactUrl(options.manifest.wasm, baseUrl),
+    typesUrl: resolveArtifactUrl(options.manifest.types, baseUrl),
+    requiredExports: requiredWasmExports(options.requiredExports),
+  };
+}
+
+export function validateWasmArtifactManifest(
+  manifest: NnrpWasmArtifactManifest,
+  requiredExports?: readonly string[],
+): void {
+  if (!isWasmArtifactManifest(manifest)) {
+    throw wasmArtifactError("NNRP_WASM_ARTIFACT_MANIFEST_INVALID", "Invalid WASM artifact manifest.");
+  }
+
+  const missing = requiredWasmExports(requiredExports).filter((name) => !manifest.exports.includes(name));
+  if (missing.length > 0) {
+    throw wasmArtifactError(
+      "NNRP_WASM_ARTIFACT_EXPORT_MISSING",
+      `WASM artifact manifest is missing exports: ${missing.join(", ")}.`,
+    );
+  }
 }
 
 export function createBrowserTransportProvider(
@@ -286,6 +347,53 @@ export function createBrowserTransportProvider(
 
 function normalizeModuleUrl(moduleUrl: string | URL): string {
   return moduleUrl instanceof URL ? moduleUrl.toString() : moduleUrl;
+}
+
+function resolveArtifactUrl(asset: string, baseUrl: string | undefined): string {
+  if (baseUrl === undefined || isAbsoluteUrl(asset)) {
+    return asset;
+  }
+
+  if (isAbsoluteUrl(baseUrl)) {
+    return new URL(asset, ensureTrailingSlash(baseUrl)).toString();
+  }
+
+  return `${baseUrl.replace(/\/+$/, "")}/${asset.replace(/^\/+/, "")}`;
+}
+
+function ensureTrailingSlash(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`;
+}
+
+function isAbsoluteUrl(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value);
+}
+
+function isWasmArtifactManifest(value: unknown): value is NnrpWasmArtifactManifest {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const manifest = value as Record<string, unknown>;
+  return manifest.package === "nnrp-wasm" &&
+    typeof manifest.wasm === "string" &&
+    typeof manifest.types === "string" &&
+    (manifest.owner === undefined || typeof manifest.owner === "string") &&
+    (manifest.downstream_wrapper === undefined || typeof manifest.downstream_wrapper === "string") &&
+    Array.isArray(manifest.exports) &&
+    manifest.exports.every((entry) => typeof entry === "string");
+}
+
+function requiredWasmExports(requiredExports: readonly string[] | undefined): readonly string[] {
+  return [
+    ...new Set([
+      "nnrp_wasm_protocol_major",
+      "nnrp_wasm_wire_format",
+      "selectTransportWithProbeJson",
+      "scoreProviderProbeJson",
+      ...(requiredExports ?? []),
+    ]),
+  ];
 }
 
 function withBrowserProvider(
@@ -346,6 +454,15 @@ function bindingNotInstantiatedError(operation: string): NnrpWasmBindingUnavaila
   return new NnrpWasmBindingUnavailableError({
     code: "NNRP_WASM_BINDING_NOT_INSTANTIATED",
     message: `WASM binding operation '${operation}' is not connected to instantiated primitives yet.`,
+    source: "wasm",
+    retryable: false,
+  });
+}
+
+function wasmArtifactError(code: string, message: string): NnrpCapabilityError {
+  return new NnrpCapabilityError({
+    code,
+    message,
     source: "wasm",
     retryable: false,
   });

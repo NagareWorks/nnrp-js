@@ -8,13 +8,14 @@
 
 ## WASM Artifact Resolution
 
-- [ ] Consume `nnrp-rs` WASM primitive package.
-- [ ] Validate WASM artifact manifest before instantiation.
+- [x] Consume `nnrp-rs` WASM primitive package.
+- [x] Validate WASM artifact manifest before instantiation.
 - [x] Support explicit WASM URL injection.
 - [x] Support explicit `WebAssembly.Module` injection.
 - [x] Support package-default WASM asset resolution for bundlers.
 - [x] Surface missing or mismatched WASM primitive diagnostics.
 - [x] Add tests for URL, module, and package-default artifact paths.
+- [x] Add tests for rs primitive artifact manifests and required exports.
 - [ ] Add tests for missing artifact paths once runtime instantiation is wired.
 
 ## WASM Primitive Binding

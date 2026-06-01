@@ -3,14 +3,17 @@ import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   createBrowserTransportProvider,
   createWasmRuntimeBinding,
+  type NnrpWasmArtifactManifest,
   NnrpWasmBindingUnavailableError,
   openBrowserRuntime,
+  resolveWasmArtifact,
+  validateWasmArtifactManifest,
 } from "../src/index.ts";
 
 Deno.test("@nnrp/wasm creates a default wasm binding descriptor", () => {
   const binding = createWasmRuntimeBinding();
 
-  assertEquals(binding.moduleUrl, "./nnrp_wasm_bg.wasm");
+  assertEquals(binding.moduleUrl, "./nnrp_wasm.wasm");
   assertEquals(binding.manifest.capabilities, ["client.session", "wasm.loader"]);
   assertEquals(binding.manifest.buildMode, "browser-wasm");
 });
@@ -26,6 +29,52 @@ Deno.test("@nnrp/wasm preserves injected modules on the descriptor", () => {
   const binding = createWasmRuntimeBinding({ module });
 
   assertEquals(binding.module, module);
+});
+
+Deno.test("@nnrp/wasm resolves rs primitive artifact manifests", () => {
+  const artifact = resolveWasmArtifact({
+    manifest: wasmManifest(),
+    baseUrl: "https://cdn.example.test/nnrp",
+  });
+
+  assertEquals(artifact.moduleUrl, "https://cdn.example.test/nnrp/nnrp_wasm.wasm");
+  assertEquals(artifact.typesUrl, "https://cdn.example.test/nnrp/nnrp_wasm.d.ts");
+  assertEquals(artifact.requiredExports, [
+    "nnrp_wasm_protocol_major",
+    "nnrp_wasm_wire_format",
+    "selectTransportWithProbeJson",
+    "scoreProviderProbeJson",
+  ]);
+});
+
+Deno.test("@nnrp/wasm validates primitive artifact manifests", () => {
+  validateWasmArtifactManifest(wasmManifest());
+
+  assertThrows(
+    () => validateWasmArtifactManifest({ ...wasmManifest(), exports: [] }),
+    NnrpCapabilityError,
+    "missing exports",
+  );
+});
+
+Deno.test("@nnrp/wasm uses artifact URLs unless a caller injects a module URL", () => {
+  const artifactBinding = createWasmRuntimeBinding({
+    artifact: {
+      manifest: wasmManifest(),
+      baseUrl: "/assets/nnrp",
+    },
+  });
+  const explicitBinding = createWasmRuntimeBinding({
+    moduleUrl: "/custom/nnrp.wasm",
+    artifact: {
+      manifest: wasmManifest(),
+      baseUrl: "/assets/nnrp",
+    },
+  });
+
+  assertEquals(artifactBinding.moduleUrl, "/assets/nnrp/nnrp_wasm.wasm");
+  assertEquals(artifactBinding.artifact?.manifest.package, "nnrp-wasm");
+  assertEquals(explicitBinding.moduleUrl, "/custom/nnrp.wasm");
 });
 
 Deno.test("@nnrp/wasm preserves injected browser transport providers", () => {
@@ -171,3 +220,19 @@ Deno.test("@nnrp/wasm exposes async event iterator convenience", async () => {
 
   assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 });
+
+function wasmManifest(): NnrpWasmArtifactManifest {
+  return {
+    package: "nnrp-wasm",
+    wasm: "nnrp_wasm.wasm",
+    types: "nnrp_wasm.d.ts",
+    owner: "nnrp-rs",
+    downstream_wrapper: "nnrp-js",
+    exports: [
+      "nnrp_wasm_protocol_major",
+      "nnrp_wasm_wire_format",
+      "selectTransportWithProbeJson",
+      "scoreProviderProbeJson",
+    ],
+  };
+}

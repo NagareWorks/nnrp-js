@@ -2,6 +2,7 @@ import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifes
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
+    readonly artifact?: NnrpWasmArtifactOptions;
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
@@ -30,13 +31,34 @@ export interface NnrpBrowserSessionOptions {
 export interface NnrpWasmBindingOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
+    readonly artifact?: NnrpWasmArtifactOptions;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 export interface NnrpWasmRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
     readonly moduleUrl: string;
     readonly module?: WebAssembly.Module;
+    readonly artifact?: NnrpResolvedWasmArtifact;
     readonly transportProviders: readonly NnrpBrowserTransportProvider[];
+}
+export interface NnrpWasmArtifactOptions {
+    readonly manifest: NnrpWasmArtifactManifest;
+    readonly baseUrl?: string | URL;
+    readonly requiredExports?: readonly string[];
+}
+export interface NnrpWasmArtifactManifest {
+    readonly package: "nnrp-wasm";
+    readonly wasm: string;
+    readonly types: string;
+    readonly owner?: string;
+    readonly downstream_wrapper?: string;
+    readonly exports: readonly string[];
+}
+export interface NnrpResolvedWasmArtifact {
+    readonly manifest: NnrpWasmArtifactManifest;
+    readonly moduleUrl: string;
+    readonly typesUrl: string;
+    readonly requiredExports: readonly string[];
 }
 export declare class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
     constructor(diagnostic: NnrpDiagnostic);
@@ -47,6 +69,7 @@ export declare class NnrpBrowserRuntime {
     constructor(binding: NnrpWasmRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
     get manifest(): NnrpCapabilityManifest;
     get moduleUrl(): string;
+    get artifact(): NnrpResolvedWasmArtifact | undefined;
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
     close(): Promise<void>;
@@ -83,5 +106,7 @@ export declare class NnrpBrowserClientSession {
     get closed(): boolean;
 }
 export declare function createWasmRuntimeBinding(options?: NnrpWasmBindingOptions): NnrpWasmRuntimeBinding;
+export declare function resolveWasmArtifact(options: NnrpWasmArtifactOptions): NnrpResolvedWasmArtifact;
+export declare function validateWasmArtifactManifest(manifest: NnrpWasmArtifactManifest, requiredExports?: readonly string[]): void;
 export declare function createBrowserTransportProvider(kind: NnrpBrowserTransportKind, options?: Omit<NnrpBrowserTransportProvider, "kind">): NnrpBrowserTransportProvider;
 //# sourceMappingURL=index.d.ts.map
