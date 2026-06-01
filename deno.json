@@ -1,6 +1,8 @@
 {
   "imports": {
-    "@nnrp/core": "./packages/core/src/index.ts"
+    "@nnrp/core": "./packages/core/src/index.ts",
+    "@nnrp/native": "./packages/native/src/index.ts",
+    "@nnrp/wasm": "./packages/wasm/src/index.ts"
   },
   "tasks": {
     "build": "deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
@@ -8,6 +10,7 @@
     "benchmark:browser": "deno run --allow-env scripts/run-benchmark.ts --mode browser-wasm",
     "conformance:backend": "deno run --allow-env scripts/run-conformance-adapter.ts --mode backend-native",
     "conformance:browser": "deno run --allow-env scripts/run-conformance-adapter.ts --mode browser-wasm",
+    "examples:check": "deno check examples/*.ts",
     "manifest": "deno run --allow-env scripts/generate-capability-manifest.ts",
     "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts",
     "package-smoke": "deno task build && deno task package-check",
@@ -16,7 +19,7 @@
     "lint": "deno fmt --check && deno lint && deno task runtime-policy && deno task typecheck",
     "runtime-policy": "deno run --allow-read scripts/check-runtime-policy.ts",
     "test": "deno test --allow-env packages/*/test/*.test.ts scripts/*.test.ts",
-    "typecheck": "deno check packages/*/src/index.ts packages/*/test/*.test.ts scripts/*.ts"
+    "typecheck": "deno check packages/*/src/index.ts packages/*/test/*.test.ts scripts/*.ts examples/*.ts"
   },
   "compilerOptions": {
     "types": ["node"]

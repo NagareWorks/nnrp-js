@@ -40,18 +40,18 @@
 
 ## Examples
 
-- [ ] Add Node native client example for CLI/agent usage.
-- [ ] Add Node native server/adapter example.
-- [ ] Add browser WASM client example.
-- [ ] Add opencode-style native client sketch once API names are implemented.
-- [ ] Ensure examples import package entrypoints, not source files.
-- [ ] Keep examples small enough for users to copy without reading internals.
+- [x] Add Node native client example for CLI/agent usage.
+- [x] Add Node native server/adapter example.
+- [x] Add browser WASM client example.
+- [x] Add opencode-style native client sketch once API names are implemented.
+- [x] Ensure examples import package entrypoints, not source files.
+- [x] Keep examples small enough for users to copy without reading internals.
 
 ## Docs Synchronization
 
 - [ ] Keep `nnrp-doc` English JS/TS SDK pages synchronized.
 - [ ] Keep `nnrp-doc` Chinese JS/TS SDK pages synchronized.
-- [ ] Update local README when package layout changes.
+- [x] Update local README when package layout changes.
 - [ ] Add docs links from package READMEs after package names are frozen.
 - [ ] Add API change checklist to PR template if one is introduced.
 

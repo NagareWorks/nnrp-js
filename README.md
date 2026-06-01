@@ -33,6 +33,9 @@ orchestration experiments.
 deno task lint
 deno task test
 deno task build
+deno task manifest
+deno task conformance:backend
+deno task benchmark:backend
 ```
 
 The first preview keeps the JavaScript layer thin: Deno drives formatting, linting, tests, and TypeScript builds. The
@@ -42,6 +45,18 @@ and WASM primitives.
 
 `nnrp-js` uses Deno for repository tooling and keeps Node.js compatibility for package consumers. Bun is not a supported
 runtime, build tool, compatibility target, or CI axis for this SDK.
+
+## Examples
+
+| Example                             | Purpose                                                   |
+| ----------------------------------- | --------------------------------------------------------- |
+| `examples/native-client.ts`         | Node/Deno native client shape for CLI and agent callers.  |
+| `examples/native-server-adapter.ts` | Native server/adapter lifecycle shape.                    |
+| `examples/browser-client.ts`        | Browser/edge WASM client shape.                           |
+| `examples/opencode-agent-client.ts` | Native client sketch for coding-agent style integrations. |
+
+Examples use package entrypoint names through the repository import map. They are checked with
+`deno task examples:check`.
 
 ## Repository Status
 
