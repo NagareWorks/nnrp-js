@@ -1,0 +1,69 @@
+import { NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpInputProfile, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
+export interface NnrpWasmRuntimeOptions {
+    readonly moduleUrl?: string | URL;
+    readonly module?: WebAssembly.Module;
+    readonly transportPolicy?: NnrpTransportPolicy;
+}
+export interface NnrpBrowserConnectOptions {
+    readonly endpoint: string | URL;
+    readonly transportPolicy?: NnrpTransportPolicy;
+    readonly sessionDefaults?: NnrpBrowserSessionOptions;
+}
+export interface NnrpBrowserSessionOptions {
+    readonly inputProfile?: NnrpInputProfile;
+    readonly targetCadence?: number;
+    readonly qualityTier?: number;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface WasmRuntimeOptions {
+    readonly moduleUrl?: string | URL;
+    readonly module?: WebAssembly.Module;
+}
+export interface WasmRuntimeBinding {
+    readonly manifest: NnrpCapabilityManifest;
+    readonly moduleUrl: string;
+    readonly module?: WebAssembly.Module;
+}
+export declare class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
+    constructor(diagnostic: NnrpDiagnostic);
+}
+export declare function openBrowserRuntime(options?: NnrpWasmRuntimeOptions): Promise<NnrpBrowserRuntime>;
+export declare class NnrpBrowserRuntime {
+    #private;
+    constructor(binding: WasmRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
+    get manifest(): NnrpCapabilityManifest;
+    get moduleUrl(): string;
+    connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
+    close(): Promise<void>;
+    get closed(): boolean;
+}
+export interface NnrpBrowserClientState {
+    readonly endpoint: string;
+    readonly runtime: NnrpBrowserRuntime;
+    readonly transportPolicy: NnrpTransportPolicy;
+    readonly sessionDefaults?: NnrpBrowserSessionOptions;
+}
+export declare class NnrpBrowserClient {
+    #private;
+    constructor(state: NnrpBrowserClientState);
+    get endpoint(): string;
+    get transportPolicy(): NnrpTransportPolicy;
+    openSession(options?: NnrpBrowserSessionOptions): NnrpBrowserClientSession;
+    close(): Promise<void>;
+    get closed(): boolean;
+}
+export interface NnrpBrowserClientSessionState {
+    readonly client: NnrpBrowserClient;
+    readonly options: NnrpBrowserSessionOptions;
+}
+export declare class NnrpBrowserClientSession {
+    #private;
+    constructor(state: NnrpBrowserClientSessionState);
+    get options(): NnrpBrowserSessionOptions;
+    submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
+    nextEvent(): Promise<NnrpRuntimeEvent>;
+    close(): Promise<void>;
+    get closed(): boolean;
+}
+export declare function createWasmRuntimeBinding(options?: WasmRuntimeOptions): WasmRuntimeBinding;
+//# sourceMappingURL=index.d.ts.map

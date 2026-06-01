@@ -5,11 +5,18 @@ const entrypoints: readonly PackageEntrypoint[] = [
     exports: [
       "NNRP_PROTOCOL_NAME",
       "NNRP_PROTOCOL_VERSION",
+      "NNRP_STANDARD_INPUT_PROFILES",
+      "createCacheKey",
       "createBackendNativeManifest",
       "createBrowserWasmManifest",
+      "createCapabilityManifest",
+      "createSchemaDescriptor",
+      "isStandardInputProfile",
+      "normalizeSubmitRequest",
       "selectTransport",
       "NnrpError",
     ],
+    forbiddenExports: [],
   },
   {
     name: "@nnrp/native",
@@ -21,6 +28,7 @@ const entrypoints: readonly PackageEntrypoint[] = [
       "NnrpClient",
       "NnrpNativeBindingUnavailableError",
     ],
+    forbiddenExports: ["NnrpBrowserRuntime", "NnrpBrowserClient"],
   },
   {
     name: "@nnrp/wasm",
@@ -31,6 +39,7 @@ const entrypoints: readonly PackageEntrypoint[] = [
       "NnrpBrowserClient",
       "NnrpWasmBindingUnavailableError",
     ],
+    forbiddenExports: ["NnrpServer", "NnrpServerSession", "NnrpNativeBindingUnavailableError"],
   },
 ];
 
@@ -51,6 +60,12 @@ for (const entrypoint of entrypoints) {
   for (const exportName of entrypoint.exports) {
     if (!(exportName in moduleExports)) {
       failures.push(`${entrypoint.name}: missing export ${exportName}`);
+    }
+  }
+
+  for (const exportName of entrypoint.forbiddenExports) {
+    if (exportName in moduleExports) {
+      failures.push(`${entrypoint.name}: forbidden export ${exportName}`);
     }
   }
 }
@@ -75,4 +90,5 @@ interface PackageEntrypoint {
   readonly name: string;
   readonly path: string;
   readonly exports: readonly string[];
+  readonly forbiddenExports: readonly string[];
 }

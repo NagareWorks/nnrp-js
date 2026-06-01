@@ -12,7 +12,8 @@
     "conformance:browser": "deno run --allow-env scripts/run-conformance-adapter.ts --mode browser-wasm",
     "examples:check": "deno check examples/*.ts",
     "manifest": "deno run --allow-env scripts/generate-capability-manifest.ts",
-    "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts",
+    "public-api": "deno run --allow-read scripts/check-public-api.ts",
+    "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts && deno task public-api",
     "package-smoke": "deno task build && deno task package-check",
     "format": "deno fmt",
     "format:check": "deno fmt --check",
@@ -28,7 +29,8 @@
     "lineWidth": 120,
     "indentWidth": 2,
     "semiColons": true,
-    "singleQuote": false
+    "singleQuote": false,
+    "exclude": ["scripts/public-api"]
   },
   "lint": {
     "rules": {

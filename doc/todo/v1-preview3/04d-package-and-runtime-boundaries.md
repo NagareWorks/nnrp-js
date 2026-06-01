@@ -13,7 +13,7 @@
 - [x] Add package export map for `@nnrp/wasm`.
 - [x] Add type declaration output for each package.
 - [x] Add declaration maps if they do not bloat package artifacts.
-- [ ] Add subpath export policy for future internal helpers.
+- [x] Add subpath export policy for future internal helpers.
 - [x] Add tests that import built package entrypoints instead of source paths.
 
 ## Build Outputs
@@ -31,7 +31,7 @@
 - [x] Assert `@nnrp/core` package contains no native or WASM artifacts.
 - [x] Assert `@nnrp/native` package contains no browser-only implementation files.
 - [x] Assert `@nnrp/wasm` package contains no native loader files.
-- [ ] Assert browser package contains no server exports.
+- [x] Assert browser package contains no server exports.
 - [ ] Assert native package contains required native artifact metadata when artifact packaging is enabled.
 - [ ] Assert README/license/package metadata are present.
 

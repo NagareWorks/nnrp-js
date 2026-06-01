@@ -12,7 +12,7 @@
 - [x] Deno lint task exists.
 - [x] Deno typecheck task exists.
 - [x] Deno test task exists.
-- [ ] Add package declaration diff check.
+- [x] Add package declaration diff check.
 - [x] Add package export snapshot check.
 - [x] Add runtime-policy checks for core/native/wasm import boundaries.
 - [ ] Add content-policy checks for docs and examples.

@@ -55,7 +55,7 @@
 
 ## Declaration Stability
 
-- [ ] Add generated declaration output for `@nnrp/core`.
-- [ ] Add declaration diff check against an approved snapshot.
-- [ ] Add API extractor or equivalent public export verification.
-- [ ] Ensure docs references use names exported by `@nnrp/core`.
+- [x] Add generated declaration output for `@nnrp/core`.
+- [x] Add declaration diff check against an approved snapshot.
+- [x] Add API extractor or equivalent public export verification.
+- [x] Ensure docs references use names exported by `@nnrp/core`.

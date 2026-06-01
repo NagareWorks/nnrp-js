@@ -15,8 +15,8 @@
 - [ ] Freeze public package names before npm publication.
 - [x] Rename placeholder exports to the documented `Nnrp*` public names.
 - [ ] Add compatibility aliases only when they avoid needless churn before first publication.
-- [ ] Add package export maps for ESM runtime entrypoints.
-- [ ] Add package export maps for `.d.ts` type entrypoints.
+- [x] Add package export maps for ESM runtime entrypoints.
+- [x] Add package export maps for `.d.ts` type entrypoints.
 - [ ] Add package export maps for future subpath exports.
 - [ ] Add package metadata that clearly marks unpublished/internal packages as private until release gates pass.
 
@@ -28,33 +28,33 @@
 - [x] Define `core` as runtime-neutral and transport-neutral.
 - [x] Add build-mode constants and capability manifest fields in `@nnrp/core`.
 - [ ] Add README build-mode table matching `nnrp-doc`.
-- [ ] Add package-level smoke tests that assert each build mode claims only implemented capabilities.
-- [ ] Add CI check that backend packages do not contain browser-only files.
-- [ ] Add CI check that browser packages do not contain native loader files.
-- [ ] Add CI check that core imports neither native nor browser packages.
+- [x] Add package-level smoke tests that assert each build mode claims only implemented capabilities.
+- [x] Add CI check that backend packages do not contain browser-only files.
+- [x] Add CI check that browser packages do not contain native loader files.
+- [x] Add CI check that core imports neither native nor browser packages.
 
 ## Public Naming Contract
 
 - [x] Use `Nnrp` prefix for public classes, interfaces, errors, and runtime objects.
-- [ ] Keep internal helper names unexported unless they are part of the frozen docs.
+- [x] Keep internal helper names unexported unless they are part of the frozen docs.
 - [x] Replace `CapabilityManifest` with public `NnrpCapabilityManifest`.
 - [x] Replace `TransportCandidate` with public `NnrpTransportCandidate`.
 - [x] Replace `TransportSelection` with public `NnrpTransportSelection`.
 - [ ] Replace `NativeRuntimeOptions` with documented native runtime/client option types.
 - [ ] Replace `WasmRuntimeOptions` with documented WASM/browser runtime option types.
-- [ ] Add declaration tests that fail when documented public exports disappear.
+- [x] Add declaration tests that fail when documented public exports disappear.
 
 ## Dependency and Runtime Policy
 
 - [x] Deno drives formatting, linting, testing, type checking, and package builds.
 - [x] Node.js compatibility remains the backend runtime target.
 - [x] Add runtime policy check that rejects Bun files or Bun adaptation traces.
-- [ ] `@nnrp/core` must not import Node built-ins, DOM APIs, native loaders, or WASM loaders.
-- [ ] `@nnrp/native` may import Node-compatible filesystem/process/native-loading helpers.
-- [ ] `@nnrp/native` must not import DOM globals or browser-only transport implementation files.
-- [ ] `@nnrp/wasm` may import browser and WebAssembly APIs.
-- [ ] `@nnrp/wasm` must not import `node:*` modules.
-- [ ] Add dependency graph check for cross-package import violations.
+- [x] `@nnrp/core` must not import Node built-ins, DOM APIs, native loaders, or WASM loaders.
+- [x] `@nnrp/native` may import Node-compatible filesystem/process/native-loading helpers.
+- [x] `@nnrp/native` must not import DOM globals or browser-only transport implementation files.
+- [x] `@nnrp/wasm` may import browser and WebAssembly APIs.
+- [x] `@nnrp/wasm` must not import `node:*` modules.
+- [x] Add dependency graph check for cross-package import violations.
 
 ## Documentation Contract
 
