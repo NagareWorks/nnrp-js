@@ -30,18 +30,18 @@
 
 ## Browser Runtime Lifecycle
 
-- [ ] Add public `openBrowserRuntime(options)` or documented equivalent in `@nnrp/wasm`.
+- [x] Add public `openBrowserRuntime(options)` or documented equivalent in `@nnrp/wasm`.
 - [ ] Validate WASM manifest before instantiation.
-- [ ] Instantiate WASM lazily, not during module import.
-- [ ] Add `NnrpBrowserRuntime.connect(options)`.
-- [ ] Add `NnrpBrowserClient` with explicit close/dispose semantics.
-- [ ] Exclude server listen/accept APIs from browser exports.
+- [x] Instantiate WASM lazily, not during module import.
+- [x] Add `NnrpBrowserRuntime.connect(options)`.
+- [x] Add `NnrpBrowserClient` with explicit close/dispose semantics.
+- [x] Exclude server listen/accept APIs from browser exports.
 - [ ] Add browser bundling smoke that imports the runtime without Node built-ins.
 
 ## Session Lifecycle
 
 - [x] Add `NnrpClient.openSession(options)` in native mode.
-- [ ] Add `NnrpBrowserClient.openSession(options)` in browser mode.
+- [x] Add `NnrpBrowserClient.openSession(options)` in browser mode.
 - [x] Add `NnrpServer.accept()` returning `NnrpServerSession` in native mode.
 - [x] Wrap session ids/handles without exposing raw pointers or WASM internals.
 - [ ] Add session patch/update API once Rust artifact support is available.

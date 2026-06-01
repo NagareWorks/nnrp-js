@@ -10,10 +10,10 @@
 
 - [ ] Consume `nnrp-rs` WASM primitive package.
 - [ ] Validate WASM artifact manifest before instantiation.
-- [ ] Support explicit WASM URL injection.
-- [ ] Support explicit `WebAssembly.Module` injection.
-- [ ] Support package-default WASM asset resolution for bundlers.
-- [ ] Surface missing or mismatched WASM primitive diagnostics.
+- [x] Support explicit WASM URL injection.
+- [x] Support explicit `WebAssembly.Module` injection.
+- [x] Support package-default WASM asset resolution for bundlers.
+- [x] Surface missing or mismatched WASM primitive diagnostics.
 - [ ] Add tests for URL, module, package-default, and missing artifact paths.
 
 ## WASM Primitive Binding
@@ -22,21 +22,21 @@
 - [ ] Wrap transport selection primitive calls.
 - [ ] Wrap payload/schema validation primitive calls where available.
 - [ ] Wrap submit/result encode/decode primitives where available.
-- [ ] Keep raw WASM memory details private.
+- [x] Keep raw WASM memory details private.
 - [ ] Normalize binary payload inputs without unnecessary copies.
-- [ ] Add tests with fake primitive module.
+- [x] Add tests with fake primitive module.
 
 ## Browser Runtime API
 
-- [ ] Add `openBrowserRuntime(options)`.
-- [ ] Add `NnrpBrowserRuntime.connect(options)`.
-- [ ] Add `NnrpBrowserRuntime.close()`.
-- [ ] Add `NnrpBrowserClient.openSession(options)`.
-- [ ] Add `NnrpBrowserClient.close()`.
-- [ ] Add `NnrpBrowserClientSession.submit(request)`.
-- [ ] Add browser event delivery when runtime support is available.
+- [x] Add `openBrowserRuntime(options)`.
+- [x] Add `NnrpBrowserRuntime.connect(options)`.
+- [x] Add `NnrpBrowserRuntime.close()`.
+- [x] Add `NnrpBrowserClient.openSession(options)`.
+- [x] Add `NnrpBrowserClient.close()`.
+- [x] Add `NnrpBrowserClientSession.submit(request)`.
+- [x] Add browser event delivery when runtime support is available.
 - [ ] Add browser cancel API when runtime support is available.
-- [ ] Add tests for open/connect/session/close lifecycle.
+- [x] Add tests for open/connect/session/close lifecycle.
 
 ## Browser Transport Adapters
 
@@ -44,8 +44,8 @@
 - [ ] Add WebSocket provider slot.
 - [ ] Add WebTransport provider slot after mapping is frozen.
 - [ ] Keep transport providers optional.
-- [ ] Keep network-free WASM primitive tests possible.
-- [ ] Use the same candidate/rejection type shapes as native mode.
+- [x] Keep network-free WASM primitive tests possible.
+- [x] Use the same candidate/rejection type shapes as native mode.
 - [ ] Add bundling tests with no adapter installed.
 
 ## Browser Package Gates
