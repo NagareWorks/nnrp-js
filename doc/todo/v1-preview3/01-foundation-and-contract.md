@@ -40,8 +40,8 @@
 - [x] Replace `CapabilityManifest` with public `NnrpCapabilityManifest`.
 - [x] Replace `TransportCandidate` with public `NnrpTransportCandidate`.
 - [x] Replace `TransportSelection` with public `NnrpTransportSelection`.
-- [ ] Replace `NativeRuntimeOptions` with documented native runtime/client option types.
-- [ ] Replace `WasmRuntimeOptions` with documented WASM/browser runtime option types.
+- [x] Replace `NativeRuntimeOptions` with documented native runtime/client option types.
+- [x] Replace `WasmRuntimeOptions` with documented WASM/browser runtime option types.
 - [x] Add declaration tests that fail when documented public exports disappear.
 
 ## Dependency and Runtime Policy

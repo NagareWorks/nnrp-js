@@ -56,13 +56,13 @@ export interface NnrpBrowserSessionOptions {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
-export interface WasmRuntimeOptions {
+export interface NnrpWasmBindingOptions {
   readonly moduleUrl?: string | URL;
   readonly module?: WebAssembly.Module;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 
-export interface WasmRuntimeBinding {
+export interface NnrpWasmRuntimeBinding {
   readonly manifest: NnrpCapabilityManifest;
   readonly moduleUrl: string;
   readonly module?: WebAssembly.Module;
@@ -81,11 +81,11 @@ export function openBrowserRuntime(options: NnrpWasmRuntimeOptions = {}): Promis
 }
 
 export class NnrpBrowserRuntime {
-  readonly #binding: WasmRuntimeBinding;
+  readonly #binding: NnrpWasmRuntimeBinding;
   readonly #transportPolicy: NnrpTransportPolicy;
   #closed = false;
 
-  public constructor(binding: WasmRuntimeBinding, transportPolicy: NnrpTransportPolicy = "score") {
+  public constructor(binding: NnrpWasmRuntimeBinding, transportPolicy: NnrpTransportPolicy = "score") {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
   }
@@ -263,7 +263,7 @@ export class NnrpBrowserClientSession {
   }
 }
 
-export function createWasmRuntimeBinding(options: WasmRuntimeOptions = {}): WasmRuntimeBinding {
+export function createWasmRuntimeBinding(options: NnrpWasmBindingOptions = {}): NnrpWasmRuntimeBinding {
   return {
     manifest: createBrowserWasmManifest(),
     moduleUrl: normalizeModuleUrl(options.moduleUrl ?? "./nnrp_wasm_bg.wasm"),

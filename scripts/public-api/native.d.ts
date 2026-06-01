@@ -39,14 +39,14 @@ export interface NnrpTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
     readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
-export interface NativeRuntimeOptions {
+export interface NnrpNativeBindingOptions {
     readonly libraryPath?: string;
     readonly nativeLibrary?: NnrpNativeLibraryOptions;
     readonly env?: Record<string, string | undefined>;
     readonly platform?: NodePlatform;
     readonly arch?: NodeArchitecture;
 }
-export interface NativeRuntimeBinding {
+export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
     readonly libraryPath: string;
     readonly requiredSymbols: readonly string[];
@@ -54,13 +54,11 @@ export interface NativeRuntimeBinding {
 export declare class NnrpNativeBindingUnavailableError extends NnrpCapabilityError {
     constructor(diagnostic: NnrpDiagnostic);
 }
-export declare class NativeBindingUnavailableError extends NnrpNativeBindingUnavailableError {
-}
 export declare function openNativeClient(options: NnrpNativeClientOptions): Promise<NnrpClient>;
 export declare function openBackendRuntime(options?: NnrpBackendRuntimeOptions): Promise<NnrpBackendRuntime>;
 export declare class NnrpBackendRuntime {
     #private;
-    constructor(binding: NativeRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
+    constructor(binding: NnrpNativeRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
     get manifest(): NnrpCapabilityManifest;
     get libraryPath(): string;
     connect(options: NnrpConnectOptions): NnrpClient;
@@ -121,8 +119,8 @@ export declare class NnrpServerSession {
     close(): Promise<void>;
     get closed(): boolean;
 }
-export declare function resolveNativeLibraryPath(options?: NativeRuntimeOptions): string;
-export declare function createNativeRuntimeBinding(options?: NativeRuntimeOptions): NativeRuntimeBinding;
+export declare function resolveNativeLibraryPath(options?: NnrpNativeBindingOptions): string;
+export declare function createNativeRuntimeBinding(options?: NnrpNativeBindingOptions): NnrpNativeRuntimeBinding;
 type NodePlatform = NodeJS.Platform;
 type NodeArchitecture = NodeJS.Architecture;
 export {};

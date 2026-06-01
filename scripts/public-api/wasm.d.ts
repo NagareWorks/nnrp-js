@@ -27,12 +27,12 @@ export interface NnrpBrowserSessionOptions {
     readonly qualityTier?: number;
     readonly metadata?: Readonly<Record<string, string>>;
 }
-export interface WasmRuntimeOptions {
+export interface NnrpWasmBindingOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
-export interface WasmRuntimeBinding {
+export interface NnrpWasmRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
     readonly moduleUrl: string;
     readonly module?: WebAssembly.Module;
@@ -44,7 +44,7 @@ export declare class NnrpWasmBindingUnavailableError extends NnrpCapabilityError
 export declare function openBrowserRuntime(options?: NnrpWasmRuntimeOptions): Promise<NnrpBrowserRuntime>;
 export declare class NnrpBrowserRuntime {
     #private;
-    constructor(binding: WasmRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
+    constructor(binding: NnrpWasmRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
     get manifest(): NnrpCapabilityManifest;
     get moduleUrl(): string;
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
@@ -82,6 +82,6 @@ export declare class NnrpBrowserClientSession {
     close(): Promise<void>;
     get closed(): boolean;
 }
-export declare function createWasmRuntimeBinding(options?: WasmRuntimeOptions): WasmRuntimeBinding;
+export declare function createWasmRuntimeBinding(options?: NnrpWasmBindingOptions): NnrpWasmRuntimeBinding;
 export declare function createBrowserTransportProvider(kind: NnrpBrowserTransportKind, options?: Omit<NnrpBrowserTransportProvider, "kind">): NnrpBrowserTransportProvider;
 //# sourceMappingURL=index.d.ts.map

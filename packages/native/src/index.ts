@@ -69,7 +69,7 @@ export interface NnrpTransportSelectionOptions {
   readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 
-export interface NativeRuntimeOptions {
+export interface NnrpNativeBindingOptions {
   readonly libraryPath?: string;
   readonly nativeLibrary?: NnrpNativeLibraryOptions;
   readonly env?: Record<string, string | undefined>;
@@ -77,7 +77,7 @@ export interface NativeRuntimeOptions {
   readonly arch?: NodeArchitecture;
 }
 
-export interface NativeRuntimeBinding {
+export interface NnrpNativeRuntimeBinding {
   readonly manifest: NnrpCapabilityManifest;
   readonly libraryPath: string;
   readonly requiredSymbols: readonly string[];
@@ -89,8 +89,6 @@ export class NnrpNativeBindingUnavailableError extends NnrpCapabilityError {
     this.name = "NnrpNativeBindingUnavailableError";
   }
 }
-
-export class NativeBindingUnavailableError extends NnrpNativeBindingUnavailableError {}
 
 export async function openNativeClient(options: NnrpNativeClientOptions): Promise<NnrpClient> {
   const runtime = await openBackendRuntime(options);
@@ -114,11 +112,11 @@ export function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Pro
 }
 
 export class NnrpBackendRuntime {
-  readonly #binding: NativeRuntimeBinding;
+  readonly #binding: NnrpNativeRuntimeBinding;
   readonly #transportPolicy: NnrpTransportPolicy;
   #closed = false;
 
-  public constructor(binding: NativeRuntimeBinding, transportPolicy: NnrpTransportPolicy = "score") {
+  public constructor(binding: NnrpNativeRuntimeBinding, transportPolicy: NnrpTransportPolicy = "score") {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
   }
@@ -394,7 +392,7 @@ export class NnrpServerSession {
   }
 }
 
-export function resolveNativeLibraryPath(options: NativeRuntimeOptions = {}): string {
+export function resolveNativeLibraryPath(options: NnrpNativeBindingOptions = {}): string {
   const env = options.env ?? process.env;
   const explicit = options.libraryPath ?? options.nativeLibrary?.path ?? env.NNRP_NATIVE_LIBRARY;
 
@@ -410,7 +408,7 @@ export function resolveNativeLibraryPath(options: NativeRuntimeOptions = {}): st
   return `${artifactDir}/${platform}-${arch}/nnrp_ffi.${suffix}`;
 }
 
-export function createNativeRuntimeBinding(options: NativeRuntimeOptions = {}): NativeRuntimeBinding {
+export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {}): NnrpNativeRuntimeBinding {
   return {
     manifest: createBackendNativeManifest(),
     libraryPath: resolveNativeLibraryPath(options),
