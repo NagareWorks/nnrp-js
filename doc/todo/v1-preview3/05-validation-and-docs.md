@@ -20,20 +20,20 @@
 
 ## Conformance
 
-- [ ] Add JS/TS capability manifest generator.
-- [ ] Add conformance adapter command for backend native mode.
-- [ ] Add conformance adapter command for browser WASM mode where behavior can be exercised headlessly.
-- [ ] Ensure capability claims are build-mode specific.
-- [ ] Include artifact/build-mode diagnostics in adapter output.
-- [ ] Add CI job that runs public suite smoke cases through the adapter.
+- [x] Add JS/TS capability manifest generator.
+- [x] Add conformance adapter command for backend native mode.
+- [x] Add conformance adapter command for browser WASM mode where behavior can be exercised headlessly.
+- [x] Ensure capability claims are build-mode specific.
+- [x] Include artifact/build-mode diagnostics in adapter output.
+- [x] Add CI job that runs public suite smoke cases through the adapter.
 - [ ] Add negative conformance cases for unavailable native/WASM artifacts.
 
 ## Benchmarks
 
-- [ ] Add backend native benchmark command.
-- [ ] Add browser WASM benchmark command.
+- [x] Add backend native benchmark command.
+- [x] Add browser WASM benchmark command.
 - [ ] Report latency and throughput separately by build mode.
-- [ ] Report native artifact version or WASM artifact version.
+- [x] Report native artifact version or WASM artifact version.
 - [ ] Report selected transport and rejected provider diagnostics.
 - [ ] Add smoke thresholds only after first stable local baseline.
 - [ ] Store benchmark JSON artifacts in CI when benchmark workflow is explicitly requested.

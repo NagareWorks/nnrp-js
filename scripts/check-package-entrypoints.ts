@@ -46,7 +46,7 @@ for (const entrypoint of entrypoints) {
   const source = await Deno.readTextFile(moduleUrl);
   checkBuiltEntrypointSource(entrypoint.name, source);
 
-  const moduleExports = await import(moduleUrl) as Record<string, unknown>;
+  const moduleExports = await import(moduleUrl.href) as Record<string, unknown>;
 
   for (const exportName of entrypoint.exports) {
     if (!(exportName in moduleExports)) {

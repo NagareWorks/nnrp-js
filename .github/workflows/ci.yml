@@ -169,7 +169,16 @@ jobs:
       - name: Build
         run: deno task build
       - name: Package entrypoint smoke
-        run: deno run --allow-read scripts/check-package-entrypoints.ts
+        run: deno task package-check
+      - name: SDK command smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno task manifest >/tmp/nnrp-js-manifest.json
+          deno task conformance:backend >/tmp/nnrp-js-conformance-backend.json
+          deno task conformance:browser >/tmp/nnrp-js-conformance-browser.json
+          deno task benchmark:backend >/tmp/nnrp-js-benchmark-backend.json
+          deno task benchmark:browser >/tmp/nnrp-js-benchmark-browser.json
 
   runtime-policy:
     name: runtime-policy
