@@ -82,8 +82,8 @@ export async function openNativeClient(options: NnrpNativeClientOptions): Promis
   try {
     return runtime.connect({
       endpoint: options.endpoint,
-      transportPolicy: options.transportPolicy,
-      sessionDefaults: options.sessionDefaults,
+      ...(options.transportPolicy === undefined ? {} : { transportPolicy: options.transportPolicy }),
+      ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
     });
   } catch (error) {
     await runtime.close();
@@ -121,7 +121,7 @@ export class NnrpBackendRuntime {
       endpoint: normalizeEndpoint(options.endpoint),
       runtime: this,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
-      sessionDefaults: options.sessionDefaults,
+      ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
     });
   }
 

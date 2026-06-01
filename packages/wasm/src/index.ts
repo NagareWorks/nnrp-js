@@ -77,7 +77,7 @@ export class NnrpBrowserRuntime {
       endpoint: normalizeEndpoint(options.endpoint),
       runtime: this,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
-      sessionDefaults: options.sessionDefaults,
+      ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
     });
   }
 
@@ -189,7 +189,7 @@ export function createWasmRuntimeBinding(options: WasmRuntimeOptions = {}): Wasm
   return {
     manifest: createBrowserWasmManifest(),
     moduleUrl: normalizeModuleUrl(options.moduleUrl ?? "./nnrp_wasm_bg.wasm"),
-    module: options.module,
+    ...(options.module === undefined ? {} : { module: options.module }),
   };
 }
 
