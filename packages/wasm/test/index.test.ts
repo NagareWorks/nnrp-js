@@ -1,6 +1,11 @@
 import { createCapabilityManifest, NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
-import { createWasmRuntimeBinding, NnrpWasmBindingUnavailableError, openBrowserRuntime } from "../src/index.ts";
+import {
+  createBrowserTransportProvider,
+  createWasmRuntimeBinding,
+  NnrpWasmBindingUnavailableError,
+  openBrowserRuntime,
+} from "../src/index.ts";
 
 Deno.test("@nnrp/wasm creates a default wasm binding descriptor", () => {
   const binding = createWasmRuntimeBinding();
@@ -21,6 +26,13 @@ Deno.test("@nnrp/wasm preserves injected modules on the descriptor", () => {
   const binding = createWasmRuntimeBinding({ module });
 
   assertEquals(binding.module, module);
+});
+
+Deno.test("@nnrp/wasm preserves injected browser transport providers", () => {
+  const provider = createBrowserTransportProvider("websocket", { available: true, score: 42 });
+  const binding = createWasmRuntimeBinding({ transportProviders: [provider] });
+
+  assertEquals(binding.transportProviders, [provider]);
 });
 
 Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
@@ -50,6 +62,36 @@ Deno.test("@nnrp/wasm selects browser transport slots from local and peer manife
 
   assertEquals(summary.selected, "websocket");
   assertEquals(summary.rejected, [{ kind: "webtransport", reason: "peer-unsupported", score: 90 }]);
+});
+
+Deno.test("@nnrp/wasm applies browser transport provider availability", async () => {
+  const runtime = await openBrowserRuntime({
+    transportProviders: [
+      createBrowserTransportProvider("websocket", {
+        available: false,
+        score: 100,
+        diagnostic: {
+          code: "NNRP_BROWSER_WEBSOCKET_DISABLED",
+          message: "websocket disabled",
+          source: "transport",
+          retryable: false,
+          transport: "websocket",
+        },
+      }),
+    ],
+  });
+  const summary = runtime.selectTransport({
+    peerManifest: createCapabilityManifest({
+      buildMode: "browser-wasm",
+      transports: ["websocket"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, null);
+  assertEquals(summary.rejected[0]?.reason, "peer-unsupported");
+  assertEquals(summary.rejected[1]?.reason, "local-unavailable");
+  assertEquals(summary.rejected[1]?.diagnostic?.code, "NNRP_BROWSER_WEBSOCKET_DISABLED");
 });
 
 Deno.test("@nnrp/wasm rejects empty endpoints", async () => {

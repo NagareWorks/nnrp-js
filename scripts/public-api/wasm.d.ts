@@ -3,6 +3,7 @@ export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
     readonly transportPolicy?: NnrpTransportPolicy;
+    readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 export interface NnrpBrowserConnectOptions {
     readonly endpoint: string | URL;
@@ -13,6 +14,13 @@ export interface NnrpBrowserTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
     readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
+export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket" | "webtransport">;
+export interface NnrpBrowserTransportProvider {
+    readonly kind: NnrpBrowserTransportKind;
+    readonly available?: boolean;
+    readonly score?: number;
+    readonly diagnostic?: NnrpDiagnostic;
+}
 export interface NnrpBrowserSessionOptions {
     readonly inputProfile?: NnrpInputProfile;
     readonly targetCadence?: number;
@@ -22,11 +30,13 @@ export interface NnrpBrowserSessionOptions {
 export interface WasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
+    readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 export interface WasmRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
     readonly moduleUrl: string;
     readonly module?: WebAssembly.Module;
+    readonly transportProviders: readonly NnrpBrowserTransportProvider[];
 }
 export declare class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
     constructor(diagnostic: NnrpDiagnostic);
@@ -73,4 +83,5 @@ export declare class NnrpBrowserClientSession {
     get closed(): boolean;
 }
 export declare function createWasmRuntimeBinding(options?: WasmRuntimeOptions): WasmRuntimeBinding;
+export declare function createBrowserTransportProvider(kind: NnrpBrowserTransportKind, options?: Omit<NnrpBrowserTransportProvider, "kind">): NnrpBrowserTransportProvider;
 //# sourceMappingURL=index.d.ts.map

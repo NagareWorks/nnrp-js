@@ -2,19 +2,19 @@ const packages: readonly PackagePolicy[] = [
   {
     name: "@nnrp/core",
     directory: "packages/core",
-    requiredFiles: ["dist/index.js", "dist/index.d.ts"],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts"],
     forbiddenPatterns: [/\.tsbuildinfo$/, /^native\//, /^wasm\//],
   },
   {
     name: "@nnrp/native",
     directory: "packages/native",
-    requiredFiles: ["dist/index.js", "dist/index.d.ts"],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts"],
     forbiddenPatterns: [/\.tsbuildinfo$/, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/wasm",
     directory: "packages/wasm",
-    requiredFiles: ["dist/index.js", "dist/index.d.ts"],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts"],
     forbiddenPatterns: [/\.tsbuildinfo$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
 ];
@@ -24,6 +24,7 @@ const failures: string[] = [];
 for (const policy of packages) {
   const packageJson = await readPackageJson(policy);
   const declaredFiles = readDeclaredFiles(policy, packageJson);
+  checkPackageMetadata(policy, packageJson);
 
   for (const required of policy.requiredFiles) {
     if (!declaredFiles.includes(required)) {
@@ -40,6 +41,22 @@ for (const policy of packages) {
         failures.push(`${policy.name}: forbidden package file declaration ${file}`);
       }
     }
+  }
+}
+
+function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string, unknown>): void {
+  for (const field of ["name", "version", "description", "license", "exports", "type"]) {
+    if (packageJson[field] === undefined) {
+      failures.push(`${policy.name}: package.json missing ${field}`);
+    }
+  }
+
+  if (packageJson.license !== "Apache-2.0") {
+    failures.push(`${policy.name}: package.json license must be Apache-2.0`);
+  }
+
+  if (packageJson.type !== "module") {
+    failures.push(`${policy.name}: package.json type must be module`);
   }
 }
 

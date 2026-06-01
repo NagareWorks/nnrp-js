@@ -27,7 +27,7 @@
 - [x] Define `browser-wasm` build mode for browser/edge clients.
 - [x] Define `core` as runtime-neutral and transport-neutral.
 - [x] Add build-mode constants and capability manifest fields in `@nnrp/core`.
-- [ ] Add README build-mode table matching `nnrp-doc`.
+- [x] Add README build-mode table matching `nnrp-doc`.
 - [x] Add package-level smoke tests that assert each build mode claims only implemented capabilities.
 - [x] Add CI check that backend packages do not contain browser-only files.
 - [x] Add CI check that browser packages do not contain native loader files.

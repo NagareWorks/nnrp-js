@@ -33,7 +33,7 @@
 - [x] Assert `@nnrp/wasm` package contains no native loader files.
 - [x] Assert browser package contains no server exports.
 - [ ] Assert native package contains required native artifact metadata when artifact packaging is enabled.
-- [ ] Assert README/license/package metadata are present.
+- [x] Assert README/license/package metadata are present.
 
 ## Runtime Policy CI
 
@@ -43,7 +43,7 @@
 - [x] Reject DOM globals in `@nnrp/native`.
 - [x] Reject direct package-to-source imports in built packages.
 - [x] Add Node import smoke for built `@nnrp/native`.
-- [ ] Add browser bundling smoke for built `@nnrp/wasm`.
+- [x] Add browser bundling smoke for built `@nnrp/wasm`.
 
 ## Release Artifact Shape
 
@@ -51,6 +51,6 @@
 - [ ] Ensure package versions are synchronized or explicitly independent.
 - [ ] Decide whether native artifacts are bundled, optional peer artifacts, or downloaded by package policy.
 - [ ] Decide whether WASM assets are bundled or externally injected by package policy.
-- [ ] Document supported Node versions.
-- [ ] Document supported browser baseline.
+- [x] Document supported Node versions.
+- [x] Document supported browser baseline.
 - [ ] Add release dry-run workflow before enabling publish.

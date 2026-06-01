@@ -40,6 +40,7 @@ const entrypoints: readonly PackageEntrypoint[] = [
     path: "../packages/wasm/dist/index.js",
     exports: [
       "openBrowserRuntime",
+      "createBrowserTransportProvider",
       "NnrpBrowserRuntime",
       "NnrpBrowserClient",
       "NnrpWasmBindingUnavailableError",

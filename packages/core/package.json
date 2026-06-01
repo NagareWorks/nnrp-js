@@ -11,6 +11,7 @@
     }
   },
   "files": [
+    "README.md",
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map"

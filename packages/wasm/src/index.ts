@@ -12,6 +12,7 @@ import {
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
+  type NnrpTransportCandidate,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportSelectionSummary,
@@ -25,6 +26,7 @@ export interface NnrpWasmRuntimeOptions {
   readonly moduleUrl?: string | URL;
   readonly module?: WebAssembly.Module;
   readonly transportPolicy?: NnrpTransportPolicy;
+  readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 
 export interface NnrpBrowserConnectOptions {
@@ -38,6 +40,15 @@ export interface NnrpBrowserTransportSelectionOptions {
   readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 
+export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket" | "webtransport">;
+
+export interface NnrpBrowserTransportProvider {
+  readonly kind: NnrpBrowserTransportKind;
+  readonly available?: boolean;
+  readonly score?: number;
+  readonly diagnostic?: NnrpDiagnostic;
+}
+
 export interface NnrpBrowserSessionOptions {
   readonly inputProfile?: NnrpInputProfile;
   readonly targetCadence?: number;
@@ -48,12 +59,14 @@ export interface NnrpBrowserSessionOptions {
 export interface WasmRuntimeOptions {
   readonly moduleUrl?: string | URL;
   readonly module?: WebAssembly.Module;
+  readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 
 export interface WasmRuntimeBinding {
   readonly manifest: NnrpCapabilityManifest;
   readonly moduleUrl: string;
   readonly module?: WebAssembly.Module;
+  readonly transportProviders: readonly NnrpBrowserTransportProvider[];
 }
 
 export class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
@@ -99,14 +112,16 @@ export class NnrpBrowserRuntime {
 
   public selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary {
     this.#ensureOpen();
+    const providerMap = new Map(this.#binding.transportProviders.map((provider) => [provider.kind, provider]));
+    const candidates = createTransportCandidates({
+      local: this.#binding.manifest,
+      peer: options.peerManifest,
+      ...(options.scores === undefined ? {} : { scores: options.scores }),
+    }).map((candidate) => withBrowserProvider(candidate, providerMap.get(candidate.kind as NnrpBrowserTransportKind)));
 
     return createTransportSelectionSummary(
       selectTransport(
-        createTransportCandidates({
-          local: this.#binding.manifest,
-          peer: options.peerManifest,
-          ...(options.scores === undefined ? {} : { scores: options.scores }),
-        }),
+        candidates,
         this.#transportPolicy,
       ),
     );
@@ -253,11 +268,40 @@ export function createWasmRuntimeBinding(options: WasmRuntimeOptions = {}): Wasm
     manifest: createBrowserWasmManifest(),
     moduleUrl: normalizeModuleUrl(options.moduleUrl ?? "./nnrp_wasm_bg.wasm"),
     ...(options.module === undefined ? {} : { module: options.module }),
+    transportProviders: [...(options.transportProviders ?? [])],
+  };
+}
+
+export function createBrowserTransportProvider(
+  kind: NnrpBrowserTransportKind,
+  options: Omit<NnrpBrowserTransportProvider, "kind"> = {},
+): NnrpBrowserTransportProvider {
+  return {
+    kind,
+    ...(options.available === undefined ? {} : { available: options.available }),
+    ...(options.score === undefined ? {} : { score: options.score }),
+    ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
   };
 }
 
 function normalizeModuleUrl(moduleUrl: string | URL): string {
   return moduleUrl instanceof URL ? moduleUrl.toString() : moduleUrl;
+}
+
+function withBrowserProvider(
+  candidate: NnrpTransportCandidate,
+  provider: NnrpBrowserTransportProvider | undefined,
+): NnrpTransportCandidate {
+  if (provider === undefined) {
+    return candidate;
+  }
+
+  return {
+    ...candidate,
+    localAvailable: provider.available ?? candidate.localAvailable,
+    score: provider.score ?? candidate.score,
+    ...(provider.diagnostic === undefined ? {} : { diagnostic: provider.diagnostic }),
+  };
 }
 
 function normalizeEndpoint(endpoint: string | URL): string {
