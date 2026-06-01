@@ -22,6 +22,7 @@ Deno.test("@nnrp/native builds a platform-specific default path", () => {
 Deno.test("@nnrp/native creates a native binding descriptor", () => {
   const binding = createNativeRuntimeBinding({ platform: "linux", arch: "x64", env: {} });
 
-  assertEquals(binding.manifest.features.includes("native.loader"), true);
+  assertEquals(binding.manifest.capabilities, ["client.session", "server.session", "native.loader"]);
+  assertEquals(binding.manifest.buildMode, "backend-native");
   assertEquals(binding.libraryPath, "native/linux-x64/nnrp_ffi.so");
 });

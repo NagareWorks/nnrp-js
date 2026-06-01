@@ -1,17 +1,17 @@
-import { type CapabilityManifest, createPreviewManifest } from "@nnrp/core";
+import { createBrowserWasmManifest, type NnrpCapabilityManifest } from "@nnrp/core";
 
 export interface WasmRuntimeOptions {
   readonly moduleUrl?: string | URL;
 }
 
 export interface WasmRuntimeBinding {
-  readonly manifest: CapabilityManifest;
+  readonly manifest: NnrpCapabilityManifest;
   readonly moduleUrl: string;
 }
 
 export function createWasmRuntimeBinding(options: WasmRuntimeOptions = {}): WasmRuntimeBinding {
   return {
-    manifest: createPreviewManifest(["wasm.loader"]),
+    manifest: createBrowserWasmManifest(),
     moduleUrl: normalizeModuleUrl(options.moduleUrl ?? "./nnrp_wasm_bg.wasm"),
   };
 }

@@ -13,7 +13,7 @@
 - [x] Create `@nnrp/native` package skeleton.
 - [x] Create `@nnrp/wasm` package skeleton.
 - [ ] Freeze public package names before npm publication.
-- [ ] Rename placeholder exports to the documented `Nnrp*` public names.
+- [x] Rename placeholder exports to the documented `Nnrp*` public names.
 - [ ] Add compatibility aliases only when they avoid needless churn before first publication.
 - [ ] Add package export maps for ESM runtime entrypoints.
 - [ ] Add package export maps for `.d.ts` type entrypoints.
@@ -22,11 +22,11 @@
 
 ## Build Modes
 
-- [ ] Define `backend-native` build mode for Node.js/Deno clients, CLI tools, agent runtimes, adapter processes, and
+- [x] Define `backend-native` build mode for Node.js/Deno clients, CLI tools, agent runtimes, adapter processes, and
       services.
-- [ ] Define `browser-wasm` build mode for browser/edge clients.
-- [ ] Define `core` as runtime-neutral and transport-neutral.
-- [ ] Add build-mode constants and capability manifest fields in `@nnrp/core`.
+- [x] Define `browser-wasm` build mode for browser/edge clients.
+- [x] Define `core` as runtime-neutral and transport-neutral.
+- [x] Add build-mode constants and capability manifest fields in `@nnrp/core`.
 - [ ] Add README build-mode table matching `nnrp-doc`.
 - [ ] Add package-level smoke tests that assert each build mode claims only implemented capabilities.
 - [ ] Add CI check that backend packages do not contain browser-only files.
@@ -35,11 +35,11 @@
 
 ## Public Naming Contract
 
-- [ ] Use `Nnrp` prefix for public classes, interfaces, errors, and runtime objects.
+- [x] Use `Nnrp` prefix for public classes, interfaces, errors, and runtime objects.
 - [ ] Keep internal helper names unexported unless they are part of the frozen docs.
-- [ ] Replace `CapabilityManifest` with public `NnrpCapabilityManifest`.
-- [ ] Replace `TransportCandidate` with public `NnrpTransportCandidate`.
-- [ ] Replace `TransportSelection` with public `NnrpTransportSelection`.
+- [x] Replace `CapabilityManifest` with public `NnrpCapabilityManifest`.
+- [x] Replace `TransportCandidate` with public `NnrpTransportCandidate`.
+- [x] Replace `TransportSelection` with public `NnrpTransportSelection`.
 - [ ] Replace `NativeRuntimeOptions` with documented native runtime/client option types.
 - [ ] Replace `WasmRuntimeOptions` with documented WASM/browser runtime option types.
 - [ ] Add declaration tests that fail when documented public exports disappear.

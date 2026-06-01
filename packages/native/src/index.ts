@@ -1,4 +1,4 @@
-import { type CapabilityManifest, createPreviewManifest } from "@nnrp/core";
+import { createBackendNativeManifest, type NnrpCapabilityManifest } from "@nnrp/core";
 import process from "node:process";
 
 export interface NativeRuntimeOptions {
@@ -9,7 +9,7 @@ export interface NativeRuntimeOptions {
 }
 
 export interface NativeRuntimeBinding {
-  readonly manifest: CapabilityManifest;
+  readonly manifest: NnrpCapabilityManifest;
   readonly libraryPath: string;
 }
 
@@ -37,7 +37,7 @@ export function resolveNativeLibraryPath(options: NativeRuntimeOptions = {}): st
 
 export function createNativeRuntimeBinding(options: NativeRuntimeOptions = {}): NativeRuntimeBinding {
   return {
-    manifest: createPreviewManifest(["native.loader"]),
+    manifest: createBackendNativeManifest(),
     libraryPath: resolveNativeLibraryPath(options),
   };
 }

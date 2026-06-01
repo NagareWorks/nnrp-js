@@ -5,7 +5,8 @@ Deno.test("@nnrp/wasm creates a default wasm binding descriptor", () => {
   const binding = createWasmRuntimeBinding();
 
   assertEquals(binding.moduleUrl, "./nnrp_wasm_bg.wasm");
-  assertEquals(binding.manifest.features.includes("wasm.loader"), true);
+  assertEquals(binding.manifest.capabilities, ["client.session", "wasm.loader"]);
+  assertEquals(binding.manifest.buildMode, "browser-wasm");
 });
 
 Deno.test("@nnrp/wasm normalizes URL module locations", () => {
