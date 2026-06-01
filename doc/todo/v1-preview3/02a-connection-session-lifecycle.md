@@ -8,25 +8,25 @@
 
 ## Native Client Lifecycle
 
-- [ ] Add public `openNativeClient(options)` in `@nnrp/native`.
-- [ ] Load native artifacts only inside `openNativeClient` or explicit runtime open functions.
+- [x] Add public `openNativeClient(options)` in `@nnrp/native`.
+- [x] Load native artifacts only inside `openNativeClient` or explicit runtime open functions.
 - [ ] Connect to endpoint after manifest and required-symbol validation.
-- [ ] Return `NnrpClient` with no raw handle exposure.
-- [ ] Support explicit close/dispose on `NnrpClient`.
-- [ ] Reject use-after-close with structured diagnostics.
-- [ ] Add Node smoke test for `openNativeClient` without real network by using a test loader/fake binding.
+- [x] Return `NnrpClient` with no raw handle exposure.
+- [x] Support explicit close/dispose on `NnrpClient`.
+- [x] Reject use-after-close with structured diagnostics.
+- [x] Add Node smoke test for `openNativeClient` without real network by using a test loader/fake binding.
 - [ ] Add docs example for coding-agent/CLI client usage.
 
 ## Native Backend Runtime Lifecycle
 
-- [ ] Add public `openBackendRuntime(options)` in `@nnrp/native`.
-- [ ] Add `NnrpBackendRuntime.connect(options)` for client mode when explicit runtime lifecycle is needed.
-- [ ] Add `NnrpBackendRuntime.listen(options)` for server mode.
-- [ ] Add `NnrpServer.accept()` for incoming sessions.
-- [ ] Add explicit runtime close/dispose semantics.
-- [ ] Ensure closing a runtime closes child clients/servers/sessions or rejects if children are still active.
-- [ ] Map native lifecycle failures to `NnrpDiagnostic`.
-- [ ] Add lifecycle tests for open/connect/listen/close ordering.
+- [x] Add public `openBackendRuntime(options)` in `@nnrp/native`.
+- [x] Add `NnrpBackendRuntime.connect(options)` for client mode when explicit runtime lifecycle is needed.
+- [x] Add `NnrpBackendRuntime.listen(options)` for server mode.
+- [x] Add `NnrpServer.accept()` for incoming sessions.
+- [x] Add explicit runtime close/dispose semantics.
+- [x] Ensure closing a runtime closes child clients/servers/sessions or rejects if children are still active.
+- [x] Map native lifecycle failures to `NnrpDiagnostic`.
+- [x] Add lifecycle tests for open/connect/listen/close ordering.
 
 ## Browser Runtime Lifecycle
 
@@ -40,21 +40,21 @@
 
 ## Session Lifecycle
 
-- [ ] Add `NnrpClient.openSession(options)` in native mode.
+- [x] Add `NnrpClient.openSession(options)` in native mode.
 - [ ] Add `NnrpBrowserClient.openSession(options)` in browser mode.
-- [ ] Add `NnrpServer.accept()` returning `NnrpServerSession` in native mode.
-- [ ] Wrap session ids/handles without exposing raw pointers or WASM internals.
+- [x] Add `NnrpServer.accept()` returning `NnrpServerSession` in native mode.
+- [x] Wrap session ids/handles without exposing raw pointers or WASM internals.
 - [ ] Add session patch/update API once Rust artifact support is available.
-- [ ] Add explicit `session.close(reason?)`.
-- [ ] Reject submit/cancel/event operations after close.
+- [x] Add explicit `session.close(reason?)`.
+- [x] Reject submit/cancel/event operations after close.
 - [ ] Route events by session id so multiple sessions can share one runtime connection.
 - [ ] Add multi-session lifecycle tests.
 
 ## Options and Defaults
 
-- [ ] Add `NnrpNativeClientOptions` with endpoint, native library, transport policy, and session defaults.
-- [ ] Add `NnrpBackendRuntimeOptions` with native artifact and transport policy settings.
-- [ ] Add `NnrpConnectOptions` and `NnrpListenOptions`.
-- [ ] Add `NnrpSessionOptions` with input profile, target cadence, quality tier, and metadata.
-- [ ] Validate endpoints before invoking native/WASM backends.
+- [x] Add `NnrpNativeClientOptions` with endpoint, native library, transport policy, and session defaults.
+- [x] Add `NnrpBackendRuntimeOptions` with native artifact and transport policy settings.
+- [x] Add `NnrpConnectOptions` and `NnrpListenOptions`.
+- [x] Add `NnrpSessionOptions` with input profile, target cadence, quality tier, and metadata.
+- [x] Validate endpoints before invoking native/WASM backends.
 - [ ] Validate session metadata key/value size limits before sending.

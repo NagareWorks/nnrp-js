@@ -12,57 +12,57 @@
 - [ ] Parse native artifact `manifest.json` before loading any library.
 - [ ] Validate ABI version compatibility.
 - [ ] Validate required exported symbols before exposing runtime APIs.
-- [ ] Resolve local library path from explicit option.
-- [ ] Resolve local library path from environment variable.
-- [ ] Resolve local library path from packaged artifact.
+- [x] Resolve local library path from explicit option.
+- [x] Resolve local library path from environment variable.
+- [x] Resolve local library path from packaged artifact.
 - [ ] Resolve local library path from system policy only when explicitly enabled.
-- [ ] Surface rejected candidates with structured diagnostics.
+- [x] Surface rejected candidates with structured diagnostics.
 - [ ] Add tests for explicit path, environment path, packaged path, and missing artifact.
 
 ## Native Binding Layer
 
 - [ ] Choose a binding mechanism that works for Node-compatible packages and release artifacts.
-- [ ] Keep raw FFI handles private.
-- [ ] Wrap runtime handles.
-- [ ] Wrap client handles.
-- [ ] Wrap server handles.
-- [ ] Wrap session handles.
+- [x] Keep raw FFI handles private.
+- [x] Wrap runtime handles.
+- [x] Wrap client handles.
+- [x] Wrap server handles.
+- [x] Wrap session handles.
 - [ ] Wrap operation handles/ids.
-- [ ] Map native status/error objects to `NnrpDiagnostic`.
+- [x] Map native status/error objects to `NnrpDiagnostic`.
 - [ ] Ensure finalizers do not hide required explicit close behavior.
-- [ ] Add fake-binding tests for handle ownership and double-close.
+- [x] Add fake-binding tests for handle ownership and double-close.
 
 ## Client-First API
 
-- [ ] Add `openNativeClient(options)`.
-- [ ] Add `NnrpNativeClientOptions`.
-- [ ] Open runtime, connect endpoint, and return `NnrpClient`.
-- [ ] Apply `sessionDefaults` to sessions.
-- [ ] Add `NnrpClient.openSession(options)`.
-- [ ] Add `NnrpClient.close()`.
-- [ ] Add tests for client open/close and failed connect diagnostics.
+- [x] Add `openNativeClient(options)`.
+- [x] Add `NnrpNativeClientOptions`.
+- [x] Open runtime, connect endpoint, and return `NnrpClient`.
+- [x] Apply `sessionDefaults` to sessions.
+- [x] Add `NnrpClient.openSession(options)`.
+- [x] Add `NnrpClient.close()`.
+- [x] Add tests for client open/close and failed connect diagnostics.
 
 ## Backend Runtime API
 
-- [ ] Add `openBackendRuntime(options)`.
-- [ ] Add `NnrpBackendRuntime.connect(options)`.
-- [ ] Add `NnrpBackendRuntime.listen(options)`.
-- [ ] Add `NnrpBackendRuntime.close()`.
-- [ ] Add `NnrpServer.accept()`.
-- [ ] Add `NnrpServer.close()`.
-- [ ] Add tests for runtime connect/listen lifecycle.
+- [x] Add `openBackendRuntime(options)`.
+- [x] Add `NnrpBackendRuntime.connect(options)`.
+- [x] Add `NnrpBackendRuntime.listen(options)`.
+- [x] Add `NnrpBackendRuntime.close()`.
+- [x] Add `NnrpServer.accept()`.
+- [x] Add `NnrpServer.close()`.
+- [x] Add tests for runtime connect/listen lifecycle.
 
 ## Session and Operation API
 
-- [ ] Add `NnrpClientSession.submit(request)`.
-- [ ] Add `NnrpClientSession.submitNoWait(request)`.
-- [ ] Add `NnrpClientSession.nextEvent(options?)`.
+- [x] Add `NnrpClientSession.submit(request)`.
+- [x] Add `NnrpClientSession.submitNoWait(request)`.
+- [x] Add `NnrpClientSession.nextEvent(options?)`.
 - [ ] Add `NnrpClientSession.cancel(operationIdOrFrameId, options?)`.
-- [ ] Add `NnrpClientSession.close(reason?)`.
-- [ ] Add `NnrpServerSession.receive(options?)`.
-- [ ] Add `NnrpServerSession.sendResult(result)`.
-- [ ] Add `NnrpServerSession.close(reason?)`.
-- [ ] Preserve backpressure and flow-control diagnostics.
+- [x] Add `NnrpClientSession.close(reason?)`.
+- [x] Add `NnrpServerSession.receive(options?)`.
+- [x] Add `NnrpServerSession.sendResult(result)`.
+- [x] Add `NnrpServerSession.close(reason?)`.
+- [x] Preserve backpressure and flow-control diagnostics.
 - [ ] Add tests for submit/result, no-wait/event, cancel, and close paths.
 
 ## Native Package Gates
