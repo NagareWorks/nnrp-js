@@ -32,8 +32,13 @@ Deno.test("sdk reporting creates benchmark smoke results", () => {
   assertEquals(report.buildMode, "browser-wasm");
   assertEquals(report.results[0]?.name, "capability_manifest_generation");
   assertEquals(report.results[0]?.value, report.manifest.capabilities.length);
-  assertEquals(report.results[1]?.name, "transport_candidate_count");
+  assertEquals(report.results[1]?.category, "latency");
+  assertEquals(report.results[1]?.status, "skipped");
+  assertEquals(report.results[2]?.category, "throughput");
+  assertEquals(report.results[2]?.status, "skipped");
+  assertEquals(report.results[3]?.name, "transport_candidates");
   assertEquals(report.transport.selected, "websocket");
+  assertEquals(report.diagnostics.some((entry) => entry.code === "NNRP_JS_TRANSPORT_SELECTION"), true);
 });
 
 Deno.test("sdk reporting parses command options", () => {

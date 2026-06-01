@@ -62,8 +62,9 @@ export interface SdkBenchmarkReport {
 
 export interface SdkBenchmarkResult {
   readonly name: string;
+  readonly category: "capability" | "latency" | "throughput" | "transport";
   readonly status: "measured" | "skipped";
-  readonly unit: "operations";
+  readonly unit: "count" | "milliseconds" | "operations" | "operations/second";
   readonly value: number;
   readonly diagnostic?: NnrpDiagnostic;
 }
@@ -116,18 +117,44 @@ export function createBenchmarkReport(
     results: [
       {
         name: "capability_manifest_generation",
+        category: "capability",
         status: "measured",
         unit: "operations",
         value: buildManifest.manifest.capabilities.length,
       },
       {
-        name: "transport_candidate_count",
+        name: "runtime_latency_p50",
+        category: "latency",
+        status: "skipped",
+        unit: "milliseconds",
+        value: 0,
+        diagnostic: benchmarkDiagnostic(buildMode),
+      },
+      {
+        name: "runtime_throughput",
+        category: "throughput",
+        status: "skipped",
+        unit: "operations/second",
+        value: 0,
+        diagnostic: benchmarkDiagnostic(buildMode),
+      },
+      {
+        name: "transport_candidates",
+        category: "transport",
         status: "measured",
-        unit: "operations",
+        unit: "count",
         value: transport.candidates.length,
       },
+      {
+        name: "transport_rejections",
+        category: "transport",
+        status: "measured",
+        unit: "count",
+        value: transport.rejected.length,
+        ...(transport.rejected[0]?.diagnostic === undefined ? {} : { diagnostic: transport.rejected[0].diagnostic }),
+      },
     ],
-    diagnostics: [benchmarkDiagnostic(buildMode)],
+    diagnostics: [benchmarkDiagnostic(buildMode), ...transportDiagnostics(buildMode, transport)],
   };
 }
 
@@ -218,4 +245,29 @@ function benchmarkDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic {
     source: "runtime",
     retryable: false,
   };
+}
+
+function transportDiagnostics(
+  buildMode: NnrpBuildMode,
+  transport: NnrpTransportSelectionSummary,
+): readonly NnrpDiagnostic[] {
+  return [
+    {
+      code: "NNRP_JS_TRANSPORT_SELECTION",
+      message: transport.selected === null
+        ? `${buildMode} benchmark smoke did not select a transport.`
+        : `${buildMode} benchmark smoke selected ${transport.selected}.`,
+      source: "transport",
+      retryable: false,
+      ...(transport.selected === null ? {} : { transport: transport.selected }),
+    },
+    ...transport.rejected.map((candidate): NnrpDiagnostic => ({
+      code: "NNRP_JS_TRANSPORT_REJECTED",
+      message: `${buildMode} rejected ${candidate.kind}: ${candidate.reason}.`,
+      source: "transport",
+      retryable: candidate.reason === "local-unavailable",
+      transport: candidate.kind,
+      ...(candidate.diagnostic === undefined ? {} : { cause: candidate.diagnostic }),
+    })),
+  ];
 }

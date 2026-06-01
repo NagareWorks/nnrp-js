@@ -32,9 +32,9 @@
 
 - [x] Add backend native benchmark command.
 - [x] Add browser WASM benchmark command.
-- [ ] Report latency and throughput separately by build mode.
+- [x] Report latency and throughput separately by build mode.
 - [x] Report native artifact version or WASM artifact version.
-- [ ] Report selected transport and rejected provider diagnostics.
+- [x] Report selected transport and rejected provider diagnostics.
 - [ ] Add smoke thresholds only after first stable local baseline.
 - [ ] Store benchmark JSON artifacts in CI when benchmark workflow is explicitly requested.
 
