@@ -2,20 +2,20 @@ const packages: readonly PackagePolicy[] = [
   {
     name: "@nnrp/core",
     directory: "packages/core",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /^native\//, /^wasm\//],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^native\//, /^wasm\//],
   },
   {
     name: "@nnrp/native",
     directory: "packages/native",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /browser/i, /websocket/i, /webtransport/i],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/wasm",
     directory: "packages/wasm",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
 ];
 

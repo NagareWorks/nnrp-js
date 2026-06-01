@@ -5,7 +5,8 @@
     "@nnrp/wasm": "./packages/wasm/src/index.ts"
   },
   "tasks": {
-    "build": "deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
+    "clean": "deno run --allow-write=packages/core/dist,packages/native/dist,packages/wasm/dist scripts/clean-build-output.ts",
+    "build": "deno task clean && deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
     "benchmark:backend": "deno run --allow-env scripts/run-benchmark.ts --mode backend-native",
     "benchmark:browser": "deno run --allow-env scripts/run-benchmark.ts --mode browser-wasm",
     "conformance:backend": "deno run --allow-env scripts/run-conformance-adapter.ts --mode backend-native",
@@ -14,7 +15,8 @@
     "manifest": "deno run --allow-env scripts/generate-capability-manifest.ts",
     "browser-bundle-smoke": "deno run --allow-read scripts/check-browser-bundle.js",
     "public-api": "deno run --allow-read scripts/check-public-api.ts",
-    "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts && deno task public-api && deno task browser-bundle-smoke",
+    "package-pack": "deno run --allow-read --allow-env=ComSpec,NNRP_JS_FORCE_NPM_PACK --allow-run=npm,cmd scripts/check-npm-pack.ts",
+    "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts && deno task package-pack && deno task public-api && deno task browser-bundle-smoke",
     "package-smoke": "deno task build && deno task package-check",
     "format": "deno fmt",
     "format:check": "deno fmt --check",

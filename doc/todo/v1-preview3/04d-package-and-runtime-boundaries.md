@@ -21,13 +21,13 @@
 - [x] Build `@nnrp/core` to ESM.
 - [x] Build `@nnrp/native` to Node-compatible ESM.
 - [x] Build `@nnrp/wasm` to browser-compatible ESM.
-- [ ] Keep source maps only if package policy allows them.
+- [x] Keep source maps only if package policy allows them.
 - [x] Ensure package output is reproducible enough for CI artifact diffing.
-- [ ] Add clean build task that removes stale output before building.
+- [x] Add clean build task that removes stale output before building.
 
 ## Package Content Checks
 
-- [ ] Add script that runs `npm pack --dry-run` for each package.
+- [x] Add script that runs `npm pack --dry-run` for each package.
 - [x] Assert `@nnrp/core` package contains no native or WASM artifacts.
 - [x] Assert `@nnrp/native` package contains no browser-only implementation files.
 - [x] Assert `@nnrp/wasm` package contains no native loader files.
@@ -48,7 +48,7 @@
 ## Release Artifact Shape
 
 - [ ] Decide npm package versioning policy for preview builds.
-- [ ] Ensure package versions are synchronized or explicitly independent.
+- [x] Ensure package versions are synchronized or explicitly independent.
 - [ ] Decide whether native artifacts are bundled, optional peer artifacts, or downloaded by package policy.
 - [ ] Decide whether WASM assets are bundled or externally injected by package policy.
 - [x] Document supported Node versions.
