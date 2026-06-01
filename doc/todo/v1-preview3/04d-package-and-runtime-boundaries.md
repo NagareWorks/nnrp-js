@@ -1,0 +1,56 @@
+# JS/TS Preview3 Package and Runtime Boundaries
+
+## Scope
+
+1. Make package contents and runtime boundaries enforceable instead of relying on review memory.
+2. Prepare npm-ready artifacts without leaking wrong-runtime code.
+3. Keep Deno tooling while publishing Node/browser-compatible packages.
+
+## Export Maps and Type Declarations
+
+- [ ] Add package export map for `@nnrp/core`.
+- [ ] Add package export map for `@nnrp/native`.
+- [ ] Add package export map for `@nnrp/wasm`.
+- [ ] Add type declaration output for each package.
+- [ ] Add declaration maps if they do not bloat package artifacts.
+- [ ] Add subpath export policy for future internal helpers.
+- [ ] Add tests that import built package entrypoints instead of source paths.
+
+## Build Outputs
+
+- [ ] Build `@nnrp/core` to ESM.
+- [ ] Build `@nnrp/native` to Node-compatible ESM.
+- [ ] Build `@nnrp/wasm` to browser-compatible ESM.
+- [ ] Keep source maps only if package policy allows them.
+- [ ] Ensure package output is reproducible enough for CI artifact diffing.
+- [ ] Add clean build task that removes stale output before building.
+
+## Package Content Checks
+
+- [ ] Add script that runs `npm pack --dry-run` for each package.
+- [ ] Assert `@nnrp/core` package contains no native or WASM artifacts.
+- [ ] Assert `@nnrp/native` package contains no browser-only implementation files.
+- [ ] Assert `@nnrp/wasm` package contains no native loader files.
+- [ ] Assert browser package contains no server exports.
+- [ ] Assert native package contains required native artifact metadata when artifact packaging is enabled.
+- [ ] Assert README/license/package metadata are present.
+
+## Runtime Policy CI
+
+- [x] Reject Bun files and adaptation traces.
+- [ ] Reject accidental `node:*` imports in `@nnrp/core`.
+- [ ] Reject accidental `node:*` imports in `@nnrp/wasm`.
+- [ ] Reject DOM globals in `@nnrp/native`.
+- [ ] Reject direct package-to-source imports in built packages.
+- [ ] Add Node import smoke for built `@nnrp/native`.
+- [ ] Add browser bundling smoke for built `@nnrp/wasm`.
+
+## Release Artifact Shape
+
+- [ ] Decide npm package versioning policy for preview builds.
+- [ ] Ensure package versions are synchronized or explicitly independent.
+- [ ] Decide whether native artifacts are bundled, optional peer artifacts, or downloaded by package policy.
+- [ ] Decide whether WASM assets are bundled or externally injected by package policy.
+- [ ] Document supported Node versions.
+- [ ] Document supported browser baseline.
+- [ ] Add release dry-run workflow before enabling publish.
