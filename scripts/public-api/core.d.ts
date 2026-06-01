@@ -4,6 +4,8 @@ export type NnrpBuildMode = "backend-native" | "browser-wasm";
 export type NnrpTransportKind = "tcp" | "quic" | "webtransport" | "websocket";
 export type NnrpTransportPolicy = "score" | "tcp-only" | "quic-only";
 export type NnrpOperationId = bigint;
+export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
+export type NnrpOperationRef = NnrpOperationId | number;
 export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.websocket" | "transport.webtransport" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
@@ -131,6 +133,22 @@ export interface NnrpResultHintMetadata {
     readonly expectedBytes?: number;
     readonly transport?: NnrpTransportKind;
 }
+export interface NnrpCancelOptions {
+    readonly reason?: string;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface NnrpCancelRequest {
+    readonly operation: NnrpOperationRef;
+    readonly options?: NnrpCancelOptions;
+}
+export interface NnrpCancelResult {
+    readonly operation: NnrpOperationId;
+    readonly state: Extract<NnrpOperationState, "cancelled">;
+    readonly diagnostic?: NnrpDiagnostic;
+}
+export interface NnrpEventPollOptions {
+    readonly timeoutMillis?: number;
+}
 export declare class NnrpError extends Error {
     readonly diagnostic: NnrpDiagnostic;
     constructor(diagnostic: NnrpDiagnostic);
@@ -164,4 +182,7 @@ export declare function createCacheKey(kind: NnrpCacheObjectKind, key: bigint | 
 export declare function createSchemaDescriptor(descriptor: NnrpSchemaDescriptor): NnrpSchemaDescriptor;
 export declare function isStandardInputProfile(profile: string): profile is NnrpInputProfile;
 export declare function normalizeSubmitRequest(request: NnrpSubmitRequest, options?: NormalizeSubmitRequestOptions): NnrpNormalizedSubmitRequest;
+export declare function normalizeOperationRef(operation: NnrpOperationRef): NnrpOperationId;
+export declare function normalizeCancelRequest(operation: NnrpOperationRef, options?: NnrpCancelOptions): NnrpCancelRequest;
+export declare function validateEventPollOptions(options?: NnrpEventPollOptions): void;
 //# sourceMappingURL=index.d.ts.map

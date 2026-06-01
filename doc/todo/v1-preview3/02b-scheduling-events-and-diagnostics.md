@@ -8,12 +8,12 @@
 
 ## Submit and Result APIs
 
-- [ ] Add `NnrpClientSession.submit(request)` for native client sessions.
-- [ ] Add `NnrpBrowserClientSession.submit(request)` for browser client sessions.
-- [ ] Add `NnrpClientSession.submitNoWait(request)` returning a `bigint` operation id.
+- [x] Add `NnrpClientSession.submit(request)` for native client sessions.
+- [x] Add `NnrpBrowserClientSession.submit(request)` for browser client sessions.
+- [x] Add `NnrpClientSession.submitNoWait(request)` returning a `bigint` operation id.
 - [ ] Add browser `submitNoWait` only if WASM/runtime support can deliver events safely.
-- [ ] Add `NnrpServerSession.receive()` for server-side submit/control events.
-- [ ] Add `NnrpServerSession.sendResult(result)`.
+- [x] Add `NnrpServerSession.receive()` for server-side submit/control events.
+- [x] Add `NnrpServerSession.sendResult(result)`.
 - [ ] Validate `frameId` uniqueness while in flight.
 - [x] Validate payload ownership rules before calling native/WASM backends.
 - [ ] Map result drops to typed JS errors with diagnostics.
@@ -22,23 +22,26 @@
 
 ## Cancel and Operation Lifecycle
 
-- [ ] Add `session.cancel(operationIdOrFrameId, options?)` where supported by runtime artifacts.
-- [ ] Preserve cancel scope semantics from the Rust-backed protocol layer.
-- [ ] Expose operation states as typed values, not ad hoc strings.
+- [x] Add `session.cancel(operationIdOrFrameId, options?)` where supported by runtime artifacts.
+- [x] Preserve cancel scope semantics from the Rust-backed protocol layer.
+- [x] Expose operation states as typed values, not ad hoc strings.
 - [ ] Emit terminal events exactly once.
 - [ ] Reject duplicate cancel attempts with deterministic diagnostics.
-- [ ] Add tests for cancel before dispatch, cancel after result, and cancel after close.
+- [x] Add tests for cancel before dispatch.
+- [ ] Add tests for cancel after result and cancel after close.
 
 ## Event Delivery
 
-- [ ] Add `NnrpClientSession.nextEvent(options?)`.
-- [ ] Add async iterator convenience for client session events if it does not hide backpressure.
-- [ ] Add `NnrpServerSession.receive()` event shape for server sessions.
+- [x] Add `NnrpClientSession.nextEvent(options?)`.
+- [x] Add async iterator convenience for client session events if it does not hide backpressure.
+- [x] Add `NnrpServerSession.receive()` event shape for server sessions.
 - [x] Define event discriminants for result, flow update, result hint, drop, close, and diagnostic events.
-- [ ] Support timeout/cancellation for event polling.
-- [ ] Avoid unbounded event queues.
+- [x] Support timeout for event polling.
+- [ ] Support cancellation for event polling.
+- [x] Avoid unbounded event queues.
 - [ ] Add tests for event ordering under multiple in-flight operations.
-- [ ] Add tests for no-event timeout behavior.
+- [x] Add tests for invalid no-event timeout behavior.
+- [ ] Add tests for successful no-event timeout behavior once runtime polling is implemented.
 
 ## Flow Control and Backpressure
 

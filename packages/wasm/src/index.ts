@@ -1,14 +1,19 @@
 import {
   createBrowserWasmManifest,
+  type NnrpCancelOptions,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
+  type NnrpEventPollOptions,
   type NnrpInputProfile,
+  type NnrpOperationRef,
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
   type NnrpTransportPolicy,
+  normalizeCancelRequest,
   normalizeSubmitRequest,
+  validateEventPollOptions,
 } from "@nnrp/core";
 
 export interface NnrpWasmRuntimeOptions {
@@ -174,9 +179,32 @@ export class NnrpBrowserClientSession {
     return Promise.reject(bindingNotInstantiatedError("submit"));
   }
 
-  public nextEvent(): Promise<NnrpRuntimeEvent> {
-    this.#ensureOpen();
+  public cancel(operation: NnrpOperationRef, options: NnrpCancelOptions = {}): Promise<void> {
+    try {
+      this.#ensureOpen();
+      normalizeCancelRequest(operation, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return Promise.reject(bindingNotInstantiatedError("cancel"));
+  }
+
+  public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+    try {
+      this.#ensureOpen();
+      validateEventPollOptions(options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
     return Promise.reject(bindingNotInstantiatedError("nextEvent"));
+  }
+
+  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
+    while (!this.closed) {
+      yield await this.nextEvent(options);
+    }
   }
 
   public close(): Promise<void> {

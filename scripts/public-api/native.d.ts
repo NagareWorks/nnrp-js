@@ -1,4 +1,4 @@
-import { NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpInputProfile, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
+import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -89,7 +89,9 @@ export declare class NnrpClientSession {
     get options(): NnrpSessionOptions;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
-    nextEvent(): Promise<NnrpRuntimeEvent>;
+    cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;
+    nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
+    events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
     close(): Promise<void>;
     get closed(): boolean;
 }
@@ -109,7 +111,7 @@ export declare class NnrpServer {
 }
 export declare class NnrpServerSession {
     #private;
-    receive(): Promise<NnrpRuntimeEvent>;
+    receive(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     sendResult(_result: NnrpResult): Promise<void>;
     close(): Promise<void>;
     get closed(): boolean;

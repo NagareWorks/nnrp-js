@@ -1,4 +1,4 @@
-import { NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpInputProfile, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
+import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportPolicy } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -61,7 +61,9 @@ export declare class NnrpBrowserClientSession {
     constructor(state: NnrpBrowserClientSessionState);
     get options(): NnrpBrowserSessionOptions;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
-    nextEvent(): Promise<NnrpRuntimeEvent>;
+    cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;
+    nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
+    events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
     close(): Promise<void>;
     get closed(): boolean;
 }

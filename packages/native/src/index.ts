@@ -1,14 +1,19 @@
 import {
   createBackendNativeManifest,
+  type NnrpCancelOptions,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
+  type NnrpEventPollOptions,
   type NnrpInputProfile,
+  type NnrpOperationRef,
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
   type NnrpTransportPolicy,
+  normalizeCancelRequest,
   normalizeSubmitRequest,
+  validateEventPollOptions,
 } from "@nnrp/core";
 import process from "node:process";
 
@@ -242,9 +247,32 @@ export class NnrpClientSession {
     return Promise.reject(bindingNotConnectedError("submitNoWait"));
   }
 
-  public nextEvent(): Promise<NnrpRuntimeEvent> {
-    this.#ensureOpen();
+  public cancel(operation: NnrpOperationRef, options: NnrpCancelOptions = {}): Promise<void> {
+    try {
+      this.#ensureOpen();
+      normalizeCancelRequest(operation, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return Promise.reject(bindingNotConnectedError("cancel"));
+  }
+
+  public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+    try {
+      this.#ensureOpen();
+      validateEventPollOptions(options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
     return Promise.reject(bindingNotConnectedError("nextEvent"));
+  }
+
+  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
+    while (!this.closed) {
+      yield await this.nextEvent(options);
+    }
   }
 
   public close(): Promise<void> {
@@ -309,8 +337,14 @@ export class NnrpServer {
 export class NnrpServerSession {
   #closed = false;
 
-  public receive(): Promise<NnrpRuntimeEvent> {
-    this.#ensureOpen();
+  public receive(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+    try {
+      this.#ensureOpen();
+      validateEventPollOptions(options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
     return Promise.reject(bindingNotConnectedError("receive"));
   }
 

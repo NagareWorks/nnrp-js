@@ -127,3 +127,33 @@ Deno.test("@nnrp/native validates submit requests before native dispatch", async
 
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
 });
+
+Deno.test("@nnrp/native validates cancel and event polling before native dispatch", async () => {
+  const client = await openNativeClient({ endpoint: "127.0.0.1:4433", env: {} });
+  const session = client.openSession();
+
+  const cancelError = await assertRejects(
+    () => session.cancel(-1),
+    NnrpProtocolError,
+  );
+  const eventError = await assertRejects(
+    () => session.nextEvent({ timeoutMillis: -1 }),
+    NnrpProtocolError,
+  );
+
+  assertEquals(cancelError.diagnostic.code, "NNRP_OPERATION_ID_INVALID");
+  assertEquals(eventError.diagnostic.code, "NNRP_EVENT_TIMEOUT_INVALID");
+});
+
+Deno.test("@nnrp/native exposes async event iterator convenience", async () => {
+  const client = await openNativeClient({ endpoint: "127.0.0.1:4433", env: {} });
+  const session = client.openSession();
+  const iterator = session.events()[Symbol.asyncIterator]();
+
+  const error = await assertRejects(
+    () => iterator.next(),
+    NnrpNativeBindingUnavailableError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_BINDING_NOT_CONNECTED");
+});

@@ -9,6 +9,10 @@ export type NnrpTransportPolicy = "score" | "tcp-only" | "quic-only";
 
 export type NnrpOperationId = bigint;
 
+export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
+
+export type NnrpOperationRef = NnrpOperationId | number;
+
 export type NnrpCapability =
   | "client.session"
   | "server.session"
@@ -163,6 +167,26 @@ export interface NnrpResultHintMetadata {
   readonly transport?: NnrpTransportKind;
 }
 
+export interface NnrpCancelOptions {
+  readonly reason?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export interface NnrpCancelRequest {
+  readonly operation: NnrpOperationRef;
+  readonly options?: NnrpCancelOptions;
+}
+
+export interface NnrpCancelResult {
+  readonly operation: NnrpOperationId;
+  readonly state: Extract<NnrpOperationState, "cancelled">;
+  readonly diagnostic?: NnrpDiagnostic;
+}
+
+export interface NnrpEventPollOptions {
+  readonly timeoutMillis?: number;
+}
+
 export class NnrpError extends Error {
   public readonly diagnostic: NnrpDiagnostic;
 
@@ -305,6 +329,61 @@ export function normalizeSubmitRequest(
     ...(request.descriptor === undefined ? {} : { descriptor: createPayloadDescriptor(request.descriptor) }),
     ...(request.metadata === undefined ? {} : { metadata: { ...request.metadata } }),
   };
+}
+
+export function normalizeOperationRef(operation: NnrpOperationRef): NnrpOperationId {
+  if (typeof operation === "bigint") {
+    if (operation < 0n) {
+      throw new NnrpProtocolError({
+        code: "NNRP_OPERATION_ID_INVALID",
+        message: "Operation ids must be non-negative.",
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    return operation;
+  }
+
+  if (!Number.isSafeInteger(operation) || operation < 0) {
+    throw new NnrpProtocolError({
+      code: "NNRP_OPERATION_ID_INVALID",
+      message: "Operation ids must be non-negative safe integers.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
+  return BigInt(operation);
+}
+
+export function normalizeCancelRequest(
+  operation: NnrpOperationRef,
+  options: NnrpCancelOptions = {},
+): NnrpCancelRequest {
+  const normalized = normalizeOperationRef(operation);
+
+  return {
+    operation: normalized,
+    options: {
+      ...(options.reason === undefined ? {} : { reason: options.reason }),
+      ...(options.metadata === undefined ? {} : { metadata: { ...options.metadata } }),
+    },
+  };
+}
+
+export function validateEventPollOptions(options: NnrpEventPollOptions = {}): void {
+  if (
+    options.timeoutMillis !== undefined &&
+    (!Number.isFinite(options.timeoutMillis) || options.timeoutMillis < 0)
+  ) {
+    throw new NnrpProtocolError({
+      code: "NNRP_EVENT_TIMEOUT_INVALID",
+      message: "Event timeoutMillis must be a non-negative finite number.",
+      source: "core",
+      retryable: false,
+    });
+  }
 }
 
 function isTransportEligible(candidate: NnrpTransportCandidate, policy: NnrpTransportPolicy): boolean {

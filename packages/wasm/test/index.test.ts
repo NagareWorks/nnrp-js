@@ -83,3 +83,35 @@ Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () 
 
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
 });
+
+Deno.test("@nnrp/wasm validates cancel and event polling before WASM dispatch", async () => {
+  const runtime = await openBrowserRuntime();
+  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
+  const session = client.openSession();
+
+  const cancelError = await assertRejects(
+    () => session.cancel(-1),
+    NnrpProtocolError,
+  );
+  const eventError = await assertRejects(
+    () => session.nextEvent({ timeoutMillis: -1 }),
+    NnrpProtocolError,
+  );
+
+  assertEquals(cancelError.diagnostic.code, "NNRP_OPERATION_ID_INVALID");
+  assertEquals(eventError.diagnostic.code, "NNRP_EVENT_TIMEOUT_INVALID");
+});
+
+Deno.test("@nnrp/wasm exposes async event iterator convenience", async () => {
+  const runtime = await openBrowserRuntime();
+  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
+  const session = client.openSession();
+  const iterator = session.events()[Symbol.asyncIterator]();
+
+  const error = await assertRejects(
+    () => iterator.next(),
+    NnrpWasmBindingUnavailableError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
+});

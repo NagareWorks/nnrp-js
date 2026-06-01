@@ -9,8 +9,11 @@ import {
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
   NnrpProtocolError,
+  normalizeCancelRequest,
+  normalizeOperationRef,
   normalizeSubmitRequest,
   selectTransport,
+  validateEventPollOptions,
 } from "../src/index.ts";
 
 Deno.test("@nnrp/core creates a backend native manifest", () => {
@@ -156,6 +159,32 @@ Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () =>
 Deno.test("@nnrp/core exposes strict standard profile checks", () => {
   assertEquals(isStandardInputProfile("tool_delta"), true);
   assertEquals(isStandardInputProfile("custom"), false);
+});
+
+Deno.test("@nnrp/core normalizes operation references and cancel requests", () => {
+  assertEquals(normalizeOperationRef(42), 42n);
+  assertEquals(normalizeOperationRef(7n), 7n);
+  assertEquals(normalizeCancelRequest(3, { reason: "user", metadata: { source: "test" } }), {
+    operation: 3n,
+    options: { reason: "user", metadata: { source: "test" } },
+  });
+
+  assertThrows(
+    () => normalizeOperationRef(-1),
+    NnrpProtocolError,
+    "Operation ids must be non-negative",
+  );
+});
+
+Deno.test("@nnrp/core validates event polling options", () => {
+  validateEventPollOptions({ timeoutMillis: 0 });
+  validateEventPollOptions({ timeoutMillis: 10 });
+
+  assertThrows(
+    () => validateEventPollOptions({ timeoutMillis: -1 }),
+    NnrpProtocolError,
+    "timeoutMillis must be a non-negative",
+  );
 });
 
 Deno.test("@nnrp/core keeps diagnostics on typed errors", () => {
