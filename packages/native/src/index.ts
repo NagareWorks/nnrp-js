@@ -91,8 +91,10 @@ export async function openNativeClient(options: NnrpNativeClientOptions): Promis
   }
 }
 
-export async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Promise<NnrpBackendRuntime> {
-  return new NnrpBackendRuntime(createNativeRuntimeBinding(options), options.transportPolicy ?? "score");
+export function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Promise<NnrpBackendRuntime> {
+  return Promise.resolve(
+    new NnrpBackendRuntime(createNativeRuntimeBinding(options), options.transportPolicy ?? "score"),
+  );
 }
 
 export class NnrpBackendRuntime {
@@ -136,8 +138,9 @@ export class NnrpBackendRuntime {
     });
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
@@ -183,8 +186,9 @@ export class NnrpClient {
     });
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
@@ -215,23 +219,24 @@ export class NnrpClientSession {
     return this.#state.options;
   }
 
-  public async submit(_request: NnrpSubmitRequest): Promise<NnrpResult> {
+  public submit(_request: NnrpSubmitRequest): Promise<NnrpResult> {
     this.#ensureOpen();
-    throw bindingNotConnectedError("submit");
+    return Promise.reject(bindingNotConnectedError("submit"));
   }
 
-  public async submitNoWait(_request: NnrpSubmitRequest): Promise<bigint> {
+  public submitNoWait(_request: NnrpSubmitRequest): Promise<bigint> {
     this.#ensureOpen();
-    throw bindingNotConnectedError("submitNoWait");
+    return Promise.reject(bindingNotConnectedError("submitNoWait"));
   }
 
-  public async nextEvent(): Promise<NnrpRuntimeEvent> {
+  public nextEvent(): Promise<NnrpRuntimeEvent> {
     this.#ensureOpen();
-    throw bindingNotConnectedError("nextEvent");
+    return Promise.reject(bindingNotConnectedError("nextEvent"));
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
@@ -267,13 +272,14 @@ export class NnrpServer {
     return this.#state.transportPolicy;
   }
 
-  public async accept(): Promise<NnrpServerSession> {
+  public accept(): Promise<NnrpServerSession> {
     this.#ensureOpen();
-    throw bindingNotConnectedError("accept");
+    return Promise.reject(bindingNotConnectedError("accept"));
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
@@ -290,18 +296,19 @@ export class NnrpServer {
 export class NnrpServerSession {
   #closed = false;
 
-  public async receive(): Promise<NnrpRuntimeEvent> {
+  public receive(): Promise<NnrpRuntimeEvent> {
     this.#ensureOpen();
-    throw bindingNotConnectedError("receive");
+    return Promise.reject(bindingNotConnectedError("receive"));
   }
 
-  public async sendResult(_result: NnrpResult): Promise<void> {
+  public sendResult(_result: NnrpResult): Promise<void> {
     this.#ensureOpen();
-    throw bindingNotConnectedError("sendResult");
+    return Promise.reject(bindingNotConnectedError("sendResult"));
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {

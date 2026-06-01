@@ -47,8 +47,8 @@ export class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
   }
 }
 
-export async function openBrowserRuntime(options: NnrpWasmRuntimeOptions = {}): Promise<NnrpBrowserRuntime> {
-  return new NnrpBrowserRuntime(createWasmRuntimeBinding(options), options.transportPolicy ?? "score");
+export function openBrowserRuntime(options: NnrpWasmRuntimeOptions = {}): Promise<NnrpBrowserRuntime> {
+  return Promise.resolve(new NnrpBrowserRuntime(createWasmRuntimeBinding(options), options.transportPolicy ?? "score"));
 }
 
 export class NnrpBrowserRuntime {
@@ -81,8 +81,9 @@ export class NnrpBrowserRuntime {
     });
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
@@ -128,8 +129,9 @@ export class NnrpBrowserClient {
     });
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
@@ -160,18 +162,19 @@ export class NnrpBrowserClientSession {
     return this.#state.options;
   }
 
-  public async submit(_request: NnrpSubmitRequest): Promise<NnrpResult> {
+  public submit(_request: NnrpSubmitRequest): Promise<NnrpResult> {
     this.#ensureOpen();
-    throw bindingNotInstantiatedError("submit");
+    return Promise.reject(bindingNotInstantiatedError("submit"));
   }
 
-  public async nextEvent(): Promise<NnrpRuntimeEvent> {
+  public nextEvent(): Promise<NnrpRuntimeEvent> {
     this.#ensureOpen();
-    throw bindingNotInstantiatedError("nextEvent");
+    return Promise.reject(bindingNotInstantiatedError("nextEvent"));
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
     this.#closed = true;
+    return Promise.resolve();
   }
 
   public get closed(): boolean {
