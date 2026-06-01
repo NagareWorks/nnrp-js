@@ -8,6 +8,7 @@ import {
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
   type NnrpInputProfile,
+  type NnrpNormalizedSubmitRequest,
   type NnrpOperationRef,
   type NnrpResult,
   type NnrpRuntimeEvent,
@@ -20,12 +21,121 @@ import {
   selectTransport,
   validateEventPollOptions,
 } from "@nnrp/core";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
+
+const EXPECTED_PROTOCOL_MAJOR = 1;
+const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
+const EXPECTED_ABI_MAJOR = 1;
+const MINIMUM_ABI_MINOR = 5;
+const TRANSPORT_SLOT_TCP = 0x00000002;
+const REQUIRED_TRANSPORT_SLOTS = TRANSPORT_SLOT_TCP;
+const RUNTIME_FEATURE_PROTOCOL_CORE = 0x0000000000000001n;
+const RUNTIME_FEATURE_CLIENT_API = 0x0000000000000002n;
+const RUNTIME_FEATURE_SERVER_API = 0x0000000000000004n;
+const RUNTIME_FEATURE_EVENT_POLLING = 0x0000000000000008n;
+const RUNTIME_FEATURE_CALLBACK_DISPATCH = 0x0000000000000010n;
+const RUNTIME_FEATURE_CACHE_SCHEMA = 0x0000000000000020n;
+const RUNTIME_FEATURE_RECOVERY = 0x0000000000000040n;
+const RUNTIME_FEATURE_TYPED_PAYLOAD = 0x0000000000000080n;
+const RUNTIME_FEATURE_TRANSPORT_SLOTS = 0x0000000000000100n;
+const RUNTIME_FEATURE_BATCH_POLLING = 0x0000000000000200n;
+const RUNTIME_FEATURE_CACHE_LEASE_OPS = 0x0000000000000400n;
+const RUNTIME_FEATURE_SCHEMA_REGISTRY_HANDLES = 0x0000000000000800n;
+const RUNTIME_FEATURE_BUFFER_HANDLES = 0x0000000000001000n;
+const RUNTIME_FEATURE_EXECUTABLE_RESUME = 0x0000000000002000n;
+const RUNTIME_FEATURE_CLIENT_COMPLETION_HELPERS = 0x0000000000004000n;
+const RUNTIME_FEATURE_CLIENT_COARSE_RESULT_HELPERS = 0x0000000000008000n;
+const RUNTIME_FEATURE_CLIENT_COMPACT_RESULT_HELPERS = 0x0000000000010000n;
+const REQUIRED_NATIVE_SYMBOLS = [
+  "nnrp_runtime_capabilities",
+  "nnrp_client_submit_result_compact",
+  "nnrp_client_await_events",
+] as const;
+const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
+  RUNTIME_FEATURE_CLIENT_API |
+  RUNTIME_FEATURE_SERVER_API |
+  RUNTIME_FEATURE_EVENT_POLLING |
+  RUNTIME_FEATURE_CALLBACK_DISPATCH |
+  RUNTIME_FEATURE_CACHE_SCHEMA |
+  RUNTIME_FEATURE_RECOVERY |
+  RUNTIME_FEATURE_TYPED_PAYLOAD |
+  RUNTIME_FEATURE_TRANSPORT_SLOTS |
+  RUNTIME_FEATURE_BATCH_POLLING |
+  RUNTIME_FEATURE_CACHE_LEASE_OPS |
+  RUNTIME_FEATURE_SCHEMA_REGISTRY_HANDLES |
+  RUNTIME_FEATURE_BUFFER_HANDLES |
+  RUNTIME_FEATURE_EXECUTABLE_RESUME |
+  RUNTIME_FEATURE_CLIENT_COMPLETION_HELPERS |
+  RUNTIME_FEATURE_CLIENT_COARSE_RESULT_HELPERS |
+  RUNTIME_FEATURE_CLIENT_COMPACT_RESULT_HELPERS;
 
 export interface NnrpNativeLibraryOptions {
   readonly path?: string;
   readonly artifactDir?: string;
+  readonly manifestPath?: string;
+  readonly packageName?: string;
   readonly requiredSymbols?: readonly string[];
+}
+
+export interface NnrpNativeRuntimeCapabilities {
+  readonly abiMajor: number;
+  readonly abiMinor: number;
+  readonly abiPatch: number;
+  readonly protocolMajor: number;
+  readonly protocolWireFormat: number;
+  readonly sdkMajor: number;
+  readonly sdkMinor: number;
+  readonly sdkPatch: number;
+  readonly sdkChannel: number;
+  readonly sdkRevision: number;
+  readonly transportSlots: number;
+  readonly featureFlags: bigint;
+}
+
+export interface NnrpNativeSubmitResultCompactRequest {
+  readonly sessionOptions: NnrpSessionOptions;
+  readonly submit: NnrpNormalizedSubmitRequest;
+  readonly resultPayload?: Uint8Array;
+  readonly maxEvents?: number;
+}
+
+export interface NnrpNativeEventBatchRequest {
+  readonly maxEvents: number;
+}
+
+export interface NnrpNativeFfiBinding {
+  readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
+  runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
+  submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
+  awaitEvents?(
+    request: NnrpNativeEventBatchRequest,
+  ): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
+  close?(): void | Promise<void>;
+}
+
+export interface NnrpNativeArtifactManifest {
+  readonly package: "nnrp-ffi";
+  readonly profile: "debug" | "release";
+  readonly os: string;
+  readonly arch: string;
+  readonly target?: string | null;
+  readonly library_kind: "dynamic" | "static";
+  readonly library: string;
+  readonly libraries: readonly string[];
+  readonly header: string;
+  readonly headers: readonly string[];
+  readonly legacy_header?: string;
+  readonly exports: readonly string[];
+}
+
+export interface NnrpResolvedNativeArtifact {
+  readonly packageName: string;
+  readonly packageDir: string;
+  readonly manifestPath: string;
+  readonly libraryPath: string;
+  readonly manifest: NnrpNativeArtifactManifest;
 }
 
 export interface NnrpSessionOptions {
@@ -43,6 +153,7 @@ export interface NnrpNativeClientOptions {
   readonly env?: Record<string, string | undefined>;
   readonly platform?: NodePlatform;
   readonly arch?: NodeArchitecture;
+  readonly ffi?: NnrpNativeFfiBinding;
 }
 
 export interface NnrpBackendRuntimeOptions {
@@ -51,6 +162,7 @@ export interface NnrpBackendRuntimeOptions {
   readonly env?: Record<string, string | undefined>;
   readonly platform?: NodePlatform;
   readonly arch?: NodeArchitecture;
+  readonly ffi?: NnrpNativeFfiBinding;
 }
 
 export interface NnrpConnectOptions {
@@ -75,12 +187,16 @@ export interface NnrpNativeBindingOptions {
   readonly env?: Record<string, string | undefined>;
   readonly platform?: NodePlatform;
   readonly arch?: NodeArchitecture;
+  readonly ffi?: NnrpNativeFfiBinding;
 }
 
 export interface NnrpNativeRuntimeBinding {
   readonly manifest: NnrpCapabilityManifest;
   readonly libraryPath: string;
   readonly requiredSymbols: readonly string[];
+  readonly artifact?: NnrpResolvedNativeArtifact;
+  readonly ffi?: NnrpNativeFfiBinding;
+  readonly runtimeCapabilities?: NnrpNativeRuntimeCapabilities;
 }
 
 export class NnrpNativeBindingUnavailableError extends NnrpCapabilityError {
@@ -105,9 +221,15 @@ export async function openNativeClient(options: NnrpNativeClientOptions): Promis
   }
 }
 
-export function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Promise<NnrpBackendRuntime> {
-  return Promise.resolve(
-    new NnrpBackendRuntime(createNativeRuntimeBinding(options), options.transportPolicy ?? "score"),
+export async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Promise<NnrpBackendRuntime> {
+  const binding = createNativeRuntimeBinding(options);
+  const runtimeCapabilities = await resolveRuntimeCapabilities(binding);
+  return new NnrpBackendRuntime(
+    {
+      ...binding,
+      ...(runtimeCapabilities === undefined ? {} : { runtimeCapabilities }),
+    },
+    options.transportPolicy ?? "score",
   );
 }
 
@@ -127,6 +249,38 @@ export class NnrpBackendRuntime {
 
   public get libraryPath(): string {
     return this.#binding.libraryPath;
+  }
+
+  public get runtimeCapabilities(): NnrpNativeRuntimeCapabilities | undefined {
+    return this.#binding.runtimeCapabilities;
+  }
+
+  public get artifact(): NnrpResolvedNativeArtifact | undefined {
+    return this.#binding.artifact;
+  }
+
+  public get bindingMode(): string {
+    return this.#binding.ffi?.mode ?? "unbound";
+  }
+
+  public submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult> {
+    this.#ensureOpen();
+    const submitResultCompact = this.#binding.ffi?.submitResultCompact;
+    if (submitResultCompact === undefined) {
+      return Promise.reject(bindingNotConnectedError("submitResultCompact"));
+    }
+
+    return Promise.resolve(submitResultCompact(request));
+  }
+
+  public async awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]> {
+    this.#ensureOpen();
+    const awaitEvents = this.#binding.ffi?.awaitEvents;
+    if (awaitEvents === undefined) {
+      throw bindingNotConnectedError("awaitEvents");
+    }
+
+    return await awaitEvents(request);
   }
 
   public connect(options: NnrpConnectOptions): NnrpClient {
@@ -167,9 +321,9 @@ export class NnrpBackendRuntime {
     );
   }
 
-  public close(): Promise<void> {
+  public async close(): Promise<void> {
     this.#closed = true;
-    return Promise.resolve();
+    await this.#binding.ffi?.close?.();
   }
 
   public get closed(): boolean {
@@ -204,6 +358,10 @@ export class NnrpClient {
 
   public get transportPolicy(): NnrpTransportPolicy {
     return this.#state.transportPolicy;
+  }
+
+  public get runtime(): NnrpBackendRuntime {
+    return this.#state.runtime;
   }
 
   public openSession(options: NnrpSessionOptions = {}): NnrpClientSession {
@@ -249,14 +407,19 @@ export class NnrpClientSession {
   }
 
   public submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
+    let normalized: NnrpNormalizedSubmitRequest;
     try {
       this.#ensureOpen();
-      normalizeSubmitRequest(request);
+      normalized = normalizeSubmitRequest(request);
     } catch (error) {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotConnectedError("submit"));
+    return this.#state.client.runtime.submitResultCompact({
+      sessionOptions: this.#state.options,
+      submit: normalized,
+      maxEvents: 1,
+    });
   }
 
   public submitNoWait(request: NnrpSubmitRequest): Promise<bigint> {
@@ -289,7 +452,14 @@ export class NnrpClientSession {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotConnectedError("nextEvent"));
+    return this.#state.client.runtime.awaitEvents({ maxEvents: 1 }).then((events) => {
+      const [event] = events;
+      if (event === undefined) {
+        throw bindingNotConnectedError("nextEvent");
+      }
+
+      return event;
+    });
   }
 
   public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
@@ -393,27 +563,85 @@ export class NnrpServerSession {
 }
 
 export function resolveNativeLibraryPath(options: NnrpNativeBindingOptions = {}): string {
-  const env = options.env ?? process.env;
-  const explicit = options.libraryPath ?? options.nativeLibrary?.path ?? env.NNRP_NATIVE_LIBRARY;
-
+  const explicit = resolveExplicitNativeLibraryPath(options);
   if (explicit && explicit.length > 0) {
     return explicit;
   }
 
+  const artifact = resolveNativeArtifact(options);
+  if (artifact !== null) {
+    return artifact.libraryPath;
+  }
+
   const platform = options.platform ?? process.platform;
-  const arch = options.arch ?? process.arch;
   const suffix = nativeLibrarySuffix(platform);
   const artifactDir = options.nativeLibrary?.artifactDir ?? "native";
+  const packageName = options.nativeLibrary?.packageName ?? nativePackageName(platform, options.arch ?? process.arch);
 
-  return `${artifactDir}/${platform}-${arch}/nnrp_ffi.${suffix}`;
+  return path.posix.join(toPosixPath(artifactDir), packageName, nativeLibraryFileName(platform, suffix));
 }
 
 export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {}): NnrpNativeRuntimeBinding {
+  const explicit = resolveExplicitNativeLibraryPath(options);
+  const artifact = explicit === undefined ? resolveNativeArtifact(options) : null;
+  const requiredSymbols = requiredNativeSymbols(options.nativeLibrary);
+
   return {
     manifest: createBackendNativeManifest(),
-    libraryPath: resolveNativeLibraryPath(options),
-    requiredSymbols: [...(options.nativeLibrary?.requiredSymbols ?? [])],
+    libraryPath: artifact?.libraryPath ?? explicit ?? resolveNativeLibraryPath(options),
+    requiredSymbols,
+    ...(artifact === null ? {} : { artifact }),
+    ...(options.ffi === undefined ? {} : { ffi: options.ffi }),
   };
+}
+
+function resolveExplicitNativeLibraryPath(options: NnrpNativeBindingOptions): string | undefined {
+  const env = options.env ?? process.env;
+  const explicit = options.libraryPath ?? options.nativeLibrary?.path ?? env.NNRP_NATIVE_LIBRARY;
+  return explicit && explicit.length > 0 ? explicit : undefined;
+}
+
+async function resolveRuntimeCapabilities(
+  binding: NnrpNativeRuntimeBinding,
+): Promise<NnrpNativeRuntimeCapabilities | undefined> {
+  const capabilities = await binding.ffi?.runtimeCapabilities?.();
+  if (capabilities === undefined) {
+    return undefined;
+  }
+
+  validateNativeRuntimeCapabilities(capabilities);
+  return capabilities;
+}
+
+export function validateNativeRuntimeCapabilities(capabilities: NnrpNativeRuntimeCapabilities): void {
+  if (capabilities.abiMajor !== EXPECTED_ABI_MAJOR || capabilities.abiMinor < MINIMUM_ABI_MINOR) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ABI_MISMATCH",
+      `Native artifact ABI ${capabilities.abiMajor}.${capabilities.abiMinor}.${capabilities.abiPatch} is not supported.`,
+    );
+  }
+
+  if (
+    capabilities.protocolMajor !== EXPECTED_PROTOCOL_MAJOR ||
+    capabilities.protocolWireFormat !== EXPECTED_PROTOCOL_WIRE_FORMAT
+  ) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_PROTOCOL_MISMATCH",
+      `Native artifact protocol ${capabilities.protocolMajor}/${capabilities.protocolWireFormat} is not supported.`,
+    );
+  }
+
+  const missing = REQUIRED_RUNTIME_FEATURES & ~capabilities.featureFlags;
+  if (missing !== 0n) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_FEATURES_MISSING",
+      `Native artifact is missing required runtime feature bits: 0x${missing.toString(16)}.`,
+    );
+  }
+
+  if ((capabilities.transportSlots & REQUIRED_TRANSPORT_SLOTS) !== REQUIRED_TRANSPORT_SLOTS) {
+    throw nativeArtifactError("NNRP_NATIVE_TRANSPORT_MISSING", "Native artifact must expose TCP transport support.");
+  }
 }
 
 function nativeLibrarySuffix(platform: NodePlatform): "dll" | "dylib" | "so" {
@@ -426,6 +654,176 @@ function nativeLibrarySuffix(platform: NodePlatform): "dll" | "dylib" | "so" {
   }
 
   return "so";
+}
+
+function nativeLibraryFileName(platform: NodePlatform, suffix: "dll" | "dylib" | "so"): string {
+  if (platform === "win32") {
+    return `nnrp_ffi.${suffix}`;
+  }
+
+  return `libnnrp_ffi.${suffix}`;
+}
+
+export function resolveNativeArtifact(options: NnrpNativeBindingOptions): NnrpResolvedNativeArtifact | null {
+  const nativeLibrary = options.nativeLibrary;
+  const manifestPath = nativeLibrary?.manifestPath ?? defaultManifestPath(options);
+  if (!existsSync(manifestPath)) {
+    if (nativeLibrary?.manifestPath !== undefined) {
+      throw nativeArtifactError(
+        "NNRP_NATIVE_ARTIFACT_MANIFEST_MISSING",
+        `Native artifact manifest not found: ${manifestPath}`,
+      );
+    }
+
+    return null;
+  }
+
+  const manifest = readNativeArtifactManifest(manifestPath);
+  validateNativeArtifactManifest(manifest, options);
+
+  const packageDir = path.dirname(manifestPath);
+  const libraryPath = path.join(packageDir, manifest.library);
+  if (!existsSync(libraryPath)) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ARTIFACT_LIBRARY_MISSING",
+      `Native artifact library not found: ${libraryPath}`,
+    );
+  }
+
+  return {
+    packageName: path.basename(packageDir),
+    packageDir,
+    manifestPath,
+    libraryPath,
+    manifest,
+  };
+}
+
+function defaultManifestPath(options: NnrpNativeBindingOptions): string {
+  const artifactDir = options.nativeLibrary?.artifactDir ?? "native";
+  const packageName = options.nativeLibrary?.packageName ?? nativePackageName(
+    options.platform ?? process.platform,
+    options.arch ?? process.arch,
+  );
+  return path.join(artifactDir, packageName, "manifest.json");
+}
+
+export function readNativeArtifactManifest(manifestPath: string): NnrpNativeArtifactManifest {
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown;
+  if (!isNativeArtifactManifest(manifest)) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ARTIFACT_MANIFEST_INVALID",
+      `Invalid native artifact manifest: ${manifestPath}`,
+    );
+  }
+
+  return manifest;
+}
+
+export function validateNativeArtifactManifest(
+  manifest: NnrpNativeArtifactManifest,
+  options: Pick<NnrpNativeBindingOptions, "platform" | "arch" | "nativeLibrary"> = {},
+): void {
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
+  const expectedOs = nativeArtifactOs(platform);
+  const expectedArch = nativeArtifactArch(arch);
+
+  if (manifest.os !== expectedOs) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ARTIFACT_OS_MISMATCH",
+      `Native artifact OS ${manifest.os} does not match ${expectedOs}.`,
+    );
+  }
+
+  if (manifest.arch !== expectedArch) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ARTIFACT_ARCH_MISMATCH",
+      `Native artifact architecture ${manifest.arch} does not match ${expectedArch}.`,
+    );
+  }
+
+  if (manifest.library_kind !== "dynamic") {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ARTIFACT_KIND_UNSUPPORTED",
+      "JavaScript native loading requires dynamic artifacts.",
+    );
+  }
+
+  const missing = requiredNativeSymbols(options.nativeLibrary).filter((symbol) => !manifest.exports.includes(symbol));
+  if (missing.length > 0) {
+    throw nativeArtifactError(
+      "NNRP_NATIVE_ARTIFACT_EXPORT_MISSING",
+      `Native artifact manifest is missing exports: ${missing.join(", ")}.`,
+    );
+  }
+}
+
+function requiredNativeSymbols(nativeLibrary: NnrpNativeLibraryOptions | undefined): readonly string[] {
+  return [...new Set([...REQUIRED_NATIVE_SYMBOLS, ...(nativeLibrary?.requiredSymbols ?? [])])];
+}
+
+function isNativeArtifactManifest(value: unknown): value is NnrpNativeArtifactManifest {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const manifest = value as Record<string, unknown>;
+  return manifest.package === "nnrp-ffi" &&
+    (manifest.profile === "debug" || manifest.profile === "release") &&
+    typeof manifest.os === "string" &&
+    typeof manifest.arch === "string" &&
+    (manifest.target === undefined || manifest.target === null || typeof manifest.target === "string") &&
+    (manifest.library_kind === "dynamic" || manifest.library_kind === "static") &&
+    typeof manifest.library === "string" &&
+    Array.isArray(manifest.libraries) &&
+    manifest.libraries.every((entry) => typeof entry === "string") &&
+    typeof manifest.header === "string" &&
+    Array.isArray(manifest.headers) &&
+    manifest.headers.every((entry) => typeof entry === "string") &&
+    (manifest.legacy_header === undefined || typeof manifest.legacy_header === "string") &&
+    Array.isArray(manifest.exports) &&
+    manifest.exports.every((entry) => typeof entry === "string");
+}
+
+function nativePackageName(platform: NodePlatform, arch: NodeArchitecture): string {
+  return `${nativeArtifactOs(platform)}-${nativeArtifactArch(arch)}`;
+}
+
+function nativeArtifactOs(platform: NodePlatform): string {
+  if (platform === "win32") {
+    return "windows";
+  }
+
+  if (platform === "darwin") {
+    return "macos";
+  }
+
+  return platform;
+}
+
+function nativeArtifactArch(arch: NodeArchitecture): string {
+  if (arch === "x64") {
+    return "x86_64";
+  }
+
+  if (arch === "ia32") {
+    return "x86";
+  }
+
+  if (arch === "arm64") {
+    return "aarch64";
+  }
+
+  if (arch === "arm") {
+    return "armv7";
+  }
+
+  return arch;
+}
+
+function toPosixPath(value: string): string {
+  return value.replaceAll("\\", "/");
 }
 
 function normalizeEndpoint(endpoint: string | URL): string {
@@ -470,6 +868,15 @@ function bindingNotConnectedError(operation: string): NnrpNativeBindingUnavailab
   return new NnrpNativeBindingUnavailableError({
     code: "NNRP_NATIVE_BINDING_NOT_CONNECTED",
     message: `Native binding operation '${operation}' is not connected to an FFI implementation yet.`,
+    source: "native",
+    retryable: false,
+  });
+}
+
+function nativeArtifactError(code: string, message: string): NnrpCapabilityError {
+  return new NnrpCapabilityError({
+    code,
+    message,
     source: "native",
     retryable: false,
   });

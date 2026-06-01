@@ -8,26 +8,28 @@
 
 ## Native Artifact Resolution
 
-- [ ] Consume `nnrp-rs` native artifact packages for supported desktop/server targets.
-- [ ] Parse native artifact `manifest.json` before loading any library.
-- [ ] Validate ABI version compatibility.
-- [ ] Validate required exported symbols before exposing runtime APIs.
+- [x] Consume `nnrp-rs` native artifact packages for supported desktop/server targets.
+- [x] Parse native artifact `manifest.json` before loading any library.
+- [x] Validate ABI version compatibility.
+- [x] Validate required exported symbols before exposing runtime APIs.
 - [x] Resolve local library path from explicit option.
 - [x] Resolve local library path from environment variable.
 - [x] Resolve local library path from packaged artifact.
 - [ ] Resolve local library path from system policy only when explicitly enabled.
 - [x] Surface rejected candidates with structured diagnostics.
-- [ ] Add tests for explicit path, environment path, packaged path, and missing artifact.
+- [x] Add tests for explicit path, environment path, packaged path, and missing artifact.
 
 ## Native Binding Layer
 
-- [ ] Choose a binding mechanism that works for Node-compatible packages and release artifacts.
+- [ ] Choose a production binding mechanism that works for Node-compatible packages and release artifacts.
+- [x] Define a coarse FFI binding contract that batches submit/result and event polling work.
 - [x] Keep raw FFI handles private.
 - [x] Wrap runtime handles.
 - [x] Wrap client handles.
 - [x] Wrap server handles.
 - [x] Wrap session handles.
 - [ ] Wrap operation handles/ids.
+- [x] Probe native runtime capabilities before exposing accelerated runtime paths.
 - [x] Map native status/error objects to `NnrpDiagnostic`.
 - [ ] Ensure finalizers do not hide required explicit close behavior.
 - [x] Add fake-binding tests for handle ownership and double-close.
@@ -57,13 +59,13 @@
 - [x] Add `NnrpClientSession.submit(request)`.
 - [x] Add `NnrpClientSession.submitNoWait(request)`.
 - [x] Add `NnrpClientSession.nextEvent(options?)`.
-- [ ] Add `NnrpClientSession.cancel(operationIdOrFrameId, options?)`.
+- [x] Add `NnrpClientSession.cancel(operationIdOrFrameId, options?)`.
 - [x] Add `NnrpClientSession.close(reason?)`.
 - [x] Add `NnrpServerSession.receive(options?)`.
 - [x] Add `NnrpServerSession.sendResult(result)`.
 - [x] Add `NnrpServerSession.close(reason?)`.
 - [x] Preserve backpressure and flow-control diagnostics.
-- [ ] Add tests for submit/result, no-wait/event, cancel, and close paths.
+- [x] Add tests for submit/result, no-wait/event, cancel, and close paths.
 
 ## Native Package Gates
 

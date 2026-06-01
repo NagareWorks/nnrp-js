@@ -29,6 +29,12 @@ const entrypoints: readonly PackageEntrypoint[] = [
     exports: [
       "openNativeClient",
       "openBackendRuntime",
+      "createNativeRuntimeBinding",
+      "resolveNativeArtifact",
+      "resolveNativeLibraryPath",
+      "readNativeArtifactManifest",
+      "validateNativeArtifactManifest",
+      "validateNativeRuntimeCapabilities",
       "NnrpBackendRuntime",
       "NnrpClient",
       "NnrpNativeBindingUnavailableError",

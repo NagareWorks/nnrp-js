@@ -22,7 +22,7 @@
     "format:check": "deno fmt --check",
     "lint": "deno fmt --check && deno lint && deno task runtime-policy && deno task typecheck",
     "runtime-policy": "deno run --allow-read scripts/check-runtime-policy.ts",
-    "test": "deno test --allow-env packages/*/test/*.test.ts scripts/*.test.ts",
+    "test": "deno test --allow-env --allow-read --allow-write packages/*/test/*.test.ts scripts/*.test.ts",
     "typecheck": "deno check packages/*/src/index.ts packages/*/test/*.test.ts scripts/*.ts examples/*.ts"
   },
   "compilerOptions": {
