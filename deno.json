@@ -12,7 +12,7 @@
     "conformance:browser": "deno run --allow-env scripts/run-conformance-adapter.ts --mode browser-wasm",
     "examples:check": "deno check examples/*.ts",
     "manifest": "deno run --allow-env scripts/generate-capability-manifest.ts",
-    "browser-bundle-smoke": "deno run --allow-read scripts/check-browser-bundle.ts",
+    "browser-bundle-smoke": "deno run --allow-read scripts/check-browser-bundle.js",
     "public-api": "deno run --allow-read scripts/check-public-api.ts",
     "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts && deno task public-api && deno task browser-bundle-smoke",
     "package-smoke": "deno task build && deno task package-check",

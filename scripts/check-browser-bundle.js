@@ -1,7 +1,7 @@
 const wasmEntrypoint = "packages/wasm/dist/index.js";
 const source = await Deno.readTextFile(wasmEntrypoint);
 
-const forbiddenPatterns: readonly { readonly label: string; readonly pattern: RegExp }[] = [
+const forbiddenPatterns = [
   { label: "Node built-in import", pattern: /\bfrom\s+["']node:/ },
   { label: "dynamic Node built-in import", pattern: /\bimport\s*\(\s*["']node:/ },
   { label: "process usage", pattern: /\bprocess\b/ },
@@ -13,10 +13,7 @@ const failures = forbiddenPatterns
   .filter(({ pattern }) => pattern.test(source))
   .map(({ label }) => `${wasmEntrypoint}: ${label}`);
 
-const moduleExports = await import(new URL("../packages/wasm/dist/index.js", import.meta.url).href) as Record<
-  string,
-  unknown
->;
+const moduleExports = await import(new URL("../packages/wasm/dist/index.js", import.meta.url).href);
 
 for (const exportName of ["openBrowserRuntime", "NnrpBrowserRuntime", "NnrpBrowserClient"]) {
   if (!(exportName in moduleExports)) {
