@@ -3,6 +3,7 @@ import {
   createTransportCandidates,
   createTransportSelectionSummary,
   type NnrpCancelOptions,
+  type NnrpCancelRequest,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
@@ -101,6 +102,16 @@ export interface NnrpNativeSubmitResultCompactRequest {
   readonly maxEvents?: number;
 }
 
+export interface NnrpNativeSubmitNoWaitRequest {
+  readonly sessionOptions: NnrpSessionOptions;
+  readonly submit: NnrpNormalizedSubmitRequest;
+}
+
+export interface NnrpNativeCancelRequest {
+  readonly sessionOptions: NnrpSessionOptions;
+  readonly cancel: NnrpCancelRequest;
+}
+
 export interface NnrpNativeEventBatchRequest {
   readonly maxEvents: number;
 }
@@ -109,6 +120,8 @@ export interface NnrpNativeFfiBinding {
   readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
   submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
+  submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
+  cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
   awaitEvents?(
     request: NnrpNativeEventBatchRequest,
   ): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
@@ -273,6 +286,26 @@ export class NnrpBackendRuntime {
     return Promise.resolve(submitResultCompact(request));
   }
 
+  public submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint> {
+    this.#ensureOpen();
+    const submitNoWait = this.#binding.ffi?.submitNoWait;
+    if (submitNoWait === undefined) {
+      return Promise.reject(bindingNotConnectedError("submitNoWait"));
+    }
+
+    return Promise.resolve(submitNoWait(request));
+  }
+
+  public cancel(request: NnrpNativeCancelRequest): Promise<void> {
+    this.#ensureOpen();
+    const cancel = this.#binding.ffi?.cancel;
+    if (cancel === undefined) {
+      return Promise.reject(bindingNotConnectedError("cancel"));
+    }
+
+    return Promise.resolve(cancel(request));
+  }
+
   public async awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]> {
     this.#ensureOpen();
     const awaitEvents = this.#binding.ffi?.awaitEvents;
@@ -423,25 +456,33 @@ export class NnrpClientSession {
   }
 
   public submitNoWait(request: NnrpSubmitRequest): Promise<bigint> {
+    let normalized: NnrpNormalizedSubmitRequest;
     try {
       this.#ensureOpen();
-      normalizeSubmitRequest(request);
+      normalized = normalizeSubmitRequest(request);
     } catch (error) {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotConnectedError("submitNoWait"));
+    return this.#state.client.runtime.submitNoWait({
+      sessionOptions: this.#state.options,
+      submit: normalized,
+    });
   }
 
   public cancel(operation: NnrpOperationRef, options: NnrpCancelOptions = {}): Promise<void> {
+    let normalized: NnrpCancelRequest;
     try {
       this.#ensureOpen();
-      normalizeCancelRequest(operation, options);
+      normalized = normalizeCancelRequest(operation, options);
     } catch (error) {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotConnectedError("cancel"));
+    return this.#state.client.runtime.cancel({
+      sessionOptions: this.#state.options,
+      cancel: normalized,
+    });
   }
 
   public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {

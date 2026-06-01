@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -26,6 +26,14 @@ export interface NnrpNativeSubmitResultCompactRequest {
     readonly resultPayload?: Uint8Array;
     readonly maxEvents?: number;
 }
+export interface NnrpNativeSubmitNoWaitRequest {
+    readonly sessionOptions: NnrpSessionOptions;
+    readonly submit: NnrpNormalizedSubmitRequest;
+}
+export interface NnrpNativeCancelRequest {
+    readonly sessionOptions: NnrpSessionOptions;
+    readonly cancel: NnrpCancelRequest;
+}
 export interface NnrpNativeEventBatchRequest {
     readonly maxEvents: number;
 }
@@ -33,6 +41,8 @@ export interface NnrpNativeFfiBinding {
     readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
     submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
+    submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
+    cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     close?(): void | Promise<void>;
 }
@@ -124,6 +134,8 @@ export declare class NnrpBackendRuntime {
     get artifact(): NnrpResolvedNativeArtifact | undefined;
     get bindingMode(): string;
     submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult>;
+    submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint>;
+    cancel(request: NnrpNativeCancelRequest): Promise<void>;
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     connect(options: NnrpConnectOptions): NnrpClient;
     listen(options: NnrpListenOptions): NnrpServer;

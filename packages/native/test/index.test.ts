@@ -174,6 +174,30 @@ Deno.test("@nnrp/native routes submit through coarse submit/result binding when 
   });
 });
 
+Deno.test("@nnrp/native routes no-wait submit and cancel through coarse bindings", async () => {
+  const seen: string[] = [];
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      submitNoWait: ({ submit }) => {
+        seen.push(`submit:${submit.frameId}`);
+        return 99n;
+      },
+      cancel: ({ cancel }) => {
+        seen.push(`cancel:${cancel.operation}:${cancel.options?.reason ?? ""}`);
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  assertEquals(await session.submitNoWait({ frameId: 9 }), 99n);
+  await session.cancel(99n, { reason: "done" });
+  assertEquals(seen, ["submit:9", "cancel:99:done"]);
+});
+
 Deno.test("@nnrp/native routes event polling through coarse batch binding when available", async () => {
   const runtime = await openBackendRuntime({
     env: {},

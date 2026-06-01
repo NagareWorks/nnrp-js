@@ -28,7 +28,7 @@
 - [x] Wrap client handles.
 - [x] Wrap server handles.
 - [x] Wrap session handles.
-- [ ] Wrap operation handles/ids.
+- [x] Wrap operation handles/ids.
 - [x] Probe native runtime capabilities before exposing accelerated runtime paths.
 - [x] Map native status/error objects to `NnrpDiagnostic`.
 - [ ] Ensure finalizers do not hide required explicit close behavior.
