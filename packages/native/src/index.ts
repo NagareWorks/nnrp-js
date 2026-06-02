@@ -433,6 +433,8 @@ export interface NnrpClientSessionState {
 export class NnrpClientSession {
   readonly #state: NnrpClientSessionState;
   readonly #inFlightFrames = new Set<number>();
+  readonly #terminalFrames = new Set<number>();
+  readonly #cancelledOperations = new Set<string>();
   #closed = false;
 
   public constructor(state: NnrpClientSessionState) {
@@ -484,6 +486,7 @@ export class NnrpClientSession {
     try {
       this.#ensureOpen();
       normalized = normalizeCancelRequest(operation, options);
+      this.#beginCancel(normalized.operation);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -491,7 +494,12 @@ export class NnrpClientSession {
     return this.#state.client.runtime.cancel({
       sessionOptions: this.#state.options,
       cancel: normalized,
-    }).finally(() => this.#finishOperation(normalized.operation));
+    }).then(() => {
+      this.#finishOperation(normalized.operation);
+    }).catch((error) => {
+      this.#cancelledOperations.delete(operationKey(normalized.operation));
+      throw error;
+    });
   }
 
   public inFlightFrames(): readonly number[] {
@@ -500,17 +508,19 @@ export class NnrpClientSession {
 
   public completeEvent(event: NnrpRuntimeEvent): void {
     if (event.type === "result") {
-      this.#finishFrame(event.result.frameId);
+      this.#finishTerminalFrame(event.result.frameId);
       return;
     }
 
     if (event.type === "drop") {
-      this.#finishFrame(event.frameId);
+      this.#finishTerminalFrame(event.frameId);
       return;
     }
 
     if (event.type === "close") {
       this.#inFlightFrames.clear();
+      this.#terminalFrames.clear();
+      this.#cancelledOperations.clear();
     }
   }
 
@@ -542,6 +552,8 @@ export class NnrpClientSession {
   public close(): Promise<void> {
     this.#closed = true;
     this.#inFlightFrames.clear();
+    this.#terminalFrames.clear();
+    this.#cancelledOperations.clear();
     return Promise.resolve();
   }
 
@@ -566,6 +578,8 @@ export class NnrpClientSession {
     }
 
     this.#inFlightFrames.add(frameId);
+    this.#terminalFrames.delete(frameId);
+    this.#cancelledOperations.delete(operationKey(frameId));
   }
 
   #finishFrame(frameId: number): void {
@@ -575,12 +589,54 @@ export class NnrpClientSession {
   #finishOperation(operation: NnrpOperationRef): void {
     if (typeof operation === "number") {
       this.#finishFrame(operation);
+      this.#terminalFrames.add(operation);
       return;
     }
 
     if (operation <= BigInt(Number.MAX_SAFE_INTEGER)) {
-      this.#finishFrame(Number(operation));
+      const frameId = Number(operation);
+      this.#finishFrame(frameId);
+      this.#terminalFrames.add(frameId);
     }
+  }
+
+  #beginCancel(operation: NnrpOperationRef): void {
+    const key = operationKey(operation);
+    if (this.#cancelledOperations.has(key)) {
+      throw new NnrpProtocolError({
+        code: "NNRP_OPERATION_CANCEL_DUPLICATE",
+        message: `Operation ${key} has already been cancelled for this session.`,
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    const frameId = operationFrameId(operation);
+    if (frameId !== undefined && this.#terminalFrames.has(frameId)) {
+      throw new NnrpProtocolError({
+        code: "NNRP_OPERATION_TERMINAL",
+        message: `Operation ${key} already reached a terminal state.`,
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    this.#cancelledOperations.add(key);
+  }
+
+  #finishTerminalFrame(frameId: number): void {
+    if (this.#terminalFrames.has(frameId)) {
+      throw new NnrpProtocolError({
+        code: "NNRP_FRAME_TERMINAL_DUPLICATE",
+        message: `Frame ${frameId} already reached a terminal state.`,
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    this.#terminalFrames.add(frameId);
+    this.#finishFrame(frameId);
+    this.#cancelledOperations.delete(operationKey(frameId));
   }
 }
 
@@ -982,6 +1038,22 @@ function nativeArtifactError(code: string, message: string): NnrpCapabilityError
     source: "native",
     retryable: false,
   });
+}
+
+function operationKey(operation: NnrpOperationRef): string {
+  return operation.toString();
+}
+
+function operationFrameId(operation: NnrpOperationRef): number | undefined {
+  if (typeof operation === "number") {
+    return operation;
+  }
+
+  if (operation <= BigInt(Number.MAX_SAFE_INTEGER)) {
+    return Number(operation);
+  }
+
+  return undefined;
 }
 
 type NodePlatform = NodeJS.Platform;

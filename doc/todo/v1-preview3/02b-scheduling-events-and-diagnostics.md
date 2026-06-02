@@ -17,7 +17,7 @@
 - [x] Validate `frameId` uniqueness while in flight.
 - [x] Validate payload ownership rules before calling native/WASM backends.
 - [ ] Map result drops to typed JS errors with diagnostics.
-- [ ] Add tests for submit success, result drop, and close-during-submit.
+- [x] Add tests for submit success, result drop, and close-during-submit.
 - [x] Add tests for malformed request rejection.
 
 ## Cancel and Operation Lifecycle
@@ -25,10 +25,10 @@
 - [x] Add `session.cancel(operationIdOrFrameId, options?)` where supported by runtime artifacts.
 - [x] Preserve cancel scope semantics from the Rust-backed protocol layer.
 - [x] Expose operation states as typed values, not ad hoc strings.
-- [ ] Emit terminal events exactly once.
-- [ ] Reject duplicate cancel attempts with deterministic diagnostics.
+- [x] Emit terminal events exactly once.
+- [x] Reject duplicate cancel attempts with deterministic diagnostics.
 - [x] Add tests for cancel before dispatch.
-- [ ] Add tests for cancel after result and cancel after close.
+- [x] Add tests for cancel after result and cancel after close.
 
 ## Event Delivery
 
@@ -39,7 +39,7 @@
 - [x] Support timeout for event polling.
 - [ ] Support cancellation for event polling.
 - [x] Avoid unbounded event queues.
-- [ ] Add tests for event ordering under multiple in-flight operations.
+- [x] Add tests for event ordering under multiple in-flight operations.
 - [x] Add tests for invalid no-event timeout behavior.
 - [ ] Add tests for successful no-event timeout behavior once runtime polling is implemented.
 

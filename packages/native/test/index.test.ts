@@ -289,6 +289,80 @@ Deno.test("@nnrp/native tracks no-wait frames until cancel or terminal events", 
   assertEquals(session.inFlightFrames(), []);
 });
 
+Deno.test("@nnrp/native rejects duplicate cancel and cancel after terminal events", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      submitNoWait: ({ submit }) => BigInt(submit.frameId),
+      cancel: () => {},
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  await session.submitNoWait({ frameId: 12 });
+  await session.cancel(12);
+  const duplicateCancel = await assertRejects(
+    () => session.cancel(12),
+    NnrpProtocolError,
+  );
+
+  assertEquals(duplicateCancel.diagnostic.code, "NNRP_OPERATION_CANCEL_DUPLICATE");
+
+  await session.submitNoWait({ frameId: 13 });
+  session.completeEvent({ type: "result", result: { frameId: 13 } });
+  const terminalCancel = await assertRejects(
+    () => session.cancel(13),
+    NnrpProtocolError,
+  );
+
+  assertEquals(terminalCancel.diagnostic.code, "NNRP_OPERATION_TERMINAL");
+});
+
+Deno.test("@nnrp/native rejects duplicate terminal events and clears frames on close", async () => {
+  let resolveSubmit: ((result: { readonly frameId: number }) => void) | undefined;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      submitNoWait: ({ submit }) => BigInt(submit.frameId),
+      submitResultCompact: ({ submit }) =>
+        new Promise((resolve) => {
+          resolveSubmit = (result) => resolve(result);
+          if (submit.frameId !== 30) {
+            resolve({ frameId: submit.frameId });
+          }
+        }),
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  await session.submitNoWait({ frameId: 4 });
+  await session.submitNoWait({ frameId: 2 });
+  await session.submitNoWait({ frameId: 3 });
+  assertEquals(session.inFlightFrames(), [2, 3, 4]);
+
+  session.completeEvent({ type: "drop", frameId: 3, diagnostic: diagnostic("NNRP_TEST_DROP") });
+  const duplicateTerminal = assertThrows(
+    () => session.completeEvent({ type: "drop", frameId: 3, diagnostic: diagnostic("NNRP_TEST_DROP_AGAIN") }),
+    NnrpProtocolError,
+  );
+
+  assertEquals(duplicateTerminal.diagnostic.code, "NNRP_FRAME_TERMINAL_DUPLICATE");
+  assertEquals(session.inFlightFrames(), [2, 4]);
+
+  const pending = session.submit({ frameId: 30 });
+  assertEquals(session.inFlightFrames(), [2, 4, 30]);
+  await session.close();
+  assertEquals(session.inFlightFrames(), []);
+  resolveSubmit?.({ frameId: 30 });
+  assertEquals(await pending, { frameId: 30 });
+});
+
 Deno.test("@nnrp/native routes event polling through coarse batch binding when available", async () => {
   const runtime = await openBackendRuntime({
     env: {},
