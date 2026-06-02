@@ -211,6 +211,55 @@ Deno.test("@nnrp/native routes submit through coarse submit/result binding when 
   assertEquals(cacheKey, "kv-block");
 });
 
+Deno.test("@nnrp/native routes submit validation through native bindings", async () => {
+  const seen: string[] = [];
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      validateSubmit: ({ sessionOptions, submit }) => {
+        seen.push(`validate:${sessionOptions.sessionId ?? ""}:${submit.frameId}:${submit.descriptor?.profile ?? ""}`);
+        return {
+          ...submit,
+          metadata: {
+            ...(submit.metadata ?? {}),
+            validated: "native",
+          },
+        };
+      },
+      submitResultCompact: ({ submit }) => {
+        seen.push(`submit:${submit.frameId}:${submit.metadata?.validated ?? ""}`);
+        return { frameId: submit.frameId, metadata: { validated: submit.metadata?.validated ?? "" } };
+      },
+      submitNoWait: ({ submit }) => {
+        seen.push(`submitNoWait:${submit.frameId}:${submit.metadata?.validated ?? ""}`);
+        return BigInt(submit.frameId);
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession({ sessionId: "native-session-a" });
+
+  assertEquals(
+    await session.submit({
+      frameId: 31,
+      descriptor: {
+        profile: "tensor",
+        cache: { key: { kind: "tensor", key: "kv-block" } },
+      },
+    }),
+    { frameId: 31, metadata: { validated: "native" } },
+  );
+  assertEquals(await session.submitNoWait({ frameId: 32, descriptor: { profile: "token" } }), 32n);
+  assertEquals(seen, [
+    "validate:native-session-a:31:tensor",
+    "submit:31:native",
+    "validate:native-session-a:32:token",
+    "submitNoWait:32:native",
+  ]);
+});
+
 Deno.test("@nnrp/native routes no-wait submit and cancel through coarse bindings", async () => {
   const seen: string[] = [];
   const runtime = await openBackendRuntime({
@@ -823,9 +872,17 @@ Deno.test("@nnrp/native rejects direct runtime operations after close", async ()
       }),
     NnrpCapabilityError,
   );
-  assertThrows(
+  await assertRejects(
     () =>
       runtime.submitNoWait({
+        sessionOptions: {},
+        submit: { frameId: 1 },
+      }),
+    NnrpCapabilityError,
+  );
+  await assertRejects(
+    () =>
+      runtime.submitResultCompact({
         sessionOptions: {},
         submit: { frameId: 1 },
       }),

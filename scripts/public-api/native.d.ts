@@ -30,6 +30,10 @@ export interface NnrpNativeSubmitNoWaitRequest {
     readonly sessionOptions: NnrpSessionOptions;
     readonly submit: NnrpNormalizedSubmitRequest;
 }
+export interface NnrpNativeSubmitValidationRequest {
+    readonly sessionOptions: NnrpSessionOptions;
+    readonly submit: NnrpNormalizedSubmitRequest;
+}
 export interface NnrpNativeCancelRequest {
     readonly sessionOptions: NnrpSessionOptions;
     readonly cancel: NnrpCancelRequest;
@@ -46,6 +50,7 @@ export interface NnrpNativeFfiBinding {
     readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
     scoreTransportCandidates?(request: NnrpNativeTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
+    validateSubmit?(request: NnrpNativeSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
     submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;

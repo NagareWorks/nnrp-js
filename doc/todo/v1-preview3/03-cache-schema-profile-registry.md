@@ -13,7 +13,7 @@
 - [x] Add cache lease/version/dependency metadata types.
 - [x] Add cache put/ack/invalidate request/result types where exposed through public APIs.
 - [x] Validate simple shape constraints in TypeScript before calling runtime backends.
-- [ ] Delegate protocol-critical cache descriptor validation to Rust/WASM/native primitives.
+- [x] Delegate protocol-critical cache descriptor validation to Rust/WASM/native primitives.
 - [x] Add tests for cache key normalization and invalid value rejection.
 
 ## Schema Registry

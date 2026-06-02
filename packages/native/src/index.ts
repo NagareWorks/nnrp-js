@@ -120,6 +120,11 @@ export interface NnrpNativeSubmitNoWaitRequest {
   readonly submit: NnrpNormalizedSubmitRequest;
 }
 
+export interface NnrpNativeSubmitValidationRequest {
+  readonly sessionOptions: NnrpSessionOptions;
+  readonly submit: NnrpNormalizedSubmitRequest;
+}
+
 export interface NnrpNativeCancelRequest {
   readonly sessionOptions: NnrpSessionOptions;
   readonly cancel: NnrpCancelRequest;
@@ -141,6 +146,9 @@ export interface NnrpNativeFfiBinding {
   scoreTransportCandidates?(
     request: NnrpNativeTransportScoreRequest,
   ): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
+  validateSubmit?(
+    request: NnrpNativeSubmitValidationRequest,
+  ): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
   submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
@@ -302,24 +310,24 @@ export class NnrpBackendRuntime {
     return this.#binding.ffi?.mode ?? "unbound";
   }
 
-  public submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult> {
+  public async submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult> {
     this.#ensureOpen();
     const submitResultCompact = this.#binding.ffi?.submitResultCompact;
     if (submitResultCompact === undefined) {
-      return Promise.reject(bindingNotConnectedError("submitResultCompact"));
+      throw bindingNotConnectedError("submitResultCompact");
     }
 
-    return Promise.resolve(submitResultCompact(request));
+    return await submitResultCompact(await this.#validateSubmit(request));
   }
 
-  public submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint> {
+  public async submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint> {
     this.#ensureOpen();
     const submitNoWait = this.#binding.ffi?.submitNoWait;
     if (submitNoWait === undefined) {
-      return Promise.reject(bindingNotConnectedError("submitNoWait"));
+      throw bindingNotConnectedError("submitNoWait");
     }
 
-    return Promise.resolve(submitNoWait(request));
+    return await submitNoWait(await this.#validateSubmit(request));
   }
 
   public cancel(request: NnrpNativeCancelRequest): Promise<void> {
@@ -408,6 +416,23 @@ export class NnrpBackendRuntime {
     if (this.#closed) {
       throw closedError("runtime");
     }
+  }
+
+  async #validateSubmit<TRequest extends NnrpNativeSubmitValidationRequest>(request: TRequest): Promise<TRequest> {
+    const validateSubmit = this.#binding.ffi?.validateSubmit;
+    if (validateSubmit === undefined) {
+      return request;
+    }
+
+    const validated = await validateSubmit(request);
+    if (validated === undefined) {
+      return request;
+    }
+
+    return {
+      ...request,
+      submit: validated,
+    };
   }
 
   #createTransportCandidates(options: NnrpTransportSelectionOptions): readonly NnrpTransportCandidate[] {
