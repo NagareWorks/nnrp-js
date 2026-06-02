@@ -47,10 +47,10 @@
 
 ## Release Artifact Shape
 
-- [ ] Decide npm package versioning policy for preview builds.
+- [x] Decide npm package versioning policy for preview builds.
 - [x] Ensure package versions are synchronized or explicitly independent.
-- [ ] Decide whether native artifacts are bundled, optional peer artifacts, or downloaded by package policy.
-- [ ] Decide whether WASM assets are bundled or externally injected by package policy.
+- [x] Decide whether native artifacts are bundled, optional peer artifacts, or downloaded by package policy.
+- [x] Decide whether WASM assets are bundled or externally injected by package policy.
 - [x] Document supported Node versions.
 - [x] Document supported browser baseline.
 - [x] Add release dry-run workflow before enabling publish.

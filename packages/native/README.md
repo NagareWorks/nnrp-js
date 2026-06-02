@@ -8,3 +8,7 @@ implementation matures.
 
 The package includes TypeScript declaration files. JavaScript consumers can use the runtime API directly without
 installing a separate type package.
+
+Native artifacts are policy-injected during the preview phase. Consumers can pass an explicit library path, an artifact
+directory, or a test/adapter FFI binding; the package does not bundle platform libraries until the release artifact
+matrix is frozen.

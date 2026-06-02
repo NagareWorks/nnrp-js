@@ -3,6 +3,7 @@
   "version": "0.1.0-preview.0",
   "description": "Shared TypeScript primitives for NNRP.",
   "type": "module",
+  "private": true,
   "license": "Apache-2.0",
   "exports": {
     ".": {

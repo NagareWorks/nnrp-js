@@ -18,7 +18,7 @@
 - [x] Add package export maps for ESM runtime entrypoints.
 - [x] Add package export maps for `.d.ts` type entrypoints.
 - [ ] Add package export maps for future subpath exports.
-- [ ] Add package metadata that clearly marks unpublished/internal packages as private until release gates pass.
+- [x] Add package metadata that clearly marks unpublished/internal packages as private until release gates pass.
 
 ## Build Modes
 

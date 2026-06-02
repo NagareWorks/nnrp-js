@@ -74,3 +74,11 @@ Examples use package entrypoint names through the repository import map. They ar
 
 This repository is being bootstrapped for Preview3-era SDK integration. Public package publishing is intentionally
 deferred until the package names, native artifact matrix, and WASM distribution shape are frozen.
+
+Preview package versions are synchronized across `@nnrp/core`, `@nnrp/native`, and `@nnrp/wasm` until the first npm
+publication. Package manifests stay `private: true` while release gates are dry-run only.
+
+Native artifacts are not bundled in the JavaScript package yet. `@nnrp/native` accepts explicit library paths, artifact
+directories, or injected FFI bindings so services can choose local packaging policy without forcing one npm asset
+layout. WASM assets are likewise injected by URL, manifest, or precompiled `WebAssembly.Module` until the browser asset
+policy is frozen.

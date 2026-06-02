@@ -58,6 +58,10 @@ function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string,
   if (packageJson.type !== "module") {
     failures.push(`${policy.name}: package.json type must be module`);
   }
+
+  if (packageJson.private !== true) {
+    failures.push(`${policy.name}: package.json must stay private until release gates are enabled`);
+  }
 }
 
 if (failures.length > 0) {
