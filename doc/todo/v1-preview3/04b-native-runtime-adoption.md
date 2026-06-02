@@ -69,9 +69,9 @@
 
 ## Native Package Gates
 
-- [ ] Packed native package contains native loader and runtime wrappers.
-- [ ] Packed native package contains client and server APIs.
-- [ ] Packed native package does not contain browser transport implementation files.
-- [ ] Packed native package does not import DOM globals.
-- [ ] CI runs Node import smoke for `@nnrp/native`.
-- [ ] CI runs Deno tooling smoke without adding Deno-specific runtime API dependencies.
+- [x] Packed native package contains native loader and runtime wrappers.
+- [x] Packed native package contains client and server APIs.
+- [x] Packed native package does not contain browser transport implementation files.
+- [x] Packed native package does not import DOM globals.
+- [x] CI runs Node import smoke for `@nnrp/native`.
+- [x] CI runs Deno tooling smoke without adding Deno-specific runtime API dependencies.
