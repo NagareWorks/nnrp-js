@@ -5,6 +5,7 @@ import {
   createConformanceReport,
   parseCommandOptions,
   selectBuildModes,
+  writeJson,
 } from "./sdk-reporting.ts";
 
 Deno.test("sdk reporting creates build-mode-specific manifests", () => {
@@ -54,6 +55,24 @@ Deno.test("sdk reporting rejects unknown modes", () => {
   assertThrows(() => parseCommandOptions(["--mode", "preview3"]));
 });
 
-Deno.test("sdk reporting selects all build modes", () => {
+Deno.test("sdk reporting selects requested build modes", () => {
   assertEquals(selectBuildModes("all"), ["backend-native", "browser-wasm"]);
+  assertEquals(selectBuildModes("backend-native"), ["backend-native"]);
+  assertEquals(selectBuildModes("browser-wasm"), ["browser-wasm"]);
+});
+
+Deno.test("sdk reporting writes JSON to stdout", () => {
+  const original = console.log;
+  const lines: string[] = [];
+  try {
+    console.log = (value: string) => {
+      lines.push(value);
+    };
+
+    writeJson({ sdk: "nnrp-js" });
+  } finally {
+    console.log = original;
+  }
+
+  assertEquals(lines, ['{\n  "sdk": "nnrp-js"\n}']);
 });

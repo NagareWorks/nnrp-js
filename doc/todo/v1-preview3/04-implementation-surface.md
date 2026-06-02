@@ -27,8 +27,8 @@
 
 ## Cross-Package Test Strategy
 
-- [ ] Unit-test `@nnrp/core` without native/WASM artifacts.
-- [ ] Unit-test `@nnrp/native` with fake native binding handles.
-- [ ] Unit-test `@nnrp/wasm` with fake WASM primitives.
+- [x] Unit-test `@nnrp/core` without native/WASM artifacts.
+- [x] Unit-test `@nnrp/native` with fake native binding handles.
+- [x] Unit-test `@nnrp/wasm` with fake WASM primitives.
 - [ ] Add integration tests only after real artifacts are available in CI.
-- [ ] Keep tests deterministic without network access unless they are explicitly adapter/conformance tests.
+- [x] Keep tests deterministic without network access unless they are explicitly adapter/conformance tests.

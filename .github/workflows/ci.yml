@@ -168,6 +168,8 @@ jobs:
         run: deno task typecheck
       - name: Test
         run: deno task test
+      - name: Coverage
+        run: deno task coverage
       - name: Build
         run: deno task build
       - name: Package entrypoint smoke

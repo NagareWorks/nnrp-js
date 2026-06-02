@@ -84,6 +84,19 @@ Deno.test("@nnrp/wasm uses artifact URLs unless a caller injects a module URL", 
   assertEquals(explicitBinding.moduleUrl, "/custom/nnrp.wasm");
 });
 
+Deno.test("@nnrp/wasm resolves absolute and default artifact URLs", () => {
+  const absolute = resolveWasmArtifact({
+    manifest: { ...wasmManifest(), wasm: "https://cdn.example.test/nnrp_wasm.wasm" },
+    baseUrl: "/assets/ignored",
+  });
+  const defaultBase = resolveWasmArtifact({
+    manifest: wasmManifest(),
+  });
+
+  assertEquals(absolute.moduleUrl, "https://cdn.example.test/nnrp_wasm.wasm");
+  assertEquals(defaultBase.moduleUrl, "nnrp_wasm.wasm");
+});
+
 Deno.test("@nnrp/wasm preserves injected browser transport providers", () => {
   const provider = createBrowserTransportProvider("websocket", { available: true, score: 42 });
   const binding = createWasmRuntimeBinding({ transportProviders: [provider] });
@@ -100,8 +113,11 @@ Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
   const session = client.openSession({ metadata: { request: "one" } });
 
   assertEquals(runtime.moduleUrl, "/assets/nnrp.wasm");
+  assertEquals(runtime.manifest.buildMode, "browser-wasm");
+  assertEquals(runtime.artifact, undefined);
   assertEquals(client.endpoint, "wss://example.test/nnrp");
   assertEquals(client.transportPolicy, "score");
+  assertEquals(client.runtime, runtime);
   assertEquals(session.options.inputProfile, "token");
   assertEquals(session.options.metadata, { app: "browser", request: "one" });
 });
@@ -170,6 +186,24 @@ Deno.test("@nnrp/wasm rejects use after close", async () => {
   );
 });
 
+Deno.test("@nnrp/wasm rejects client and session operations after close", async () => {
+  const runtime = await openBrowserRuntime();
+  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
+  await client.close();
+
+  assertThrows(() => client.openSession(), NnrpCapabilityError);
+
+  const runtime2 = await openBrowserRuntime();
+  const session = runtime2.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+  await session.close();
+
+  assertEquals(session.closed, true);
+  await assertRejects(
+    () => session.submit({ frameId: 1 }),
+    NnrpCapabilityError,
+  );
+});
+
 Deno.test("@nnrp/wasm session methods preserve not-instantiated diagnostics", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
@@ -228,6 +262,54 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
   if (event.type === "diagnostic") {
     assertEquals(event.diagnostic.code, "NNRP_WASM_TEST_EVENTS_1");
   }
+});
+
+Deno.test("@nnrp/wasm closes injected primitives", async () => {
+  let closed = false;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      close: () => {
+        closed = true;
+      },
+    },
+  });
+
+  await runtime.close();
+
+  assertEquals(closed, true);
+  assertEquals(runtime.closed, true);
+});
+
+Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for direct missing operations", async () => {
+  const runtime = await openBrowserRuntime();
+
+  await assertRejects(
+    () => runtime.submit({ sessionOptions: {}, submit: { frameId: 1 } }),
+    NnrpWasmBindingUnavailableError,
+  );
+  await assertRejects(
+    () => runtime.cancel({ sessionOptions: {}, cancel: { operation: 1n } }),
+    NnrpWasmBindingUnavailableError,
+  );
+  await assertRejects(
+    () => runtime.awaitEvents({ maxEvents: 1 }),
+    NnrpWasmBindingUnavailableError,
+  );
+});
+
+Deno.test("@nnrp/wasm treats empty event batches as unavailable next events", async () => {
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: () => [],
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  await assertRejects(
+    () => session.nextEvent(),
+    NnrpWasmBindingUnavailableError,
+    "nextEvent",
+  );
 });
 
 Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () => {

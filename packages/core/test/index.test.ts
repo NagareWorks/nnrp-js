@@ -11,6 +11,8 @@ import {
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
   NnrpProtocolError,
+  NnrpTimeoutError,
+  NnrpTransportError,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
   normalizeCancelRequest,
@@ -234,6 +236,80 @@ Deno.test("@nnrp/core rejects invalid cache leases and metadata boundaries", () 
     NnrpProtocolError,
     "Metadata values must be at most",
   );
+  assertThrows(
+    () =>
+      validateSessionMetadata({
+        metadata: Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`k${index}`, "v"])),
+      }),
+    NnrpProtocolError,
+    "Metadata maps must contain at most",
+  );
+});
+
+Deno.test("@nnrp/core rejects invalid cache and schema edge cases", () => {
+  assertThrows(
+    () => createCacheKey("unknown" as never, "key"),
+    NnrpProtocolError,
+    "Unsupported NNRP cache object kind",
+  );
+  assertThrows(
+    () => createCacheKey("tensor", " "),
+    NnrpProtocolError,
+    "Cache key strings must not be empty",
+  );
+  assertThrows(
+    () => createCacheKey("tensor", 1, -1),
+    NnrpProtocolError,
+    "namespaceId must be a non-negative",
+  );
+  assertThrows(
+    () =>
+      createSchemaDescriptor({
+        id: "tensor-frame",
+        name: "TensorFrame",
+        version: "1",
+        flags: ["unsupported" as never],
+      }),
+    NnrpProtocolError,
+    "Unsupported schema flag",
+  );
+});
+
+Deno.test("@nnrp/core covers transport diagnostics and optional descriptor fields", () => {
+  const diagnostic = {
+    code: "NNRP_TRANSPORT_PROBE",
+    message: "probe failed",
+    source: "transport" as const,
+    retryable: true,
+    transport: "quic" as const,
+  };
+  const summary = createTransportSelectionSummary(selectTransport([{
+    kind: "quic",
+    peerSupported: true,
+    localAvailable: true,
+    score: 100,
+    rejectionReason: "probe-failed",
+    diagnostic,
+  }]));
+  const normalized = normalizeSubmitRequest({
+    frameId: 12,
+    metadata: { request: "agent" },
+    descriptor: {
+      profile: "token",
+      metadata: { format: "delta" },
+      cache: {
+        key: createCacheKey("token", "stream"),
+        version: "1",
+        dependencies: [createCacheKey("schema", "token-delta")],
+      },
+    },
+  });
+
+  assertEquals(summary.selected, null);
+  assertEquals(summary.rejected[0]?.diagnostic, diagnostic);
+  assertEquals(normalized.metadata, { request: "agent" });
+  assertEquals(normalized.descriptor?.metadata, { format: "delta" });
+  assertEquals(normalized.descriptor?.cache?.dependencies?.[0]?.kind, "schema");
 });
 
 Deno.test("@nnrp/core exposes strict standard profile checks", () => {
@@ -249,6 +325,11 @@ Deno.test("@nnrp/core normalizes operation references and cancel requests", () =
     options: { reason: "user", metadata: { source: "test" } },
   });
 
+  assertThrows(
+    () => normalizeOperationRef(-1n),
+    NnrpProtocolError,
+    "Operation ids must be non-negative",
+  );
   assertThrows(
     () => normalizeOperationRef(-1),
     NnrpProtocolError,
@@ -278,4 +359,12 @@ Deno.test("@nnrp/core keeps diagnostics on typed errors", () => {
   assertInstanceOf(error, Error);
   assertEquals(error.name, "NnrpProtocolError");
   assertEquals(error.diagnostic.source, "protocol");
+  assertEquals(
+    new NnrpTransportError({ code: "NNRP_TRANSPORT", message: "transport", source: "transport" }).name,
+    "NnrpTransportError",
+  );
+  assertEquals(
+    new NnrpTimeoutError({ code: "NNRP_TIMEOUT", message: "timeout", source: "runtime" }).name,
+    "NnrpTimeoutError",
+  );
 });

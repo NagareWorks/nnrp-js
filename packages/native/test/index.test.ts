@@ -2,9 +2,11 @@ import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import { createCapabilityManifest, NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
 import {
   createNativeRuntimeBinding,
+  NnrpBackendRuntime,
   type NnrpNativeArtifactManifest,
   NnrpNativeBindingUnavailableError,
   type NnrpNativeRuntimeCapabilities,
+  NnrpServerSession,
   openBackendRuntime,
   openNativeClient,
   resolveNativeArtifact,
@@ -268,6 +270,27 @@ Deno.test("@nnrp/native opens a client-first native client", async () => {
   assertEquals(session.options.metadata, { app: "agent", request: "one" });
 });
 
+Deno.test("@nnrp/native closes runtime when client connect fails", async () => {
+  let closed = false;
+
+  await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "",
+        env: {},
+        ffi: {
+          mode: "test",
+          close: () => {
+            closed = true;
+          },
+        },
+      }),
+    NnrpCapabilityError,
+  );
+
+  assertEquals(closed, true);
+});
+
 Deno.test("@nnrp/native exposes backend runtime connect and listen lifecycles", async () => {
   const runtime = await openBackendRuntime({ env: {}, platform: "linux", arch: "x64", transportPolicy: "tcp-only" });
   const client = runtime.connect({ endpoint: new URL("nnrp://localhost:4433") });
@@ -280,6 +303,28 @@ Deno.test("@nnrp/native exposes backend runtime connect and listen lifecycles", 
   await runtime.close();
   assertEquals(client.closed, true);
   assertEquals(server.closed, true);
+});
+
+Deno.test("@nnrp/native exposes runtime artifact getters from packaged manifests", async () => {
+  const root = await Deno.makeTempDir();
+  const packageDir = `${root}/linux-x86_64`;
+  await Deno.mkdir(packageDir);
+  await Deno.writeTextFile(`${packageDir}/libnnrp_ffi.so`, "fake");
+  await Deno.writeTextFile(`${packageDir}/manifest.json`, JSON.stringify(nativeManifest(), null, 2));
+
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    nativeLibrary: { artifactDir: root },
+  });
+
+  assertEquals(runtime.manifest.buildMode, "backend-native");
+  assertEquals(runtime.artifact?.packageName, "linux-x86_64");
+  assertEquals(runtime.libraryPath.endsWith("libnnrp_ffi.so"), true);
+
+  await runtime.close();
+  await Deno.remove(root, { recursive: true });
 });
 
 Deno.test("@nnrp/native selects transports from local and peer manifests", async () => {
@@ -315,6 +360,27 @@ Deno.test("@nnrp/native rejects use after close", async () => {
   );
 });
 
+Deno.test("@nnrp/native rejects direct runtime operations after close", async () => {
+  const runtime = await openBackendRuntime({ env: {}, ffi: { mode: "test" } });
+  await runtime.close();
+
+  assertThrows(
+    () =>
+      runtime.connect({
+        endpoint: "127.0.0.1:4433",
+      }),
+    NnrpCapabilityError,
+  );
+  assertThrows(
+    () =>
+      runtime.submitNoWait({
+        sessionOptions: {},
+        submit: { frameId: 1 },
+      }),
+    NnrpCapabilityError,
+  );
+});
+
 Deno.test("@nnrp/native session methods preserve not-connected diagnostics", async () => {
   const client = await openNativeClient({ endpoint: "127.0.0.1:4433", env: {} });
   const session = client.openSession();
@@ -325,6 +391,23 @@ Deno.test("@nnrp/native session methods preserve not-connected diagnostics", asy
   );
 
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_BINDING_NOT_CONNECTED");
+});
+
+Deno.test("@nnrp/native preserves not-connected diagnostics for direct missing operations", async () => {
+  const runtime = await openBackendRuntime({ env: {} });
+
+  await assertRejects(
+    () => runtime.submitNoWait({ sessionOptions: {}, submit: { frameId: 1 } }),
+    NnrpNativeBindingUnavailableError,
+  );
+  await assertRejects(
+    () => runtime.cancel({ sessionOptions: {}, cancel: { operation: 1n } }),
+    NnrpNativeBindingUnavailableError,
+  );
+  await assertRejects(
+    () => runtime.awaitEvents({ maxEvents: 1 }),
+    NnrpNativeBindingUnavailableError,
+  );
 });
 
 Deno.test("@nnrp/native validates submit requests before native dispatch", async () => {
@@ -364,6 +447,34 @@ Deno.test("@nnrp/native validates cancel and event polling before native dispatc
 
   assertEquals(cancelError.diagnostic.code, "NNRP_OPERATION_ID_INVALID");
   assertEquals(eventError.diagnostic.code, "NNRP_EVENT_TIMEOUT_INVALID");
+});
+
+Deno.test("@nnrp/native covers server and server-session placeholders", async () => {
+  const runtime = new NnrpBackendRuntime(createNativeRuntimeBinding({ env: {} }));
+  const server = runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "tcp-only" });
+  const serverSession = new NnrpServerSession();
+
+  assertEquals(server.endpoint, "0.0.0.0:4433");
+  assertEquals(server.transportPolicy, "tcp-only");
+  await assertRejects(() => server.accept(), NnrpNativeBindingUnavailableError);
+  await assertRejects(() => serverSession.receive(), NnrpNativeBindingUnavailableError);
+  await assertRejects(() => serverSession.sendResult({ frameId: 1 }), NnrpNativeBindingUnavailableError);
+
+  await server.close();
+  await serverSession.close();
+  assertEquals(server.closed, true);
+  assertEquals(serverSession.closed, true);
+  assertThrows(() => server.accept(), NnrpCapabilityError);
+  assertThrows(() => serverSession.sendResult({ frameId: 1 }), NnrpCapabilityError);
+});
+
+Deno.test("@nnrp/native rejects server-session invalid receive options before dispatch", async () => {
+  const serverSession = new NnrpServerSession();
+
+  await assertRejects(
+    () => serverSession.receive({ timeoutMillis: -1 }),
+    NnrpProtocolError,
+  );
 });
 
 Deno.test("@nnrp/native exposes async event iterator convenience", async () => {

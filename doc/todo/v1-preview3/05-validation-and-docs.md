@@ -16,7 +16,7 @@
 - [x] Add package export snapshot check.
 - [x] Add runtime-policy checks for core/native/wasm import boundaries.
 - [x] Add content-policy checks for docs and examples.
-- [ ] Add coverage gate once implementation tests cover real logic.
+- [x] Add coverage gate once implementation tests cover real logic.
 
 ## Conformance
 
