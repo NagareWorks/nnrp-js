@@ -41,7 +41,7 @@
 - [x] Avoid unbounded event queues.
 - [x] Add tests for event ordering under multiple in-flight operations.
 - [x] Add tests for invalid no-event timeout behavior.
-- [ ] Add tests for successful no-event timeout behavior once runtime polling is implemented.
+- [x] Add tests for successful no-event timeout behavior once runtime polling is implemented.
 
 ## Flow Control and Backpressure
 

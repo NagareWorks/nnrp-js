@@ -397,6 +397,109 @@ Deno.test("@nnrp/native routes event polling through coarse batch binding when a
   }
 });
 
+Deno.test("@nnrp/native maps empty timed event polling to timeout diagnostics", async () => {
+  let seenTimeout: number | undefined;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: ({ timeoutMillis }) => {
+        seenTimeout = timeoutMillis;
+        return [];
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  const error = await assertRejects(
+    () => session.nextEvent({ timeoutMillis: 5 }),
+    NnrpTimeoutError,
+  );
+
+  assertEquals(seenTimeout, 5);
+  assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_TIMEOUT");
+  assertEquals(error.diagnostic.source, "native");
+  assertEquals(error.diagnostic.retryable, true);
+});
+
+Deno.test("@nnrp/native times out pending event polling without backend completion", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: () => new Promise<readonly NnrpRuntimeEvent[]>(() => {}),
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  const error = await assertRejects(
+    () => session.nextEvent({ timeoutMillis: 0 }),
+    NnrpTimeoutError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_TIMEOUT");
+  assertEquals(error.diagnostic.source, "native");
+});
+
+Deno.test("@nnrp/native keeps timed event polling result and error paths stable", async () => {
+  let pollCount = 0;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: () => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return [{ type: "diagnostic", diagnostic: diagnostic("NNRP_TEST_TIMED_EVENT") }];
+        }
+
+        throw new Error("backend poll failed");
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  assertEquals(await session.nextEvent({ timeoutMillis: 50 }), {
+    type: "diagnostic",
+    diagnostic: diagnostic("NNRP_TEST_TIMED_EVENT"),
+  });
+  await assertRejects(
+    () => session.nextEvent({ timeoutMillis: 50 }),
+    Error,
+    "backend poll failed",
+  );
+});
+
+Deno.test("@nnrp/native cancels timed event polling with abort signals", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: () => new Promise<readonly NnrpRuntimeEvent[]>(() => {}),
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+  const controller = new AbortController();
+  const pending = session.nextEvent({ timeoutMillis: 1000, signal: controller.signal });
+  controller.abort("timed");
+
+  const error = await assertRejects(
+    () => pending,
+    NnrpTimeoutError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_CANCELLED");
+  assertEquals(error.diagnostic.cause, "timed");
+});
+
 Deno.test("@nnrp/native maps result polling drops to typed errors", async () => {
   let pollCount = 0;
   const runtime = await openBackendRuntime({

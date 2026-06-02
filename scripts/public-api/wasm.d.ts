@@ -59,6 +59,7 @@ export interface NnrpWasmSubmitNoWaitRequest {
 }
 export interface NnrpWasmEventBatchRequest {
     readonly maxEvents: number;
+    readonly timeoutMillis?: number;
 }
 export interface NnrpWasmProtocolVersion {
     readonly protocolMajor: number;

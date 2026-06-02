@@ -104,6 +104,7 @@ export interface NnrpWasmSubmitNoWaitRequest {
 
 export interface NnrpWasmEventBatchRequest {
   readonly maxEvents: number;
+  readonly timeoutMillis?: number;
 }
 
 export interface NnrpWasmProtocolVersion {
@@ -382,8 +383,17 @@ export class NnrpBrowserClient {
     }
 
     while (true) {
-      const events = await raceEventPoll(this.#state.runtime.awaitEvents({ maxEvents: 16 }), options.signal);
+      const events = await raceEventPoll(
+        this.#state.runtime.awaitEvents({
+          maxEvents: 16,
+          ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
+        }),
+        options,
+      );
       if (events.length === 0) {
+        if (options.timeoutMillis !== undefined) {
+          throw eventPollTimeoutError("wasm");
+        }
         throw bindingNotInstantiatedError("nextEvent");
       }
 
@@ -836,7 +846,16 @@ function bindingNotInstantiatedError(operation: string): NnrpWasmBindingUnavaila
   });
 }
 
-function raceEventPoll<T>(promise: Promise<T>, signal: NnrpAbortSignalLike | undefined): Promise<T> {
+function raceEventPoll<T>(promise: Promise<T>, options: NnrpEventPollOptions): Promise<T> {
+  if (options.signal?.aborted) {
+    return Promise.reject(eventPollCancelledError(options.signal));
+  }
+
+  if (options.timeoutMillis !== undefined) {
+    return raceEventTimeout(promise, options.timeoutMillis, "wasm", options.signal);
+  }
+
+  const signal = options.signal;
   if (signal === undefined || signal.addEventListener === undefined || signal.removeEventListener === undefined) {
     return promise;
   }
@@ -852,13 +871,62 @@ function raceEventPoll<T>(promise: Promise<T>, signal: NnrpAbortSignalLike | und
   });
 }
 
-function eventPollCancelledError(signal: NnrpAbortSignalLike): NnrpTimeoutError {
+function raceEventTimeout<T>(
+  promise: Promise<T>,
+  timeoutMillis: number,
+  source: "wasm",
+  signal: NnrpAbortSignalLike | undefined,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      settled = true;
+      reject(eventPollTimeoutError(source));
+    }, timeoutMillis);
+    const onAbort = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(eventPollCancelledError(signal));
+      }
+    };
+
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(value);
+        }
+      },
+      (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(error);
+        }
+      },
+    ).finally(() => signal?.removeEventListener?.("abort", onAbort));
+  });
+}
+
+function eventPollTimeoutError(source: "wasm"): NnrpTimeoutError {
+  return new NnrpTimeoutError({
+    code: "NNRP_EVENT_POLL_TIMEOUT",
+    message: "Event polling timed out without receiving an event.",
+    source,
+    retryable: true,
+  });
+}
+
+function eventPollCancelledError(signal: NnrpAbortSignalLike | undefined): NnrpTimeoutError {
   return new NnrpTimeoutError({
     code: "NNRP_EVENT_POLL_CANCELLED",
     message: "Event polling was cancelled.",
     source: "runtime",
     retryable: false,
-    cause: signal.reason,
+    cause: signal?.reason,
   });
 }
 

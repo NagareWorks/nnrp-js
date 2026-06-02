@@ -369,6 +369,46 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
   }
 });
 
+Deno.test("@nnrp/wasm maps empty timed event polling to timeout diagnostics", async () => {
+  let seenTimeout: number | undefined;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: ({ timeoutMillis }) => {
+        seenTimeout = timeoutMillis;
+        return [];
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  const error = await assertRejects(
+    () => session.nextEvent({ timeoutMillis: 5 }),
+    NnrpTimeoutError,
+  );
+
+  assertEquals(seenTimeout, 5);
+  assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_TIMEOUT");
+  assertEquals(error.diagnostic.source, "wasm");
+  assertEquals(error.diagnostic.retryable, true);
+});
+
+Deno.test("@nnrp/wasm times out pending event polling without backend completion", async () => {
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: () => new Promise<readonly NnrpRuntimeEvent[]>(() => {}),
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  const error = await assertRejects(
+    () => session.nextEvent({ timeoutMillis: 0 }),
+    NnrpTimeoutError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_TIMEOUT");
+  assertEquals(error.diagnostic.source, "wasm");
+});
+
 Deno.test("@nnrp/wasm routes events by session id across shared runtimes", async () => {
   let pollCount = 0;
   const runtime = await openBrowserRuntime({

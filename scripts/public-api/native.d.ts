@@ -36,6 +36,7 @@ export interface NnrpNativeCancelRequest {
 }
 export interface NnrpNativeEventBatchRequest {
     readonly maxEvents: number;
+    readonly timeoutMillis?: number;
 }
 export interface NnrpNativeTransportScoreRequest {
     readonly candidates: readonly NnrpTransportCandidate[];
