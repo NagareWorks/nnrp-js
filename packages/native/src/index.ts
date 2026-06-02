@@ -1,10 +1,12 @@
 import {
   createBackendNativeManifest,
+  createCapabilityManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
   type NnrpAbortSignalLike,
   type NnrpCancelOptions,
   type NnrpCancelRequest,
+  type NnrpCapability,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
@@ -34,8 +36,10 @@ const EXPECTED_PROTOCOL_MAJOR = 1;
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 1;
 const MINIMUM_ABI_MINOR = 5;
+const TRANSPORT_SLOT_QUIC = 0x00000001;
 const TRANSPORT_SLOT_TCP = 0x00000002;
 const REQUIRED_TRANSPORT_SLOTS = TRANSPORT_SLOT_TCP;
+const NATIVE_RUNTIME_CAPABILITIES = ["cache", "schema", "recovery", "flow.update", "result.hint"] as const;
 const RUNTIME_FEATURE_PROTOCOL_CORE = 0x0000000000000001n;
 const RUNTIME_FEATURE_CLIENT_API = 0x0000000000000002n;
 const RUNTIME_FEATURE_SERVER_API = 0x0000000000000004n;
@@ -245,7 +249,10 @@ export async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}
   return new NnrpBackendRuntime(
     {
       ...binding,
-      ...(runtimeCapabilities === undefined ? {} : { runtimeCapabilities }),
+      ...(runtimeCapabilities === undefined ? {} : {
+        manifest: createNativeRuntimeManifest(runtimeCapabilities),
+        runtimeCapabilities,
+      }),
     },
     options.transportPolicy ?? "score",
   );
@@ -784,12 +791,42 @@ export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {
   const requiredSymbols = requiredNativeSymbols(options.nativeLibrary);
 
   return {
-    manifest: createBackendNativeManifest(["cache", "schema", "recovery", "flow.update", "result.hint"]),
+    manifest: createNativeRuntimeManifest(),
     libraryPath: artifact?.libraryPath ?? explicit ?? resolveNativeLibraryPath(options),
     requiredSymbols,
     ...(artifact === null ? {} : { artifact }),
     ...(options.ffi === undefined ? {} : { ffi: options.ffi }),
   };
+}
+
+function createNativeRuntimeManifest(capabilities?: NnrpNativeRuntimeCapabilities): NnrpCapabilityManifest {
+  if (capabilities === undefined) {
+    return createBackendNativeManifest(NATIVE_RUNTIME_CAPABILITIES);
+  }
+
+  return createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: nativeTransportsFromSlots(capabilities.transportSlots),
+    capabilities: [
+      "client.session",
+      "server.session",
+      "native.loader",
+      ...NATIVE_RUNTIME_CAPABILITIES,
+    ] satisfies readonly NnrpCapability[],
+  });
+}
+
+function nativeTransportsFromSlots(slots: number): readonly NnrpTransportKind[] {
+  const transports: NnrpTransportKind[] = [];
+  if ((slots & TRANSPORT_SLOT_TCP) !== 0) {
+    transports.push("tcp");
+  }
+
+  if ((slots & TRANSPORT_SLOT_QUIC) !== 0) {
+    transports.push("quic");
+  }
+
+  return transports;
 }
 
 function resolveExplicitNativeLibraryPath(options: NnrpNativeBindingOptions): string | undefined {

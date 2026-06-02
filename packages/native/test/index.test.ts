@@ -516,6 +516,59 @@ Deno.test("@nnrp/native selects transports from local and peer manifests", async
   assertEquals(summary.rejected.map((candidate) => candidate.reason), ["peer-unsupported", "policy-rejected"]);
 });
 
+Deno.test("@nnrp/native narrows transport manifest from runtime capability slots", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    transportPolicy: "quic-only",
+    ffi: {
+      mode: "test",
+      runtimeCapabilities: () => nativeCapabilities(),
+    },
+  });
+  const summary = runtime.selectTransport({
+    peerManifest: createCapabilityManifest({
+      buildMode: "backend-native",
+      transports: ["quic"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(runtime.manifest.transports, ["tcp"]);
+  assertEquals(summary.selected, null);
+  assertEquals(summary.rejected.map((candidate) => [candidate.kind, candidate.reason]), [
+    ["quic", "local-unavailable"],
+    ["tcp", "peer-unsupported"],
+  ]);
+});
+
+Deno.test("@nnrp/native keeps QUIC available when the native runtime exposes the QUIC slot", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    transportPolicy: "quic-only",
+    ffi: {
+      mode: "test",
+      runtimeCapabilities: () => ({
+        ...nativeCapabilities(),
+        transportSlots: 0x00000003,
+      }),
+    },
+  });
+  const summary = runtime.selectTransport({
+    peerManifest: createCapabilityManifest({
+      buildMode: "backend-native",
+      transports: ["quic"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(runtime.manifest.transports, ["tcp", "quic"]);
+  assertEquals(summary.selected, "quic");
+});
+
 Deno.test("@nnrp/native rejects empty endpoints", async () => {
   const runtime = await openBackendRuntime({ env: {} });
 

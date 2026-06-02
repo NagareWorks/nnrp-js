@@ -21,7 +21,7 @@
 - [x] Discover native TCP provider capability from artifact manifest.
 - [x] Discover native QUIC provider capability from artifact manifest.
 - [x] Pass explicit `tcp-only`, `quic-only`, `score`, and future policies to native runtime.
-- [ ] Fail `quic-only` when QUIC is unavailable; do not silently downgrade.
+- [x] Fail `quic-only` when QUIC is unavailable; do not silently downgrade.
 - [x] Report selected provider in connection diagnostics.
 - [x] Add Node tests using fake provider manifests.
 
