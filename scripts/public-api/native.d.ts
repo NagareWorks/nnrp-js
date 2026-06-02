@@ -5,6 +5,8 @@ export interface NnrpNativeLibraryOptions {
     readonly manifestPath?: string;
     readonly packageName?: string;
     readonly requiredSymbols?: readonly string[];
+    readonly systemPolicy?: boolean;
+    readonly systemLibraryDir?: string;
 }
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;

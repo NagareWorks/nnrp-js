@@ -15,7 +15,7 @@
 - [x] Resolve local library path from explicit option.
 - [x] Resolve local library path from environment variable.
 - [x] Resolve local library path from packaged artifact.
-- [ ] Resolve local library path from system policy only when explicitly enabled.
+- [x] Resolve local library path from system policy only when explicitly enabled.
 - [x] Surface rejected candidates with structured diagnostics.
 - [x] Add tests for explicit path, environment path, packaged path, and missing artifact.
 

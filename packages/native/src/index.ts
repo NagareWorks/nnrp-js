@@ -91,6 +91,8 @@ export interface NnrpNativeLibraryOptions {
   readonly manifestPath?: string;
   readonly packageName?: string;
   readonly requiredSymbols?: readonly string[];
+  readonly systemPolicy?: boolean;
+  readonly systemLibraryDir?: string;
 }
 
 export interface NnrpNativeRuntimeCapabilities {
@@ -869,6 +871,11 @@ export function resolveNativeLibraryPath(options: NnrpNativeBindingOptions = {})
     return artifact.libraryPath;
   }
 
+  const systemPolicy = resolveSystemPolicyNativeLibraryPath(options);
+  if (systemPolicy !== undefined) {
+    return systemPolicy;
+  }
+
   const platform = options.platform ?? process.platform;
   const suffix = nativeLibrarySuffix(platform);
   const artifactDir = options.nativeLibrary?.artifactDir ?? "native";
@@ -925,6 +932,25 @@ function resolveExplicitNativeLibraryPath(options: NnrpNativeBindingOptions): st
   const env = options.env ?? process.env;
   const explicit = options.libraryPath ?? options.nativeLibrary?.path ?? env.NNRP_NATIVE_LIBRARY;
   return explicit && explicit.length > 0 ? explicit : undefined;
+}
+
+function resolveSystemPolicyNativeLibraryPath(options: NnrpNativeBindingOptions): string | undefined {
+  if (options.nativeLibrary?.systemPolicy !== true) {
+    return undefined;
+  }
+
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
+  const root = options.nativeLibrary.systemLibraryDir ?? env.NNRP_NATIVE_SYSTEM_LIBRARY_DIR ??
+    defaultSystemLibraryDir(platform);
+  const packageName = options.nativeLibrary.packageName ?? nativePackageName(platform, arch);
+  return joinNativeLibraryPath(
+    root,
+    packageName,
+    nativeLibraryFileName(platform, nativeLibrarySuffix(platform)),
+    platform,
+  );
 }
 
 async function resolveRuntimeCapabilities(
@@ -988,6 +1014,26 @@ function nativeLibraryFileName(platform: NodePlatform, suffix: "dll" | "dylib" |
   }
 
   return `libnnrp_ffi.${suffix}`;
+}
+
+function defaultSystemLibraryDir(platform: NodePlatform): string {
+  if (platform === "win32") {
+    return "C:\\Program Files\\NNRP\\native";
+  }
+
+  if (platform === "darwin") {
+    return "/usr/local/lib/nnrp";
+  }
+
+  return "/usr/lib/nnrp";
+}
+
+function joinNativeLibraryPath(root: string, packageName: string, libraryName: string, platform: NodePlatform): string {
+  if (platform === "win32") {
+    return path.win32.join(root, packageName, libraryName);
+  }
+
+  return path.posix.join(toPosixPath(root), packageName, libraryName);
 }
 
 export function resolveNativeArtifact(options: NnrpNativeBindingOptions): NnrpResolvedNativeArtifact | null {

@@ -75,6 +75,43 @@ Deno.test("@nnrp/native uses artifactDir for packaged artifacts", () => {
   );
 });
 
+Deno.test("@nnrp/native resolves system-policy paths only when explicitly enabled", () => {
+  assertEquals(
+    resolveNativeLibraryPath({ platform: "linux", arch: "x64", env: {} }),
+    "native/linux-x86_64/libnnrp_ffi.so",
+  );
+
+  assertEquals(
+    resolveNativeLibraryPath({
+      platform: "linux",
+      arch: "x64",
+      env: {},
+      nativeLibrary: { systemPolicy: true },
+    }),
+    "/usr/lib/nnrp/linux-x86_64/libnnrp_ffi.so",
+  );
+
+  assertEquals(
+    resolveNativeLibraryPath({
+      platform: "darwin",
+      arch: "arm64",
+      env: { NNRP_NATIVE_SYSTEM_LIBRARY_DIR: "/opt/nnrp/native" },
+      nativeLibrary: { systemPolicy: true },
+    }),
+    "/opt/nnrp/native/macos-aarch64/libnnrp_ffi.dylib",
+  );
+
+  assertEquals(
+    resolveNativeLibraryPath({
+      platform: "win32",
+      arch: "x64",
+      env: {},
+      nativeLibrary: { systemPolicy: true, systemLibraryDir: "D:\\nnrp\\native" },
+    }),
+    "D:\\nnrp\\native\\windows-x86_64\\nnrp_ffi.dll",
+  );
+});
+
 Deno.test("@nnrp/native creates a native binding descriptor", () => {
   const binding = createNativeRuntimeBinding({
     platform: "linux",
