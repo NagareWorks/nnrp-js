@@ -110,3 +110,7 @@ Do not reuse a published package version. If package contents change after publi
 
 Public package publishing will be gated through a release workflow and the `release` GitHub environment once npm package
 names and native/WASM artifact policy are frozen.
+
+The publish workflow is not enabled yet. When it is enabled, keep the registry token scoped to the GitHub `release`
+environment and store it as `NPM_TOKEN`. The token must be able to publish `@nnrp/core`, `@nnrp/native`, and
+`@nnrp/wasm`; it must not be available to normal CI, pull request checks, or release dry-run jobs.

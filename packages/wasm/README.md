@@ -10,3 +10,5 @@ It must not import Node built-ins or native FFI loader code. WASM artifacts can 
 
 WASM assets remain externally injected during the preview phase. The package validates artifact manifests and keeps the
 browser runtime wrapper stable while the final npm asset layout is still gated by release dry runs.
+
+SDK reference: https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/api/wasm

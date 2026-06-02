@@ -52,7 +52,7 @@
 - [x] Keep `nnrp-doc` English JS/TS SDK pages synchronized.
 - [x] Keep `nnrp-doc` Chinese JS/TS SDK pages synchronized.
 - [x] Update local README when package layout changes.
-- [ ] Add docs links from package READMEs after package names are frozen.
+- [x] Add docs links from package READMEs after package names are frozen.
 - [ ] Add API change checklist to PR template if one is introduced.
 
 ## Release Gates
@@ -60,5 +60,5 @@
 - [x] Add release workflow only after npm package names are frozen.
 - [x] Add npm publish dry run.
 - [x] Add package artifact verification before enabling registry publish.
-- [ ] Document environment secrets required for npm publish.
+- [x] Document environment secrets required for npm publish.
 - [ ] Tag release only after docs, conformance smoke, package pack checks, and import smoke pass.
