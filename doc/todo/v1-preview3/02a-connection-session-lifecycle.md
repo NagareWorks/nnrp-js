@@ -15,7 +15,7 @@
 - [x] Support explicit close/dispose on `NnrpClient`.
 - [x] Reject use-after-close with structured diagnostics.
 - [x] Add Node smoke test for `openNativeClient` without real network by using a test loader/fake binding.
-- [ ] Add docs example for coding-agent/CLI client usage.
+- [x] Add docs example for coding-agent/CLI client usage.
 
 ## Native Backend Runtime Lifecycle
 
