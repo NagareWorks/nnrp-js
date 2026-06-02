@@ -418,6 +418,7 @@ export class NnrpBackendRuntime {
 
   public connect(options: NnrpConnectOptions): NnrpClient {
     this.#ensureOpen();
+    this.#ensureConnectReady("connect");
     validateEndpoint(options.endpoint);
 
     return new NnrpClient({
@@ -430,6 +431,7 @@ export class NnrpBackendRuntime {
 
   public listen(options: NnrpListenOptions): NnrpServer {
     this.#ensureOpen();
+    this.#ensureConnectReady("listen");
     validateEndpoint(options.endpoint);
 
     return new NnrpServer({
@@ -481,6 +483,23 @@ export class NnrpBackendRuntime {
   #ensureOpen(): void {
     if (this.#closed) {
       throw closedError("runtime");
+    }
+  }
+
+  #ensureConnectReady(operation: "connect" | "listen"): void {
+    if (this.#binding.manifest.buildMode !== "backend-native") {
+      throw nativeRuntimeReadinessError(
+        "NNRP_NATIVE_RUNTIME_MANIFEST_INVALID",
+        `Native runtime ${operation} requires a backend-native capability manifest.`,
+      );
+    }
+
+    const missing = REQUIRED_NATIVE_SYMBOLS.filter((symbol) => !this.#binding.requiredSymbols.includes(symbol));
+    if (missing.length > 0) {
+      throw nativeRuntimeReadinessError(
+        "NNRP_NATIVE_RUNTIME_SYMBOLS_UNVALIDATED",
+        `Native runtime ${operation} requires validated symbols: ${missing.join(", ")}.`,
+      );
     }
   }
 
@@ -1543,6 +1562,15 @@ function backpressureCreditExhaustedError(source: "native" | "wasm"): NnrpTransp
 }
 
 function nativeArtifactError(code: string, message: string): NnrpCapabilityError {
+  return new NnrpCapabilityError({
+    code,
+    message,
+    source: "native",
+    retryable: false,
+  });
+}
+
+function nativeRuntimeReadinessError(code: string, message: string): NnrpCapabilityError {
   return new NnrpCapabilityError({
     code,
     message,

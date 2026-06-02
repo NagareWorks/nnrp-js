@@ -13,6 +13,7 @@ import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   createBrowserTransportProvider,
   createWasmRuntimeBinding,
+  NnrpBrowserRuntime,
   type NnrpWasmArtifactManifest,
   NnrpWasmBindingUnavailableError,
   openBrowserRuntime,
@@ -149,6 +150,48 @@ Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
   assertEquals(session.sessionId, "browser-session-1");
   assertEquals(session.options.inputProfile, "token");
   assertEquals(session.options.metadata, { app: "browser", request: "one" });
+});
+
+Deno.test("@nnrp/wasm validates runtime readiness before connect", () => {
+  const wrongMode = new NnrpBrowserRuntime({
+    ...createWasmRuntimeBinding(),
+    manifest: createCapabilityManifest({
+      buildMode: "backend-native",
+      transports: ["tcp"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  const wrongModeError = assertThrows(
+    () => wrongMode.connect({ endpoint: "wss://example.test/nnrp" }),
+    NnrpCapabilityError,
+  );
+  assertEquals(wrongModeError.diagnostic.code, "NNRP_WASM_RUNTIME_MANIFEST_INVALID");
+
+  const missingModule = new NnrpBrowserRuntime({
+    ...createWasmRuntimeBinding(),
+    moduleUrl: " ",
+  });
+  const missingModuleError = assertThrows(
+    () => missingModule.connect({ endpoint: "wss://example.test/nnrp" }),
+    NnrpCapabilityError,
+  );
+  assertEquals(missingModuleError.diagnostic.code, "NNRP_WASM_RUNTIME_MODULE_UNRESOLVED");
+
+  const missingExport = new NnrpBrowserRuntime({
+    ...createWasmRuntimeBinding(),
+    artifact: {
+      manifest: wasmManifest(),
+      moduleUrl: "nnrp_wasm.wasm",
+      typesUrl: "nnrp_wasm.d.ts",
+      requiredExports: ["missing_export"],
+    },
+  });
+  const missingExportError = assertThrows(
+    () => missingExport.connect({ endpoint: "wss://example.test/nnrp" }),
+    NnrpCapabilityError,
+  );
+  assertEquals(missingExportError.diagnostic.code, "NNRP_WASM_RUNTIME_EXPORTS_UNVALIDATED");
 });
 
 Deno.test("@nnrp/wasm selects browser transport slots from local and peer manifests", async () => {

@@ -10,7 +10,7 @@
 
 - [x] Add public `openNativeClient(options)` in `@nnrp/native`.
 - [x] Load native artifacts only inside `openNativeClient` or explicit runtime open functions.
-- [ ] Connect to endpoint after manifest and required-symbol validation.
+- [x] Connect to endpoint after manifest and required-symbol validation.
 - [x] Return `NnrpClient` with no raw handle exposure.
 - [x] Support explicit close/dispose on `NnrpClient`.
 - [x] Reject use-after-close with structured diagnostics.

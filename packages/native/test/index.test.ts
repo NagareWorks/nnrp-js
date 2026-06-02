@@ -825,6 +825,35 @@ Deno.test("@nnrp/native exposes backend runtime connect and listen lifecycles", 
   assertEquals(server.closed, true);
 });
 
+Deno.test("@nnrp/native validates runtime readiness before connect and listen", () => {
+  const wrongMode = new NnrpBackendRuntime({
+    manifest: createCapabilityManifest({
+      buildMode: "browser-wasm",
+      transports: ["websocket"],
+      capabilities: ["client.session"],
+    }),
+    libraryPath: "native/linux-x86_64/libnnrp_ffi.so",
+    requiredSymbols: ["nnrp_runtime_capabilities", "nnrp_client_submit_result_compact", "nnrp_client_await_events"],
+  });
+
+  const wrongModeError = assertThrows(
+    () => wrongMode.connect({ endpoint: "127.0.0.1:4433" }),
+    NnrpCapabilityError,
+  );
+  assertEquals(wrongModeError.diagnostic.code, "NNRP_NATIVE_RUNTIME_MANIFEST_INVALID");
+
+  const missingSymbols = new NnrpBackendRuntime({
+    ...createNativeRuntimeBinding({ env: {}, platform: "linux", arch: "x64" }),
+    requiredSymbols: ["nnrp_runtime_capabilities"],
+  });
+
+  const missingSymbolsError = assertThrows(
+    () => missingSymbols.listen({ endpoint: "0.0.0.0:4433" }),
+    NnrpCapabilityError,
+  );
+  assertEquals(missingSymbolsError.diagnostic.code, "NNRP_NATIVE_RUNTIME_SYMBOLS_UNVALIDATED");
+});
+
 Deno.test("@nnrp/native exposes runtime artifact getters from packaged manifests", async () => {
   const root = await Deno.makeTempDir();
   const packageDir = `${root}/linux-x86_64`;

@@ -208,6 +208,7 @@ export class NnrpBrowserRuntime {
 
   public connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient {
     this.#ensureOpen();
+    this.#ensureConnectReady();
     validateEndpoint(options.endpoint);
 
     return new NnrpBrowserClient({
@@ -327,6 +328,33 @@ export class NnrpBrowserRuntime {
   #ensureOpen(): void {
     if (this.#closed) {
       throw closedError("browser runtime");
+    }
+  }
+
+  #ensureConnectReady(): void {
+    if (this.#binding.manifest.buildMode !== "browser-wasm") {
+      throw wasmRuntimeReadinessError(
+        "NNRP_WASM_RUNTIME_MANIFEST_INVALID",
+        "Browser runtime connect requires a browser-wasm capability manifest.",
+      );
+    }
+
+    if (this.#binding.moduleUrl.trim().length === 0) {
+      throw wasmRuntimeReadinessError(
+        "NNRP_WASM_RUNTIME_MODULE_UNRESOLVED",
+        "Browser runtime connect requires a validated WASM module URL or injected module.",
+      );
+    }
+
+    const artifact = this.#binding.artifact;
+    if (artifact !== undefined) {
+      const missing = artifact.requiredExports.filter((name) => !artifact.manifest.exports.includes(name));
+      if (missing.length > 0) {
+        throw wasmRuntimeReadinessError(
+          "NNRP_WASM_RUNTIME_EXPORTS_UNVALIDATED",
+          `Browser runtime connect requires validated WASM exports: ${missing.join(", ")}.`,
+        );
+      }
     }
   }
 
@@ -1058,6 +1086,15 @@ function backpressureCreditExhaustedError(source: "native" | "wasm"): NnrpTransp
 }
 
 function wasmArtifactError(code: string, message: string): NnrpCapabilityError {
+  return new NnrpCapabilityError({
+    code,
+    message,
+    source: "wasm",
+    retryable: false,
+  });
+}
+
+function wasmRuntimeReadinessError(code: string, message: string): NnrpCapabilityError {
   return new NnrpCapabilityError({
     code,
     message,
