@@ -48,6 +48,17 @@ export interface NnrpNativeTransportScoreRequest {
     readonly candidates: readonly NnrpTransportCandidate[];
     readonly policy: NnrpTransportPolicy;
 }
+export interface NnrpNativeAcceptRequest {
+    readonly endpoint: string;
+    readonly transportPolicy: NnrpTransportPolicy;
+}
+export interface NnrpNativeAcceptedSession {
+    readonly sessionOptions?: NnrpSessionOptions;
+}
+export interface NnrpNativeServerReceiveRequest {
+    readonly sessionOptions: NnrpSessionOptions;
+    readonly timeoutMillis?: number;
+}
 export interface NnrpNativeFfiBinding {
     readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
@@ -57,6 +68,8 @@ export interface NnrpNativeFfiBinding {
     submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
+    accept?(request: NnrpNativeAcceptRequest): NnrpNativeAcceptedSession | void | Promise<NnrpNativeAcceptedSession | void>;
+    receive?(request: NnrpNativeServerReceiveRequest): NnrpRuntimeEvent | Promise<NnrpRuntimeEvent>;
     close?(): void | Promise<void>;
 }
 export interface NnrpNativeArtifactManifest {
@@ -151,6 +164,8 @@ export declare class NnrpBackendRuntime {
     submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint>;
     cancel(request: NnrpNativeCancelRequest): Promise<void>;
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
+    acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession>;
+    receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent>;
     connect(options: NnrpConnectOptions): NnrpClient;
     listen(options: NnrpListenOptions): NnrpServer;
     selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
@@ -210,8 +225,15 @@ export declare class NnrpServer {
     close(): Promise<void>;
     get closed(): boolean;
 }
+export interface NnrpServerSessionState {
+    readonly runtime: NnrpBackendRuntime;
+    readonly options: NnrpSessionOptions;
+}
 export declare class NnrpServerSession {
     #private;
+    constructor(state?: NnrpServerSessionState);
+    get options(): NnrpSessionOptions;
+    get sessionId(): string;
     receive(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     sendResult(_result: NnrpResult): Promise<void>;
     close(): Promise<void>;

@@ -142,6 +142,20 @@ export interface NnrpNativeTransportScoreRequest {
   readonly policy: NnrpTransportPolicy;
 }
 
+export interface NnrpNativeAcceptRequest {
+  readonly endpoint: string;
+  readonly transportPolicy: NnrpTransportPolicy;
+}
+
+export interface NnrpNativeAcceptedSession {
+  readonly sessionOptions?: NnrpSessionOptions;
+}
+
+export interface NnrpNativeServerReceiveRequest {
+  readonly sessionOptions: NnrpSessionOptions;
+  readonly timeoutMillis?: number;
+}
+
 export interface NnrpNativeFfiBinding {
   readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
@@ -157,6 +171,10 @@ export interface NnrpNativeFfiBinding {
   awaitEvents?(
     request: NnrpNativeEventBatchRequest,
   ): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
+  accept?(
+    request: NnrpNativeAcceptRequest,
+  ): NnrpNativeAcceptedSession | void | Promise<NnrpNativeAcceptedSession | void>;
+  receive?(request: NnrpNativeServerReceiveRequest): NnrpRuntimeEvent | Promise<NnrpRuntimeEvent>;
   close?(): void | Promise<void>;
 }
 
@@ -350,6 +368,26 @@ export class NnrpBackendRuntime {
     }
 
     return await awaitEvents(request);
+  }
+
+  public async acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession> {
+    this.#ensureOpen();
+    const accept = this.#binding.ffi?.accept;
+    if (accept === undefined) {
+      throw bindingNotConnectedError("accept");
+    }
+
+    return await accept(request) ?? {};
+  }
+
+  public async receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent> {
+    this.#ensureOpen();
+    const receive = this.#binding.ffi?.receive;
+    if (receive === undefined) {
+      throw bindingNotConnectedError("receive");
+    }
+
+    return await receive(request);
   }
 
   public connect(options: NnrpConnectOptions): NnrpClient {
@@ -805,8 +843,21 @@ export class NnrpServer {
   }
 
   public accept(): Promise<NnrpServerSession> {
-    this.#ensureOpen();
-    return Promise.reject(bindingNotConnectedError("accept"));
+    try {
+      this.#ensureOpen();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return this.#state.runtime.acceptServerSession({
+      endpoint: this.#state.endpoint,
+      transportPolicy: this.#state.transportPolicy,
+    }).then((accepted) =>
+      new NnrpServerSession({
+        runtime: this.#state.runtime,
+        options: accepted.sessionOptions ?? {},
+      })
+    );
   }
 
   public close(): Promise<void> {
@@ -825,8 +876,26 @@ export class NnrpServer {
   }
 }
 
+export interface NnrpServerSessionState {
+  readonly runtime: NnrpBackendRuntime;
+  readonly options: NnrpSessionOptions;
+}
+
 export class NnrpServerSession {
+  readonly #state: NnrpServerSessionState | undefined;
   #closed = false;
+
+  public constructor(state?: NnrpServerSessionState) {
+    this.#state = state;
+  }
+
+  public get options(): NnrpSessionOptions {
+    return this.#state?.options ?? {};
+  }
+
+  public get sessionId(): string {
+    return this.options.sessionId ?? "";
+  }
 
   public receive(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
     try {
@@ -836,7 +905,18 @@ export class NnrpServerSession {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotConnectedError("receive"));
+    const state = this.#state;
+    if (state === undefined) {
+      return Promise.reject(bindingNotConnectedError("receive"));
+    }
+
+    return raceEventPoll(
+      state.runtime.receiveServerEvent({
+        sessionOptions: state.options,
+        ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
+      }),
+      options,
+    );
   }
 
   public sendResult(_result: NnrpResult): Promise<void> {

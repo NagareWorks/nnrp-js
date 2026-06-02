@@ -235,6 +235,12 @@ export type NnrpSessionMigrationEvent =
   };
 
 export type NnrpRuntimeEvent =
+  | {
+    readonly type: "submit";
+    readonly submit: NnrpNormalizedSubmitRequest;
+    readonly sessionId?: string;
+    readonly diagnostic?: NnrpDiagnostic;
+  }
   | { readonly type: "result"; readonly result: NnrpResult; readonly sessionId?: string }
   | {
     readonly type: "flow-update";

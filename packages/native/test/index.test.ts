@@ -1050,8 +1050,64 @@ Deno.test("@nnrp/native covers server and server-session placeholders", async ()
   await serverSession.close();
   assertEquals(server.closed, true);
   assertEquals(serverSession.closed, true);
-  assertThrows(() => server.accept(), NnrpCapabilityError);
+  await assertRejects(() => server.accept(), NnrpCapabilityError);
   assertThrows(() => serverSession.sendResult({ frameId: 1 }), NnrpCapabilityError);
+});
+
+Deno.test("@nnrp/native exposes decoded submit metadata through server receive", async () => {
+  const seen: string[] = [];
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      runtimeCapabilities: () => nativeCapabilities(),
+      accept: ({ endpoint, transportPolicy }) => {
+        seen.push(`accept:${endpoint}:${transportPolicy}`);
+        return { sessionOptions: { sessionId: "server-session-a", metadata: { side: "server" } } };
+      },
+      receive: ({ sessionOptions, timeoutMillis }) => {
+        seen.push(`receive:${sessionOptions.sessionId ?? ""}:${timeoutMillis ?? ""}`);
+        return {
+          type: "submit",
+          sessionId: sessionOptions.sessionId,
+          submit: {
+            frameId: 77,
+            descriptor: {
+              profile: "structured_event",
+              schema: {
+                id: "agent.event",
+                name: "AgentEvent",
+                version: "1.0.0",
+                flags: ["streamable"],
+              },
+              cache: {
+                key: { kind: "tool", key: "trace-77" },
+                leaseMillis: 2000,
+              },
+              metadata: { route: "ops" },
+            },
+            metadata: { request: "dispatch" },
+          },
+        };
+      },
+    },
+  });
+
+  const server = runtime.listen({ endpoint: "127.0.0.1:7443", transportPolicy: "tcp-only" });
+  const session = await server.accept();
+  const event = await session.receive({ timeoutMillis: 10 });
+
+  assertEquals(seen, ["accept:127.0.0.1:7443:tcp-only", "receive:server-session-a:10"]);
+  assertEquals(session.sessionId, "server-session-a");
+  assertEquals(event.type, "submit");
+  if (event.type === "submit") {
+    assertEquals(event.submit.descriptor?.profile, "structured_event");
+    assertEquals(event.submit.descriptor?.schema?.name, "AgentEvent");
+    assertEquals(event.submit.descriptor?.cache?.key.key, "trace-77");
+    assertEquals(event.submit.descriptor?.metadata?.route, "ops");
+  }
 });
 
 Deno.test("@nnrp/native rejects server-session invalid receive options before dispatch", async () => {

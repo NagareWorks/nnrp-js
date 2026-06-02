@@ -47,5 +47,5 @@
 
 - [x] Native submit APIs accept cache/schema/profile fields and pass them to FFI wrappers.
 - [x] Browser submit APIs accept cache/schema/profile fields and pass them to WASM wrappers.
-- [ ] Server receive APIs expose decoded cache/schema/profile metadata when available.
+- [x] Server receive APIs expose decoded cache/schema/profile metadata when available.
 - [x] Conformance adapter includes cache/schema/profile capability claims only when implemented.
