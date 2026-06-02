@@ -9,7 +9,9 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./experimental/*": null,
+    "./internal/*": null
   },
   "files": [
     "README.md",

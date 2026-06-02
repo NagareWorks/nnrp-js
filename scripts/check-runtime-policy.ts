@@ -47,6 +47,10 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
       { label: "wasm package import", pattern: /\bfrom\s+["']@nnrp\/wasm["']/ },
       {
+        label: "implicit native finalizer",
+        pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
+      },
+      {
         label: "browser-only source import",
         pattern: /\bfrom\s+["'][^"']*(?:browser|websocket|webtransport)[^"']*["']/i,
       },

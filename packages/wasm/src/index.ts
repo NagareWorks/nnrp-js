@@ -811,12 +811,16 @@ function isWasmArtifactManifest(value: unknown): value is NnrpWasmArtifactManife
 
   const manifest = value as Record<string, unknown>;
   return manifest.package === "nnrp-wasm" &&
-    typeof manifest.wasm === "string" &&
-    typeof manifest.types === "string" &&
+    isNonEmptyString(manifest.wasm) &&
+    isNonEmptyString(manifest.types) &&
     (manifest.owner === undefined || typeof manifest.owner === "string") &&
     (manifest.downstream_wrapper === undefined || typeof manifest.downstream_wrapper === "string") &&
     Array.isArray(manifest.exports) &&
     manifest.exports.every((entry) => typeof entry === "string");
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function requiredWasmExports(requiredExports: readonly string[] | undefined): readonly string[] {

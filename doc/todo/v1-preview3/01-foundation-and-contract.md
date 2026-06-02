@@ -17,7 +17,7 @@
 - [ ] Add compatibility aliases only when they avoid needless churn before first publication.
 - [x] Add package export maps for ESM runtime entrypoints.
 - [x] Add package export maps for `.d.ts` type entrypoints.
-- [ ] Add package export maps for future subpath exports.
+- [x] Add package export maps for future subpath exports.
 - [x] Add package metadata that clearly marks unpublished/internal packages as private until release gates pass.
 
 ## Build Modes

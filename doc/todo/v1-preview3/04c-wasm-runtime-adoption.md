@@ -16,7 +16,7 @@
 - [x] Surface missing or mismatched WASM primitive diagnostics.
 - [x] Add tests for URL, module, and package-default artifact paths.
 - [x] Add tests for rs primitive artifact manifests and required exports.
-- [ ] Add tests for missing artifact paths once runtime instantiation is wired.
+- [x] Add tests for missing artifact paths once runtime instantiation is wired.
 
 ## WASM Primitive Binding
 

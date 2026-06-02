@@ -83,6 +83,33 @@ function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string,
   if (packageJson.private !== true) {
     failures.push(`${policy.name}: package.json must stay private until release gates are enabled`);
   }
+
+  checkExportMap(policy, packageJson.exports);
+}
+
+function checkExportMap(policy: PackagePolicy, exports: unknown): void {
+  if (!exports || typeof exports !== "object" || Array.isArray(exports)) {
+    failures.push(`${policy.name}: package.json exports must be an object`);
+    return;
+  }
+
+  const exportMap = exports as Record<string, unknown>;
+  const root = exportMap["."];
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
+    failures.push(`${policy.name}: package.json exports must include a root entry`);
+    return;
+  }
+
+  const rootMap = root as Record<string, unknown>;
+  if (rootMap.types !== "./dist/index.d.ts" || rootMap.default !== "./dist/index.js") {
+    failures.push(`${policy.name}: package.json root export must point to dist index files`);
+  }
+
+  for (const reserved of ["./experimental/*", "./internal/*"]) {
+    if (exportMap[reserved] !== null) {
+      failures.push(`${policy.name}: package.json exports must reserve ${reserved} as null until frozen`);
+    }
+  }
 }
 
 function isNativeArtifactPackagingEnabled(packageJson: Record<string, unknown>): boolean {

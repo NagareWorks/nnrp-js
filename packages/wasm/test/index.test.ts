@@ -74,6 +74,24 @@ Deno.test("@nnrp/wasm validates primitive artifact manifests", () => {
   );
 });
 
+Deno.test("@nnrp/wasm rejects missing artifact asset paths", () => {
+  assertThrows(
+    () => validateWasmArtifactManifest({ ...wasmManifest(), wasm: "" }),
+    NnrpCapabilityError,
+    "Invalid WASM artifact manifest",
+  );
+  assertThrows(
+    () => validateWasmArtifactManifest({ ...wasmManifest(), types: " " }),
+    NnrpCapabilityError,
+    "Invalid WASM artifact manifest",
+  );
+  assertThrows(
+    () => createWasmRuntimeBinding({ artifact: { manifest: { ...wasmManifest(), wasm: "" } } }),
+    NnrpCapabilityError,
+    "Invalid WASM artifact manifest",
+  );
+});
+
 Deno.test("@nnrp/wasm uses artifact URLs unless a caller injects a module URL", () => {
   const artifactBinding = createWasmRuntimeBinding({
     artifact: {
