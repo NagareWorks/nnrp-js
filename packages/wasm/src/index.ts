@@ -2,6 +2,7 @@ import {
   createBrowserWasmManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
+  NNRP_PROTOCOL_VERSION,
   type NnrpAbortSignalLike,
   type NnrpCancelOptions,
   type NnrpCancelRequest,
@@ -101,7 +102,22 @@ export interface NnrpWasmEventBatchRequest {
   readonly maxEvents: number;
 }
 
+export interface NnrpWasmProtocolVersion {
+  readonly protocolMajor: number;
+  readonly wireFormat: number;
+  readonly version: string;
+}
+
+export interface NnrpWasmTransportScoreRequest {
+  readonly candidates: readonly NnrpTransportCandidate[];
+  readonly policy: NnrpTransportPolicy;
+}
+
 export interface NnrpWasmPrimitiveBinding {
+  protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
+  scoreTransportCandidates?(
+    request: NnrpWasmTransportScoreRequest,
+  ): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
   submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
@@ -178,19 +194,46 @@ export class NnrpBrowserRuntime {
 
   public selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary {
     this.#ensureOpen();
-    const providerMap = new Map(this.#binding.transportProviders.map((provider) => [provider.kind, provider]));
-    const candidates = createTransportCandidates({
-      local: this.#binding.manifest,
-      peer: options.peerManifest,
-      ...(options.scores === undefined ? {} : { scores: options.scores }),
-    }).map((candidate) => withBrowserProvider(candidate, providerMap.get(candidate.kind as NnrpBrowserTransportKind)));
 
     return createTransportSelectionSummary(
       selectTransport(
-        candidates,
+        this.#createTransportCandidates(options),
         this.#transportPolicy,
       ),
     );
+  }
+
+  public async selectTransportWithPrimitives(
+    options: NnrpBrowserTransportSelectionOptions,
+  ): Promise<NnrpTransportSelectionSummary> {
+    this.#ensureOpen();
+    const candidates = this.#createTransportCandidates(options);
+    const scoreTransportCandidates = this.#binding.primitives?.scoreTransportCandidates;
+    const scoredCandidates = scoreTransportCandidates === undefined ? candidates : await scoreTransportCandidates({
+      candidates,
+      policy: this.#transportPolicy,
+    });
+
+    return createTransportSelectionSummary(
+      selectTransport(
+        scoredCandidates,
+        this.#transportPolicy,
+      ),
+    );
+  }
+
+  public protocolVersion(): Promise<NnrpWasmProtocolVersion> {
+    this.#ensureOpen();
+    const protocolVersion = this.#binding.primitives?.protocolVersion;
+    if (protocolVersion === undefined) {
+      return Promise.resolve({
+        protocolMajor: 1,
+        wireFormat: 0,
+        version: NNRP_PROTOCOL_VERSION,
+      });
+    }
+
+    return Promise.resolve(protocolVersion());
   }
 
   public submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult> {
@@ -246,6 +289,15 @@ export class NnrpBrowserRuntime {
     if (this.#closed) {
       throw closedError("browser runtime");
     }
+  }
+
+  #createTransportCandidates(options: NnrpBrowserTransportSelectionOptions): readonly NnrpTransportCandidate[] {
+    const providerMap = new Map(this.#binding.transportProviders.map((provider) => [provider.kind, provider]));
+    return createTransportCandidates({
+      local: this.#binding.manifest,
+      peer: options.peerManifest,
+      ...(options.scores === undefined ? {} : { scores: options.scores }),
+    }).map((candidate) => withBrowserProvider(candidate, providerMap.get(candidate.kind as NnrpBrowserTransportKind)));
   }
 }
 

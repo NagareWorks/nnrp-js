@@ -4,6 +4,7 @@ import {
   NnrpProtocolError,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
+  type NnrpTransportCandidate,
 } from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
@@ -171,6 +172,71 @@ Deno.test("@nnrp/wasm applies browser transport provider availability", async ()
   assertEquals(summary.rejected[0]?.reason, "peer-unsupported");
   assertEquals(summary.rejected[1]?.reason, "local-unavailable");
   assertEquals(summary.rejected[1]?.diagnostic?.code, "NNRP_BROWSER_WEBSOCKET_DISABLED");
+});
+
+Deno.test("@nnrp/wasm exposes protocol version primitives with manifest fallback", async () => {
+  const fallbackRuntime = await openBrowserRuntime();
+  const primitiveRuntime = await openBrowserRuntime({
+    primitives: {
+      protocolVersion: () => ({
+        protocolMajor: 1,
+        wireFormat: 0,
+        version: "1.0.0-test",
+      }),
+    },
+  });
+
+  assertEquals(await fallbackRuntime.protocolVersion(), {
+    protocolMajor: 1,
+    wireFormat: 0,
+    version: "1.0.0",
+  });
+  assertEquals(await primitiveRuntime.protocolVersion(), {
+    protocolMajor: 1,
+    wireFormat: 0,
+    version: "1.0.0-test",
+  });
+});
+
+Deno.test("@nnrp/wasm routes transport scoring through primitive candidates when available", async () => {
+  let seenPolicy: string | undefined;
+  let seenCandidateKinds: string[] = [];
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      scoreTransportCandidates: ({ candidates, policy }) => {
+        seenPolicy = policy;
+        seenCandidateKinds = candidates.map((candidate) => candidate.kind);
+        return candidates.map((candidate): NnrpTransportCandidate => ({
+          ...candidate,
+          score: candidate.kind === "websocket" ? 120 : candidate.score,
+        }));
+      },
+    },
+  });
+  const summary = await runtime.selectTransportWithPrimitives({
+    peerManifest: createCapabilityManifest({
+      buildMode: "browser-wasm",
+      transports: ["websocket", "webtransport"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(seenPolicy, "score");
+  assertEquals(seenCandidateKinds, ["webtransport", "websocket"]);
+  assertEquals(summary.selected, "websocket");
+});
+
+Deno.test("@nnrp/wasm transport primitive path falls back to local browser scoring", async () => {
+  const runtime = await openBrowserRuntime();
+  const summary = await runtime.selectTransportWithPrimitives({
+    peerManifest: createCapabilityManifest({
+      buildMode: "browser-wasm",
+      transports: ["websocket", "webtransport"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, "webtransport");
 });
 
 Deno.test("@nnrp/wasm rejects empty endpoints", async () => {

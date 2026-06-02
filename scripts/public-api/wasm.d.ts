@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -60,7 +60,18 @@ export interface NnrpWasmSubmitNoWaitRequest {
 export interface NnrpWasmEventBatchRequest {
     readonly maxEvents: number;
 }
+export interface NnrpWasmProtocolVersion {
+    readonly protocolMajor: number;
+    readonly wireFormat: number;
+    readonly version: string;
+}
+export interface NnrpWasmTransportScoreRequest {
+    readonly candidates: readonly NnrpTransportCandidate[];
+    readonly policy: NnrpTransportPolicy;
+}
 export interface NnrpWasmPrimitiveBinding {
+    protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
+    scoreTransportCandidates?(request: NnrpWasmTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
     submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
@@ -98,6 +109,8 @@ export declare class NnrpBrowserRuntime {
     get artifact(): NnrpResolvedWasmArtifact | undefined;
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
+    selectTransportWithPrimitives(options: NnrpBrowserTransportSelectionOptions): Promise<NnrpTransportSelectionSummary>;
+    protocolVersion(): Promise<NnrpWasmProtocolVersion>;
     submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint>;
     cancel(request: NnrpWasmCancelRequest): Promise<void>;

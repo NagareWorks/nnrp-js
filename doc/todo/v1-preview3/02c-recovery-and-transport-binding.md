@@ -10,7 +10,7 @@
 
 - [x] Represent `NnrpTransportCandidate` and `NnrpTransportSelection` in `@nnrp/core`.
 - [ ] Use Rust-backed scoring for native transport providers when the artifact exposes it.
-- [ ] Use WASM primitive scoring for browser provider candidates when available.
+- [x] Use WASM primitive scoring for browser provider candidates when available.
 - [x] Keep candidate scoring stable and deterministic for tests.
 - [x] Expose rejected candidates with reason codes.
 - [x] Do not hard-code QUIC-first ordering.
