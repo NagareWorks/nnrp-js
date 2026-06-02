@@ -9,18 +9,18 @@
 
 ## Package Impact
 
-- [ ] Wheel metadata changed
-- [ ] Sdist contents changed
+- [ ] npm package metadata changed
+- [ ] npm package contents changed
 - [ ] Release workflow behavior changed
 
 Describe the release-facing impact:
 
 ## Validation
 
-- [ ] `ruff check .`
-- [ ] `pytest -q`
-- [ ] `python -m build`
-- [ ] Release workflow assumptions were checked
+- [ ] `deno task release-dry-run`
+- [ ] `deno task package-check`
+- [ ] Conformance smoke output was reviewed
+- [ ] Benchmark smoke output was reviewed
 
 Commands or workflow runs used:
 
@@ -30,8 +30,8 @@ Commands or workflow runs used:
 ## Manual Registry Steps
 
 - [ ] No manual registry work required
-- [ ] PyPI or TestPyPI state was reviewed
-- [ ] GitHub Release asset expectations were reviewed
+- [ ] npm registry state was reviewed
+- [ ] GitHub Release asset expectations were reviewed if release assets are enabled
 
 Notes:
 

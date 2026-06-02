@@ -53,7 +53,7 @@
 - [x] Keep `nnrp-doc` Chinese JS/TS SDK pages synchronized.
 - [x] Update local README when package layout changes.
 - [x] Add docs links from package READMEs after package names are frozen.
-- [ ] Add API change checklist to PR template if one is introduced.
+- [x] Add API change checklist to PR template if one is introduced.
 
 ## Release Gates
 

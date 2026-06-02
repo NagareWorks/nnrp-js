@@ -12,9 +12,11 @@
 
 ## Validation
 
-- [ ] `ruff check .`
-- [ ] `pytest -q`
+- [ ] `deno task lint`
+- [ ] `deno task test`
+- [ ] `deno task coverage`
 - [ ] Targeted validation for the affected tooling or workflow path
+- [ ] `deno task package-check` if package output, exports, or release metadata changed
 
 Commands or workflow runs used:
 
@@ -24,8 +26,9 @@ Commands or workflow runs used:
 ## Release Impact
 
 - [ ] No package output change
-- [ ] Wheel or sdist contents changed
+- [ ] npm package contents changed
 - [ ] Release workflow behavior changed
+- [ ] Public API declarations or export maps changed
 
 ## Checklist
 
@@ -33,3 +36,4 @@ Commands or workflow runs used:
 - [ ] Commit messages follow Conventional Commits
 - [ ] PR is squashed to one commit unless this is necessary `release/<version>` branch work
 - [ ] Follow-up operational work is documented if needed
+- [ ] Local README or TODO files were updated when package layout, release gates, or runtime policy changed
