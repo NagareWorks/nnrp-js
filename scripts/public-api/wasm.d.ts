@@ -69,9 +69,14 @@ export interface NnrpWasmTransportScoreRequest {
     readonly candidates: readonly NnrpTransportCandidate[];
     readonly policy: NnrpTransportPolicy;
 }
+export interface NnrpWasmSubmitValidationRequest {
+    readonly sessionOptions: NnrpBrowserSessionOptions;
+    readonly submit: NnrpNormalizedSubmitRequest;
+}
 export interface NnrpWasmPrimitiveBinding {
     protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
     scoreTransportCandidates?(request: NnrpWasmTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
+    validateSubmit?(request: NnrpWasmSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
     submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;

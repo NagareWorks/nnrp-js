@@ -301,12 +301,24 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
   const seen: string[] = [];
   const runtime = await openBrowserRuntime({
     primitives: {
+      validateSubmit: ({ submit }) => {
+        seen.push(`validate:${submit.frameId}:${submit.descriptor?.profile ?? ""}`);
+        return {
+          ...submit,
+          metadata: {
+            ...(submit.metadata ?? {}),
+            validated: "true",
+          },
+        };
+      },
       submit: ({ submit }) => {
-        seen.push(`submit:${submit.frameId}:${submit.descriptor?.cache?.key.key ?? ""}`);
+        seen.push(
+          `submit:${submit.frameId}:${submit.descriptor?.cache?.key.key ?? ""}:${submit.metadata?.validated ?? ""}`,
+        );
         return { frameId: submit.frameId, metadata: { profile: submit.descriptor?.profile ?? "" } };
       },
       submitNoWait: ({ submit }) => {
-        seen.push(`submitNoWait:${submit.frameId}`);
+        seen.push(`submitNoWait:${submit.frameId}:${submit.metadata?.validated ?? ""}`);
         return BigInt(submit.frameId);
       },
       cancel: ({ cancel }) => {
@@ -342,7 +354,13 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
   assertEquals(await session.submitNoWait({ frameId: 12 }), 12n);
   const event = await session.nextEvent();
 
-  assertEquals(seen, ["submit:11:kv-block", "cancel:11:done", "submitNoWait:12"]);
+  assertEquals(seen, [
+    "validate:11:tensor",
+    "submit:11:kv-block:true",
+    "cancel:11:done",
+    "validate:12:",
+    "submitNoWait:12:true",
+  ]);
   assertEquals(event.type, "diagnostic");
   if (event.type === "diagnostic") {
     assertEquals(event.diagnostic.code, "NNRP_WASM_TEST_EVENTS_16");

@@ -22,7 +22,7 @@
 
 - [x] Wrap protocol/version primitive calls.
 - [x] Wrap transport selection primitive calls.
-- [ ] Wrap payload/schema validation primitive calls where available.
+- [x] Wrap payload/schema validation primitive calls where available.
 - [x] Wrap submit/result encode/decode primitives where available.
 - [x] Keep raw WASM memory details private.
 - [x] Normalize binary payload inputs without unnecessary copies.

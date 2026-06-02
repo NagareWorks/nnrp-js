@@ -113,11 +113,19 @@ export interface NnrpWasmTransportScoreRequest {
   readonly policy: NnrpTransportPolicy;
 }
 
+export interface NnrpWasmSubmitValidationRequest {
+  readonly sessionOptions: NnrpBrowserSessionOptions;
+  readonly submit: NnrpNormalizedSubmitRequest;
+}
+
 export interface NnrpWasmPrimitiveBinding {
   protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
   scoreTransportCandidates?(
     request: NnrpWasmTransportScoreRequest,
   ): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
+  validateSubmit?(
+    request: NnrpWasmSubmitValidationRequest,
+  ): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
   submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
@@ -236,24 +244,24 @@ export class NnrpBrowserRuntime {
     return Promise.resolve(protocolVersion());
   }
 
-  public submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult> {
+  public async submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult> {
     this.#ensureOpen();
     const submit = this.#binding.primitives?.submit;
     if (submit === undefined) {
-      return Promise.reject(bindingNotInstantiatedError("submit"));
+      throw bindingNotInstantiatedError("submit");
     }
 
-    return Promise.resolve(submit(request));
+    return await submit(await this.#validateSubmit(request));
   }
 
-  public submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint> {
+  public async submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint> {
     this.#ensureOpen();
     const submitNoWait = this.#binding.primitives?.submitNoWait;
     if (submitNoWait === undefined) {
-      return Promise.reject(bindingNotInstantiatedError("submitNoWait"));
+      throw bindingNotInstantiatedError("submitNoWait");
     }
 
-    return Promise.resolve(submitNoWait(request));
+    return await submitNoWait(await this.#validateSubmit(request));
   }
 
   public cancel(request: NnrpWasmCancelRequest): Promise<void> {
@@ -289,6 +297,23 @@ export class NnrpBrowserRuntime {
     if (this.#closed) {
       throw closedError("browser runtime");
     }
+  }
+
+  async #validateSubmit<TRequest extends NnrpWasmSubmitValidationRequest>(request: TRequest): Promise<TRequest> {
+    const validateSubmit = this.#binding.primitives?.validateSubmit;
+    if (validateSubmit === undefined) {
+      return request;
+    }
+
+    const validated = await validateSubmit(request);
+    if (validated === undefined) {
+      return request;
+    }
+
+    return {
+      ...request,
+      submit: validated,
+    };
   }
 
   #createTransportCandidates(options: NnrpBrowserTransportSelectionOptions): readonly NnrpTransportCandidate[] {
