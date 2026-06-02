@@ -20,6 +20,8 @@ import {
   type NnrpRuntimeEvent,
   type NnrpSessionFlowControlOptions,
   type NnrpSessionMigrationRequest,
+  type NnrpSessionPatchRequest,
+  type NnrpSessionPatchResult,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
@@ -29,6 +31,7 @@ import {
   type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
   normalizeSessionMigrationRequest,
+  normalizeSessionPatchRequest,
   normalizeSubmitRequest,
   selectTransport,
   throwIfResultDrop,
@@ -134,6 +137,11 @@ export interface NnrpNativeCancelRequest {
   readonly cancel: NnrpCancelRequest;
 }
 
+export interface NnrpNativeSessionPatchRequest {
+  readonly sessionOptions: NnrpSessionOptions;
+  readonly patch: NnrpSessionPatchRequest;
+}
+
 export interface NnrpNativeEventBatchRequest {
   readonly maxEvents: number;
   readonly timeoutMillis?: number;
@@ -170,6 +178,9 @@ export interface NnrpNativeFfiBinding {
   submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
+  patchSession?(
+    request: NnrpNativeSessionPatchRequest,
+  ): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
   awaitEvents?(
     request: NnrpNativeEventBatchRequest,
   ): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
@@ -360,6 +371,19 @@ export class NnrpBackendRuntime {
     }
 
     return Promise.resolve(cancel(request));
+  }
+
+  public async patchSession(request: NnrpNativeSessionPatchRequest): Promise<NnrpSessionPatchResult> {
+    this.#ensureOpen();
+    const patchSession = this.#binding.ffi?.patchSession;
+    if (patchSession === undefined) {
+      throw bindingNotConnectedError("patchSession");
+    }
+
+    return await patchSession(request) ?? {
+      accepted: true,
+      ...(request.sessionOptions.sessionId === undefined ? {} : { sessionId: request.sessionOptions.sessionId }),
+    };
   }
 
   public async awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]> {
@@ -589,7 +613,7 @@ export class NnrpClient {
 
 export interface NnrpClientSessionState {
   readonly client: NnrpClient;
-  readonly options: NnrpSessionOptions;
+  options: NnrpSessionOptions;
 }
 
 export class NnrpClientSession {
@@ -738,6 +762,29 @@ export class NnrpClientSession {
     }
 
     return Promise.reject(recoveryUnsupportedError("native"));
+  }
+
+  public async patch(request: NnrpSessionPatchRequest): Promise<NnrpSessionPatchResult> {
+    let patch: NnrpSessionPatchRequest;
+    try {
+      this.#ensureOpen();
+      patch = normalizeSessionPatchRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    const result = await this.#state.client.runtime.patchSession({
+      sessionOptions: this.#state.options,
+      patch,
+    });
+
+    this.#state.options = mergeSessionOptions(this.#state.options, patch);
+    if (patch.initialCredits !== undefined) {
+      this.#availableCredits = patch.initialCredits;
+      this.#drainCapacityWaiters();
+    }
+
+    return result;
   }
 
   public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {

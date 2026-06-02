@@ -21,6 +21,7 @@ import {
   normalizeCancelRequest,
   normalizeOperationRef,
   normalizeSessionMigrationRequest,
+  normalizeSessionPatchRequest,
   normalizeSubmitRequest,
   selectTransport,
   throwIfResultDrop,
@@ -366,6 +367,46 @@ Deno.test("@nnrp/core normalizes recovery tokens and migration requests", () => 
     () => createRecoveryToken(new Uint8Array()),
     NnrpProtocolError,
     "Recovery token payloads must be non-empty",
+  );
+});
+
+Deno.test("@nnrp/core normalizes session patch requests", () => {
+  const patch = normalizeSessionPatchRequest({
+    inputProfile: "token",
+    targetCadence: 60,
+    qualityTier: 2,
+    submitCapacityPolicy: "await-credit",
+    initialCredits: 3,
+    metadata: { route: "fast" },
+  });
+
+  assertEquals(patch, {
+    inputProfile: "token",
+    targetCadence: 60,
+    qualityTier: 2,
+    submitCapacityPolicy: "await-credit",
+    initialCredits: 3,
+    metadata: { route: "fast" },
+  });
+  assertThrows(
+    () => normalizeSessionPatchRequest({ inputProfile: "custom" as never }),
+    NnrpProtocolError,
+    "Unknown NNRP input profile",
+  );
+  assertThrows(
+    () => normalizeSessionPatchRequest({ targetCadence: -1 }),
+    NnrpProtocolError,
+    "targetCadence must be",
+  );
+  assertThrows(
+    () => normalizeSessionPatchRequest({ qualityTier: 1.5 }),
+    NnrpProtocolError,
+    "qualityTier must be",
+  );
+  assertThrows(
+    () => normalizeSessionPatchRequest({ initialCredits: -1 }),
+    NnrpProtocolError,
+    "initialCredits must be",
   );
 });
 

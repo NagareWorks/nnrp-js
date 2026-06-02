@@ -510,6 +510,51 @@ Deno.test("@nnrp/wasm reports unsupported session migration with stable diagnost
   assertEquals(error.diagnostic.source, "wasm");
 });
 
+Deno.test("@nnrp/wasm routes session patch through WASM primitives", async () => {
+  const seen: string[] = [];
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      patchSession: ({ sessionOptions, patch }) => {
+        seen.push(`${sessionOptions.sessionId ?? ""}:${patch.inputProfile ?? ""}:${patch.metadata?.route ?? ""}`);
+        return { accepted: true, sessionId: sessionOptions.sessionId, metadata: { patched: "wasm" } };
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession({
+    sessionId: "browser-session-patch",
+    inputProfile: "tensor",
+    initialCredits: 0,
+  });
+
+  const result = await session.patch({
+    inputProfile: "token",
+    initialCredits: 2,
+    metadata: { route: "patch" },
+  });
+
+  assertEquals(result, {
+    accepted: true,
+    sessionId: "browser-session-patch",
+    metadata: { patched: "wasm" },
+  });
+  assertEquals(seen, ["browser-session-patch:token:patch"]);
+  assertEquals(session.options.inputProfile, "token");
+  assertEquals(session.options.initialCredits, 2);
+  assertEquals(session.options.metadata, { route: "patch" });
+});
+
+Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for session patch", async () => {
+  const runtime = await openBrowserRuntime();
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  const error = await assertRejects(
+    () => session.patch({ inputProfile: "token" }),
+    NnrpWasmBindingUnavailableError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
+});
+
 Deno.test("@nnrp/wasm rejects duplicate in-flight frames and releases on completion", async () => {
   let resolveSubmit: ((result: { readonly frameId: number }) => void) | undefined;
   let holdNextSubmit = true;

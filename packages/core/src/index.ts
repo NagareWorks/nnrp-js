@@ -315,6 +315,19 @@ export interface NnrpSessionFlowControlOptions {
   readonly initialCredits?: number;
 }
 
+export interface NnrpSessionPatchRequest extends NnrpSessionMetadataOptions, NnrpSessionFlowControlOptions {
+  readonly inputProfile?: NnrpInputProfile;
+  readonly targetCadence?: number;
+  readonly qualityTier?: number;
+}
+
+export interface NnrpSessionPatchResult {
+  readonly accepted: boolean;
+  readonly sessionId?: string;
+  readonly diagnostic?: NnrpDiagnostic;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
 export class NnrpError extends Error {
   public readonly diagnostic: NnrpDiagnostic;
 
@@ -643,6 +656,50 @@ export function validateSessionMetadata(options: NnrpSessionMetadataOptions = {}
   if (options.metadata !== undefined) {
     normalizeMetadataMap(options.metadata);
   }
+}
+
+export function normalizeSessionPatchRequest(request: NnrpSessionPatchRequest): NnrpSessionPatchRequest {
+  if (request.inputProfile !== undefined) {
+    validateInputProfile(request.inputProfile, true);
+  }
+
+  if (request.targetCadence !== undefined && (!Number.isFinite(request.targetCadence) || request.targetCadence < 0)) {
+    throw new NnrpProtocolError({
+      code: "NNRP_SESSION_TARGET_CADENCE_INVALID",
+      message: "Session targetCadence must be a non-negative finite number.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
+  if (request.qualityTier !== undefined && (!Number.isSafeInteger(request.qualityTier) || request.qualityTier < 0)) {
+    throw new NnrpProtocolError({
+      code: "NNRP_SESSION_QUALITY_TIER_INVALID",
+      message: "Session qualityTier must be a non-negative safe integer.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
+  if (
+    request.initialCredits !== undefined && (!Number.isFinite(request.initialCredits) || request.initialCredits < 0)
+  ) {
+    throw new NnrpProtocolError({
+      code: "NNRP_SESSION_INITIAL_CREDITS_INVALID",
+      message: "Session initialCredits must be a non-negative finite number.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
+  return {
+    ...(request.inputProfile === undefined ? {} : { inputProfile: request.inputProfile }),
+    ...(request.targetCadence === undefined ? {} : { targetCadence: request.targetCadence }),
+    ...(request.qualityTier === undefined ? {} : { qualityTier: request.qualityTier }),
+    ...(request.submitCapacityPolicy === undefined ? {} : { submitCapacityPolicy: request.submitCapacityPolicy }),
+    ...(request.initialCredits === undefined ? {} : { initialCredits: request.initialCredits }),
+    ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
+  };
 }
 
 function annotateTransportCandidate(

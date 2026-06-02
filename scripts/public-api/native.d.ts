@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -40,6 +40,10 @@ export interface NnrpNativeCancelRequest {
     readonly sessionOptions: NnrpSessionOptions;
     readonly cancel: NnrpCancelRequest;
 }
+export interface NnrpNativeSessionPatchRequest {
+    readonly sessionOptions: NnrpSessionOptions;
+    readonly patch: NnrpSessionPatchRequest;
+}
 export interface NnrpNativeEventBatchRequest {
     readonly maxEvents: number;
     readonly timeoutMillis?: number;
@@ -67,6 +71,7 @@ export interface NnrpNativeFfiBinding {
     submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
+    patchSession?(request: NnrpNativeSessionPatchRequest): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     accept?(request: NnrpNativeAcceptRequest): NnrpNativeAcceptedSession | void | Promise<NnrpNativeAcceptedSession | void>;
     receive?(request: NnrpNativeServerReceiveRequest): NnrpRuntimeEvent | Promise<NnrpRuntimeEvent>;
@@ -163,6 +168,7 @@ export declare class NnrpBackendRuntime {
     submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint>;
     cancel(request: NnrpNativeCancelRequest): Promise<void>;
+    patchSession(request: NnrpNativeSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession>;
     receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent>;
@@ -192,7 +198,7 @@ export declare class NnrpClient {
 }
 export interface NnrpClientSessionState {
     readonly client: NnrpClient;
-    readonly options: NnrpSessionOptions;
+    options: NnrpSessionOptions;
 }
 export declare class NnrpClientSession {
     #private;
@@ -207,6 +213,7 @@ export declare class NnrpClientSession {
     nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     nextResult(options?: NnrpEventPollOptions): Promise<NnrpResult>;
     migrate(request: NnrpSessionMigrationRequest): Promise<void>;
+    patch(request: NnrpSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
     close(): Promise<void>;
     get closed(): boolean;

@@ -19,6 +19,8 @@ import {
   type NnrpRuntimeEvent,
   type NnrpSessionFlowControlOptions,
   type NnrpSessionMigrationRequest,
+  type NnrpSessionPatchRequest,
+  type NnrpSessionPatchResult,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
@@ -28,6 +30,7 @@ import {
   type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
   normalizeSessionMigrationRequest,
+  normalizeSessionPatchRequest,
   normalizeSubmitRequest,
   selectTransport,
   throwIfResultDrop,
@@ -99,6 +102,11 @@ export interface NnrpWasmCancelRequest {
   readonly cancel: NnrpCancelRequest;
 }
 
+export interface NnrpWasmSessionPatchRequest {
+  readonly sessionOptions: NnrpBrowserSessionOptions;
+  readonly patch: NnrpSessionPatchRequest;
+}
+
 export interface NnrpWasmSubmitNoWaitRequest {
   readonly sessionOptions: NnrpBrowserSessionOptions;
   readonly submit: NnrpNormalizedSubmitRequest;
@@ -136,6 +144,9 @@ export interface NnrpWasmPrimitiveBinding {
   submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
+  patchSession?(
+    request: NnrpWasmSessionPatchRequest,
+  ): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
   awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
   close?(): void | Promise<void>;
 }
@@ -279,6 +290,19 @@ export class NnrpBrowserRuntime {
     }
 
     return Promise.resolve(cancel(request));
+  }
+
+  public async patchSession(request: NnrpWasmSessionPatchRequest): Promise<NnrpSessionPatchResult> {
+    this.#ensureOpen();
+    const patchSession = this.#binding.primitives?.patchSession;
+    if (patchSession === undefined) {
+      throw bindingNotInstantiatedError("patchSession");
+    }
+
+    return await patchSession(request) ?? {
+      accepted: true,
+      ...(request.sessionOptions.sessionId === undefined ? {} : { sessionId: request.sessionOptions.sessionId }),
+    };
   }
 
   public async awaitEvents(request: NnrpWasmEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]> {
@@ -438,7 +462,7 @@ export class NnrpBrowserClient {
 
 export interface NnrpBrowserClientSessionState {
   readonly client: NnrpBrowserClient;
-  readonly options: NnrpBrowserSessionOptions;
+  options: NnrpBrowserSessionOptions;
 }
 
 export class NnrpBrowserClientSession {
@@ -586,6 +610,29 @@ export class NnrpBrowserClientSession {
     }
 
     return Promise.reject(recoveryUnsupportedError("wasm"));
+  }
+
+  public async patch(request: NnrpSessionPatchRequest): Promise<NnrpSessionPatchResult> {
+    let patch: NnrpSessionPatchRequest;
+    try {
+      this.#ensureOpen();
+      patch = normalizeSessionPatchRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    const result = await this.#state.client.runtime.patchSession({
+      sessionOptions: this.#state.options,
+      patch,
+    });
+
+    this.#state.options = mergeSessionOptions(this.#state.options, patch);
+    if (patch.initialCredits !== undefined) {
+      this.#availableCredits = patch.initialCredits;
+      this.#drainCapacityWaiters();
+    }
+
+    return result;
   }
 
   public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {

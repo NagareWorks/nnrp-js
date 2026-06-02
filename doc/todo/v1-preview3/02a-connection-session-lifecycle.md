@@ -44,7 +44,7 @@
 - [x] Add `NnrpBrowserClient.openSession(options)` in browser mode.
 - [x] Add `NnrpServer.accept()` returning `NnrpServerSession` in native mode.
 - [x] Wrap session ids/handles without exposing raw pointers or WASM internals.
-- [ ] Add session patch/update API once Rust artifact support is available.
+- [x] Add session patch/update API once Rust artifact support is available.
 - [x] Add explicit `session.close(reason?)`.
 - [x] Reject submit/cancel/event operations after close.
 - [x] Route events by session id so multiple sessions can share one runtime connection.

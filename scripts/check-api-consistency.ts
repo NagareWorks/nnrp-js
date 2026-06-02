@@ -30,6 +30,7 @@ function checkSessionMethodParity(): void {
     "submit",
     "submitNoWait",
     "cancel",
+    "patch",
     "inFlightFrames",
     "completeEvent",
     "nextEvent",

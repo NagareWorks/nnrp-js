@@ -250,6 +250,17 @@ export interface NnrpSessionFlowControlOptions {
     readonly submitCapacityPolicy?: NnrpSubmitCapacityPolicy;
     readonly initialCredits?: number;
 }
+export interface NnrpSessionPatchRequest extends NnrpSessionMetadataOptions, NnrpSessionFlowControlOptions {
+    readonly inputProfile?: NnrpInputProfile;
+    readonly targetCadence?: number;
+    readonly qualityTier?: number;
+}
+export interface NnrpSessionPatchResult {
+    readonly accepted: boolean;
+    readonly sessionId?: string;
+    readonly diagnostic?: NnrpDiagnostic;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
 export declare class NnrpError extends Error {
     readonly diagnostic: NnrpDiagnostic;
     constructor(diagnostic: NnrpDiagnostic);
@@ -304,4 +315,5 @@ export declare function normalizeSessionMigrationRequest(request: NnrpSessionMig
 export declare function throwIfResultDrop(event: NnrpRuntimeEvent): void;
 export declare function validateEventPollOptions(options?: NnrpEventPollOptions): void;
 export declare function validateSessionMetadata(options?: NnrpSessionMetadataOptions): void;
+export declare function normalizeSessionPatchRequest(request: NnrpSessionPatchRequest): NnrpSessionPatchRequest;
 //# sourceMappingURL=index.d.ts.map

@@ -723,6 +723,55 @@ Deno.test("@nnrp/native reports unsupported session migration with stable diagno
   assertEquals(error.diagnostic.source, "native");
 });
 
+Deno.test("@nnrp/native routes session patch through native bindings", async () => {
+  const seen: string[] = [];
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      patchSession: ({ sessionOptions, patch }) => {
+        seen.push(`${sessionOptions.sessionId ?? ""}:${patch.inputProfile ?? ""}:${patch.metadata?.route ?? ""}`);
+        return { accepted: true, sessionId: sessionOptions.sessionId, metadata: { patched: "native" } };
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession({
+    sessionId: "native-session-patch",
+    inputProfile: "tensor",
+    initialCredits: 0,
+  });
+
+  const result = await session.patch({
+    inputProfile: "token",
+    initialCredits: 2,
+    metadata: { route: "patch" },
+  });
+
+  assertEquals(result, {
+    accepted: true,
+    sessionId: "native-session-patch",
+    metadata: { patched: "native" },
+  });
+  assertEquals(seen, ["native-session-patch:token:patch"]);
+  assertEquals(session.options.inputProfile, "token");
+  assertEquals(session.options.initialCredits, 2);
+  assertEquals(session.options.metadata, { route: "patch" });
+});
+
+Deno.test("@nnrp/native preserves not-connected diagnostics for session patch", async () => {
+  const runtime = await openBackendRuntime({ env: {}, platform: "linux", arch: "x64" });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  const error = await assertRejects(
+    () => session.patch({ inputProfile: "token" }),
+    NnrpNativeBindingUnavailableError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_BINDING_NOT_CONNECTED");
+});
+
 Deno.test("@nnrp/native opens a client-first native client", async () => {
   const client = await openNativeClient({
     endpoint: "127.0.0.1:4433",

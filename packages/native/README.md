@@ -29,6 +29,10 @@ const client = await openNativeClient({
 });
 
 const session = client.openSession();
+await session.patch({
+  metadata: { phase: "planning" },
+  initialCredits: 128,
+});
 
 try {
   await session.submitNoWait({
