@@ -53,4 +53,4 @@
 - [ ] Decide whether WASM assets are bundled or externally injected by package policy.
 - [x] Document supported Node versions.
 - [x] Document supported browser baseline.
-- [ ] Add release dry-run workflow before enabling publish.
+- [x] Add release dry-run workflow before enabling publish.

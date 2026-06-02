@@ -18,9 +18,11 @@
     "package-pack": "deno run --allow-read --allow-env=ComSpec,NNRP_JS_FORCE_NPM_PACK --allow-run=npm,cmd scripts/check-npm-pack.ts",
     "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts && deno task package-pack && deno task public-api && deno task browser-bundle-smoke",
     "package-smoke": "deno task build && deno task package-check",
+    "release-dry-run": "deno task package-smoke && deno run --allow-read --allow-write=artifacts/release-dry-run --allow-env=ComSpec,NNRP_JS_FORCE_NPM_PACK --allow-run=deno,npm,cmd scripts/create-release-dry-run-artifacts.ts artifacts/release-dry-run",
     "format": "deno fmt",
     "format:check": "deno fmt --check",
     "lint": "deno fmt --check && deno lint && deno task runtime-policy && deno task typecheck",
+    "content-policy": "deno run --allow-read scripts/check-content-policy.ts",
     "runtime-policy": "deno run --allow-read scripts/check-runtime-policy.ts",
     "test": "deno test --allow-env --allow-read --allow-write packages/*/test/*.test.ts scripts/*.test.ts",
     "typecheck": "deno check packages/*/src/index.ts packages/*/test/*.test.ts scripts/*.ts examples/*.ts"

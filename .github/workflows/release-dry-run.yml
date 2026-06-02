@@ -1,0 +1,27 @@
+name: Release Dry Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-dry-run:
+    name: release-dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Verify release gates
+        run: deno task release-dry-run
+      - name: Upload dry-run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nnrp-js-release-dry-run
+          path: artifacts/release-dry-run/
+          if-no-files-found: error

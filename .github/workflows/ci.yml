@@ -160,6 +160,8 @@ jobs:
           deno-version: v2.x
       - name: Check formatting
         run: deno task format:check
+      - name: Content policy
+        run: deno task content-policy
       - name: Lint
         run: deno lint
       - name: Typecheck

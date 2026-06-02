@@ -15,7 +15,7 @@
 - [x] Add package declaration diff check.
 - [x] Add package export snapshot check.
 - [x] Add runtime-policy checks for core/native/wasm import boundaries.
-- [ ] Add content-policy checks for docs and examples.
+- [x] Add content-policy checks for docs and examples.
 - [ ] Add coverage gate once implementation tests cover real logic.
 
 ## Conformance
@@ -36,7 +36,7 @@
 - [x] Report native artifact version or WASM artifact version.
 - [x] Report selected transport and rejected provider diagnostics.
 - [ ] Add smoke thresholds only after first stable local baseline.
-- [ ] Store benchmark JSON artifacts in CI when benchmark workflow is explicitly requested.
+- [x] Store benchmark JSON artifacts in CI when benchmark workflow is explicitly requested.
 
 ## Examples
 
@@ -57,8 +57,8 @@
 
 ## Release Gates
 
-- [ ] Add release workflow only after npm package names are frozen.
-- [ ] Add npm publish dry run.
-- [ ] Add package artifact verification before enabling registry publish.
+- [x] Add release workflow only after npm package names are frozen.
+- [x] Add npm publish dry run.
+- [x] Add package artifact verification before enabling registry publish.
 - [ ] Document environment secrets required for npm publish.
 - [ ] Tag release only after docs, conformance smoke, package pack checks, and import smoke pass.
