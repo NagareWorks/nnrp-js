@@ -118,6 +118,7 @@ Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
   assertEquals(client.endpoint, "wss://example.test/nnrp");
   assertEquals(client.transportPolicy, "score");
   assertEquals(client.runtime, runtime);
+  assertEquals(session.sessionId, "browser-session-1");
   assertEquals(session.options.inputProfile, "token");
   assertEquals(session.options.metadata, { app: "browser", request: "one" });
 });
@@ -272,8 +273,36 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
   assertEquals(seen, ["submit:11:kv-block", "cancel:11:done", "submitNoWait:12"]);
   assertEquals(event.type, "diagnostic");
   if (event.type === "diagnostic") {
-    assertEquals(event.diagnostic.code, "NNRP_WASM_TEST_EVENTS_1");
+    assertEquals(event.diagnostic.code, "NNRP_WASM_TEST_EVENTS_16");
   }
+});
+
+Deno.test("@nnrp/wasm routes events by session id across shared runtimes", async () => {
+  let pollCount = 0;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: () => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return [
+            { type: "result", sessionId: "session-b", result: { frameId: 2 } },
+            { type: "result", sessionId: "session-a", result: { frameId: 1 } },
+          ];
+        }
+
+        return [{ type: "diagnostic", diagnostic: diagnostic("NNRP_WASM_EMPTY") }];
+      },
+    },
+  });
+  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
+  const sessionA = client.openSession({ sessionId: "session-a" });
+  const sessionB = client.openSession({ sessionId: "session-b" });
+
+  assertEquals(sessionA.sessionId, "session-a");
+  assertEquals(sessionB.sessionId, "session-b");
+  assertEquals(await sessionA.nextEvent(), { type: "result", sessionId: "session-a", result: { frameId: 1 } });
+  assertEquals(await sessionB.nextEvent(), { type: "result", sessionId: "session-b", result: { frameId: 2 } });
+  assertEquals(pollCount, 1);
 });
 
 Deno.test("@nnrp/wasm rejects duplicate in-flight frames and releases on completion", async () => {

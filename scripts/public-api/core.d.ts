@@ -143,28 +143,35 @@ export interface NnrpResult {
     readonly frameId: number;
     readonly payload?: Uint8Array;
     readonly diagnostic?: NnrpDiagnostic;
+    readonly sessionId?: string;
     readonly metadata?: Readonly<Record<string, string>>;
 }
 export type NnrpRuntimeEvent = {
     readonly type: "result";
     readonly result: NnrpResult;
+    readonly sessionId?: string;
 } | {
     readonly type: "flow-update";
     readonly update: NnrpFlowUpdateMetadata;
+    readonly sessionId?: string;
     readonly diagnostic?: NnrpDiagnostic;
 } | {
     readonly type: "result-hint";
     readonly hint: NnrpResultHintMetadata;
+    readonly sessionId?: string;
     readonly diagnostic?: NnrpDiagnostic;
 } | {
     readonly type: "drop";
     readonly frameId: number;
+    readonly sessionId?: string;
     readonly diagnostic: NnrpDiagnostic;
 } | {
     readonly type: "close";
+    readonly sessionId?: string;
     readonly diagnostic?: NnrpDiagnostic;
 } | {
     readonly type: "diagnostic";
+    readonly sessionId?: string;
     readonly diagnostic: NnrpDiagnostic;
 };
 export interface NnrpFlowUpdateMetadata {

@@ -56,6 +56,7 @@ export interface NnrpBrowserTransportProvider {
 }
 
 export interface NnrpBrowserSessionOptions {
+  readonly sessionId?: string;
   readonly inputProfile?: NnrpInputProfile;
   readonly targetCadence?: number;
   readonly qualityTier?: number;
@@ -255,6 +256,8 @@ export interface NnrpBrowserClientState {
 
 export class NnrpBrowserClient {
   readonly #state: NnrpBrowserClientState;
+  readonly #eventQueues = new Map<string, NnrpRuntimeEvent[]>();
+  #nextSessionId = 1;
   #closed = false;
 
   public constructor(state: NnrpBrowserClientState) {
@@ -279,8 +282,37 @@ export class NnrpBrowserClient {
 
     return new NnrpBrowserClientSession({
       client: this,
-      options: mergeSessionOptions(this.#state.sessionDefaults, options),
+      options: this.#createSessionOptions(options),
     });
+  }
+
+  public async nextSessionEvent(sessionId: string, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+    this.#ensureOpen();
+    validateEventPollOptions(options);
+
+    const queued = this.#eventQueues.get(sessionId);
+    const event = queued?.shift();
+    if (event !== undefined) {
+      return event;
+    }
+
+    while (true) {
+      const events = await this.#state.runtime.awaitEvents({ maxEvents: 16 });
+      if (events.length === 0) {
+        throw bindingNotInstantiatedError("nextEvent");
+      }
+
+      for (const candidate of events) {
+        const candidateSessionId = eventSessionId(candidate);
+        if (candidateSessionId === undefined || candidateSessionId === sessionId) {
+          return candidate;
+        }
+
+        const queue = this.#eventQueues.get(candidateSessionId) ?? [];
+        queue.push(candidate);
+        this.#eventQueues.set(candidateSessionId, queue);
+      }
+    }
   }
 
   public close(): Promise<void> {
@@ -296,6 +328,14 @@ export class NnrpBrowserClient {
     if (this.closed) {
       throw closedError("browser client");
     }
+  }
+
+  #createSessionOptions(options: NnrpBrowserSessionOptions): NnrpBrowserSessionOptions {
+    const merged = mergeSessionOptions(this.#state.sessionDefaults, options);
+    return {
+      ...merged,
+      sessionId: merged.sessionId ?? `browser-session-${this.#nextSessionId++}`,
+    };
   }
 }
 
@@ -317,6 +357,10 @@ export class NnrpBrowserClientSession {
 
   public get options(): NnrpBrowserSessionOptions {
     return this.#state.options;
+  }
+
+  public get sessionId(): string {
+    return this.#state.options.sessionId ?? "";
   }
 
   public submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
@@ -405,12 +449,7 @@ export class NnrpBrowserClientSession {
       return Promise.reject(error);
     }
 
-    return this.#state.client.runtime.awaitEvents({ maxEvents: 1 }).then((events) => {
-      const [event] = events;
-      if (event === undefined) {
-        throw bindingNotInstantiatedError("nextEvent");
-      }
-
+    return this.#state.client.nextSessionEvent(this.sessionId, options).then((event) => {
       this.completeEvent(event);
       return event;
     });
@@ -663,6 +702,14 @@ function mergeSessionOptions(
   };
   validateSessionMetadata(merged);
   return merged;
+}
+
+function eventSessionId(event: NnrpRuntimeEvent): string | undefined {
+  if (event.type === "result") {
+    return event.sessionId ?? event.result.sessionId;
+  }
+
+  return event.sessionId;
 }
 
 function closedError(target: string): NnrpCapabilityError {

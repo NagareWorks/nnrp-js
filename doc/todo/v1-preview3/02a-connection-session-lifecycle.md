@@ -47,8 +47,8 @@
 - [ ] Add session patch/update API once Rust artifact support is available.
 - [x] Add explicit `session.close(reason?)`.
 - [x] Reject submit/cancel/event operations after close.
-- [ ] Route events by session id so multiple sessions can share one runtime connection.
-- [ ] Add multi-session lifecycle tests.
+- [x] Route events by session id so multiple sessions can share one runtime connection.
+- [x] Add multi-session lifecycle tests.
 
 ## Options and Defaults
 

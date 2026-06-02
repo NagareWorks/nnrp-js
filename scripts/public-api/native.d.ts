@@ -68,6 +68,7 @@ export interface NnrpResolvedNativeArtifact {
     readonly manifest: NnrpNativeArtifactManifest;
 }
 export interface NnrpSessionOptions {
+    readonly sessionId?: string;
     readonly inputProfile?: NnrpInputProfile;
     readonly targetCadence?: number;
     readonly qualityTier?: number;
@@ -156,6 +157,7 @@ export declare class NnrpClient {
     get transportPolicy(): NnrpTransportPolicy;
     get runtime(): NnrpBackendRuntime;
     openSession(options?: NnrpSessionOptions): NnrpClientSession;
+    nextSessionEvent(sessionId: string, options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     close(): Promise<void>;
     get closed(): boolean;
 }
@@ -167,6 +169,7 @@ export declare class NnrpClientSession {
     #private;
     constructor(state: NnrpClientSessionState);
     get options(): NnrpSessionOptions;
+    get sessionId(): string;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
     cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;

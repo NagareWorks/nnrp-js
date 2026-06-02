@@ -24,6 +24,7 @@ export interface NnrpBrowserTransportProvider {
     readonly diagnostic?: NnrpDiagnostic;
 }
 export interface NnrpBrowserSessionOptions {
+    readonly sessionId?: string;
     readonly inputProfile?: NnrpInputProfile;
     readonly targetCadence?: number;
     readonly qualityTier?: number;
@@ -117,6 +118,7 @@ export declare class NnrpBrowserClient {
     get transportPolicy(): NnrpTransportPolicy;
     get runtime(): NnrpBrowserRuntime;
     openSession(options?: NnrpBrowserSessionOptions): NnrpBrowserClientSession;
+    nextSessionEvent(sessionId: string, options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     close(): Promise<void>;
     get closed(): boolean;
 }
@@ -128,6 +130,7 @@ export declare class NnrpBrowserClientSession {
     #private;
     constructor(state: NnrpBrowserClientSessionState);
     get options(): NnrpBrowserSessionOptions;
+    get sessionId(): string;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
     cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;

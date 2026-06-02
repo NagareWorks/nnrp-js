@@ -385,8 +385,40 @@ Deno.test("@nnrp/native routes event polling through coarse batch binding when a
 
   assertEquals(event.type, "diagnostic");
   if (event.type === "diagnostic") {
-    assertEquals(event.diagnostic.code, "NNRP_TEST_BATCH_1");
+    assertEquals(event.diagnostic.code, "NNRP_TEST_BATCH_16");
   }
+});
+
+Deno.test("@nnrp/native routes events by session id across shared runtimes", async () => {
+  let pollCount = 0;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: () => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return [
+            { type: "result", sessionId: "session-b", result: { frameId: 2 } },
+            { type: "result", sessionId: "session-a", result: { frameId: 1 } },
+          ];
+        }
+
+        return [{ type: "diagnostic", diagnostic: diagnostic("NNRP_TEST_EMPTY") }];
+      },
+    },
+  });
+  const client = runtime.connect({ endpoint: "127.0.0.1:4433" });
+  const sessionA = client.openSession({ sessionId: "session-a" });
+  const sessionB = client.openSession({ sessionId: "session-b" });
+
+  assertEquals(sessionA.sessionId, "session-a");
+  assertEquals(sessionB.sessionId, "session-b");
+  assertEquals(await sessionA.nextEvent(), { type: "result", sessionId: "session-a", result: { frameId: 1 } });
+  assertEquals(await sessionB.nextEvent(), { type: "result", sessionId: "session-b", result: { frameId: 2 } });
+  assertEquals(pollCount, 1);
 });
 
 Deno.test("@nnrp/native opens a client-first native client", async () => {
@@ -402,6 +434,7 @@ Deno.test("@nnrp/native opens a client-first native client", async () => {
 
   assertEquals(client.endpoint, "127.0.0.1:4433");
   assertEquals(client.transportPolicy, "score");
+  assertEquals(session.sessionId, "native-session-1");
   assertEquals(session.options.inputProfile, "tensor");
   assertEquals(session.options.metadata, { app: "agent", request: "one" });
 });
