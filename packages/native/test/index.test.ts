@@ -7,6 +7,7 @@ import {
   NnrpResultDropError,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
+  NnrpTransportError,
 } from "@nnrp/core";
 import {
   createNativeRuntimeBinding,
@@ -381,6 +382,48 @@ Deno.test("@nnrp/native tracks no-wait frames until cancel or terminal events", 
   assertEquals(await session.submitNoWait({ frameId: 8 }), 8n);
   session.completeEvent({ type: "close" });
   assertEquals(session.inFlightFrames(), []);
+});
+
+Deno.test("@nnrp/native awaits submit capacity and rejects no-wait when credits are exhausted", async () => {
+  const submitted: number[] = [];
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      runtimeCapabilities: () => nativeCapabilities(),
+      submitResultCompact: ({ submit }) => {
+        submitted.push(submit.frameId);
+        return { frameId: submit.frameId };
+      },
+      submitNoWait: ({ submit }) => BigInt(submit.frameId),
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession({
+    submitCapacityPolicy: "await-credit",
+    initialCredits: 0,
+  });
+
+  const pending = session.submit({ frameId: 41 });
+  await Promise.resolve();
+  assertEquals(submitted, []);
+
+  const noWaitError = await assertRejects(
+    () => session.submitNoWait({ frameId: 42 }),
+    NnrpTransportError,
+  );
+  assertEquals(noWaitError.diagnostic.code, "NNRP_BACKPRESSURE_CREDIT_EXHAUSTED");
+  assertEquals(noWaitError.diagnostic.source, "native");
+  assertEquals(noWaitError.diagnostic.retryable, true);
+
+  session.completeEvent({
+    type: "flow-update",
+    update: { credits: 1, recommendedPacingMicros: 100, transport: "tcp" },
+  });
+
+  assertEquals(await pending, { frameId: 41 });
+  assertEquals(submitted, [41]);
 });
 
 Deno.test("@nnrp/native rejects duplicate cancel and cancel after terminal events", async () => {

@@ -7,6 +7,7 @@ import {
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  NnrpTransportError,
 } from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
@@ -560,6 +561,43 @@ Deno.test("@nnrp/wasm tracks no-wait frames until cancel or terminal events", as
   await session.submitNoWait({ frameId: 24 });
   session.completeEvent({ type: "close", diagnostic: diagnostic("NNRP_WASM_CLOSE") });
   assertEquals(session.inFlightFrames(), []);
+});
+
+Deno.test("@nnrp/wasm awaits submit capacity and rejects no-wait when credits are exhausted", async () => {
+  const submitted: number[] = [];
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      submit: ({ submit }) => {
+        submitted.push(submit.frameId);
+        return { frameId: submit.frameId };
+      },
+      submitNoWait: ({ submit }) => BigInt(submit.frameId),
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession({
+    submitCapacityPolicy: "await-credit",
+    initialCredits: 0,
+  });
+
+  const pending = session.submit({ frameId: 41 });
+  await Promise.resolve();
+  assertEquals(submitted, []);
+
+  const noWaitError = await assertRejects(
+    () => session.submitNoWait({ frameId: 42 }),
+    NnrpTransportError,
+  );
+  assertEquals(noWaitError.diagnostic.code, "NNRP_BACKPRESSURE_CREDIT_EXHAUSTED");
+  assertEquals(noWaitError.diagnostic.source, "wasm");
+  assertEquals(noWaitError.diagnostic.retryable, true);
+
+  session.completeEvent({
+    type: "flow-update",
+    update: { credits: 1, recommendedPacingMicros: 100, transport: "websocket" },
+  });
+
+  assertEquals(await pending, { frameId: 41 });
+  assertEquals(submitted, [41]);
 });
 
 Deno.test("@nnrp/wasm rejects duplicate cancel and cancel after terminal events", async () => {

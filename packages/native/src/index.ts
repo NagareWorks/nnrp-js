@@ -18,10 +18,12 @@ import {
   NnrpRecoveryError,
   type NnrpResult,
   type NnrpRuntimeEvent,
+  type NnrpSessionFlowControlOptions,
   type NnrpSessionMigrationRequest,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportSelectionSummary,
@@ -201,7 +203,7 @@ export interface NnrpResolvedNativeArtifact {
   readonly manifest: NnrpNativeArtifactManifest;
 }
 
-export interface NnrpSessionOptions {
+export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
   readonly sessionId?: string;
   readonly inputProfile?: NnrpInputProfile;
   readonly targetCadence?: number;
@@ -595,10 +597,13 @@ export class NnrpClientSession {
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
   readonly #cancelledOperations = new Set<string>();
+  readonly #capacityWaiters: Array<() => void> = [];
+  #availableCredits: number;
   #closed = false;
 
   public constructor(state: NnrpClientSessionState) {
     this.#state = state;
+    this.#availableCredits = state.options.initialCredits ?? Number.POSITIVE_INFINITY;
   }
 
   public get options(): NnrpSessionOptions {
@@ -609,10 +614,14 @@ export class NnrpClientSession {
     return this.#state.options.sessionId ?? "";
   }
 
-  public submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
+  public async submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
     let normalized: NnrpNormalizedSubmitRequest;
     try {
       this.#ensureOpen();
+      const capacityWait = this.#reserveOrAwaitSubmitCapacity();
+      if (capacityWait !== undefined) {
+        await capacityWait;
+      }
       normalized = normalizeSubmitRequest(request);
       this.#beginFrame(normalized.frameId);
     } catch (error) {
@@ -630,6 +639,7 @@ export class NnrpClientSession {
     let normalized: NnrpNormalizedSubmitRequest;
     try {
       this.#ensureOpen();
+      this.#reserveImmediateCapacity();
       normalized = normalizeSubmitRequest(request);
       this.#beginFrame(normalized.frameId);
     } catch (error) {
@@ -681,10 +691,17 @@ export class NnrpClientSession {
       return;
     }
 
+    if (event.type === "flow-update") {
+      this.#availableCredits = event.update.credits;
+      this.#drainCapacityWaiters();
+      return;
+    }
+
     if (event.type === "close") {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
       this.#cancelledOperations.clear();
+      this.#drainCapacityWaiters();
     }
   }
 
@@ -734,6 +751,7 @@ export class NnrpClientSession {
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
     this.#cancelledOperations.clear();
+    this.#drainCapacityWaiters();
     return Promise.resolve();
   }
 
@@ -760,6 +778,46 @@ export class NnrpClientSession {
     this.#inFlightFrames.add(frameId);
     this.#terminalFrames.delete(frameId);
     this.#cancelledOperations.delete(operationKey(frameId));
+  }
+
+  #reserveOrAwaitSubmitCapacity(): Promise<void> | undefined {
+    if (this.#state.options.submitCapacityPolicy !== "await-credit") {
+      return undefined;
+    }
+
+    if (this.#availableCredits > 0) {
+      this.#availableCredits -= 1;
+      return undefined;
+    }
+
+    return this.#awaitSubmitCapacity();
+  }
+
+  async #awaitSubmitCapacity(): Promise<void> {
+    do {
+      this.#ensureOpen();
+      await new Promise<void>((resolve) => this.#capacityWaiters.push(resolve));
+    } while (this.#availableCredits <= 0);
+
+    this.#availableCredits -= 1;
+  }
+
+  #reserveImmediateCapacity(): void {
+    if (this.#state.options.submitCapacityPolicy !== "await-credit") {
+      return;
+    }
+
+    if (this.#availableCredits <= 0) {
+      throw backpressureCreditExhaustedError("native");
+    }
+
+    this.#availableCredits -= 1;
+  }
+
+  #drainCapacityWaiters(): void {
+    for (const waiter of this.#capacityWaiters.splice(0)) {
+      waiter();
+    }
   }
 
   #finishFrame(frameId: number): void {
@@ -1425,6 +1483,15 @@ function recoveryUnsupportedError(source: "native" | "wasm"): NnrpRecoveryError 
     message: "Session migration is not supported by this runtime binding yet.",
     source,
     retryable: false,
+  });
+}
+
+function backpressureCreditExhaustedError(source: "native" | "wasm"): NnrpTransportError {
+  return new NnrpTransportError({
+    code: "NNRP_BACKPRESSURE_CREDIT_EXHAUSTED",
+    message: "Submit cannot dispatch because the session has no available flow-control credits.",
+    source,
+    retryable: true,
   });
 }
 

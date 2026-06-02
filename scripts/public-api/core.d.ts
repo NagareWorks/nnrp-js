@@ -57,6 +57,7 @@ export interface NnrpRejectedTransportCandidate {
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 export type NnrpSubmitMode = "inline" | "object-reference";
+export type NnrpSubmitCapacityPolicy = "immediate" | "await-credit";
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
 export type NnrpCacheObjectKind = "tensor" | "token" | "schema" | "artifact" | "tool";
 export interface NnrpTensorSection {
@@ -244,6 +245,10 @@ export interface NnrpEventPollOptions {
 }
 export interface NnrpSessionMetadataOptions {
     readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface NnrpSessionFlowControlOptions {
+    readonly submitCapacityPolicy?: NnrpSubmitCapacityPolicy;
+    readonly initialCredits?: number;
 }
 export declare class NnrpError extends Error {
     readonly diagnostic: NnrpDiagnostic;

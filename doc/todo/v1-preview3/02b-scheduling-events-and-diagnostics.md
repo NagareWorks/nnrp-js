@@ -48,10 +48,10 @@
 - [x] Represent flow update metadata in `@nnrp/core`.
 - [x] Surface available credits and recommended send pacing.
 - [x] Expose result hint metadata in `@nnrp/core`.
-- [ ] Preserve transport/backpressure diagnostics from native/WASM backends.
-- [ ] Ensure `submit` awaits capacity when runtime policy requires it.
+- [x] Preserve transport/backpressure diagnostics from native/WASM backends.
+- [x] Ensure `submit` awaits capacity when runtime policy requires it.
 - [x] Ensure `submitNoWait` reports backpressure rejection without losing diagnostics.
-- [ ] Add tests for credit exhaustion and credit recovery.
+- [x] Add tests for credit exhaustion and credit recovery.
 
 ## Diagnostics and Errors
 

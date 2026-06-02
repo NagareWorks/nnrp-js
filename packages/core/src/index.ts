@@ -94,6 +94,8 @@ export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 
 export type NnrpSubmitMode = "inline" | "object-reference";
 
+export type NnrpSubmitCapacityPolicy = "immediate" | "await-credit";
+
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
 
 export type NnrpCacheObjectKind = "tensor" | "token" | "schema" | "artifact" | "tool";
@@ -306,6 +308,11 @@ export interface NnrpEventPollOptions {
 
 export interface NnrpSessionMetadataOptions {
   readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export interface NnrpSessionFlowControlOptions {
+  readonly submitCapacityPolicy?: NnrpSubmitCapacityPolicy;
+  readonly initialCredits?: number;
 }
 
 export class NnrpError extends Error {
