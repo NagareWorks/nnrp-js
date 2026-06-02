@@ -58,8 +58,8 @@
 
 ## Documentation Contract
 
-- [ ] Keep `nnrp-doc/docs/en/sdk/javascript` aligned with package exports.
-- [ ] Keep `nnrp-doc/docs/zh/sdk/javascript` aligned with package exports.
+- [x] Keep `nnrp-doc/docs/en/sdk/javascript` aligned with package exports.
+- [x] Keep `nnrp-doc/docs/zh/sdk/javascript` aligned with package exports.
 - [ ] Update docs in the same PR when public API names or package boundaries change.
-- [ ] Link method parameters to shared core types in docs.
-- [ ] Keep code blocks as usage examples, not duplicate interface dumps.
+- [x] Link method parameters to shared core types in docs.
+- [x] Keep code blocks as usage examples, not duplicate interface dumps.
