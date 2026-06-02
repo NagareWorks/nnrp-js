@@ -16,7 +16,7 @@
 - [x] Add `NnrpServerSession.sendResult(result)`.
 - [x] Validate `frameId` uniqueness while in flight.
 - [x] Validate payload ownership rules before calling native/WASM backends.
-- [ ] Map result drops to typed JS errors with diagnostics.
+- [x] Map result drops to typed JS errors with diagnostics.
 - [x] Add tests for submit success, result drop, and close-during-submit.
 - [x] Add tests for malformed request rejection.
 
@@ -59,6 +59,6 @@
 - [x] Add `NnrpError` base class that carries `NnrpDiagnostic`.
 - [x] Add `NnrpNativeBindingUnavailableError`.
 - [x] Add browser/WASM loading error class with the same diagnostic shape.
-- [ ] Preserve native/WASM status codes without flattening them into strings.
+- [x] Preserve native/WASM status codes without flattening them into strings.
 - [x] Ensure thrown errors are serializable enough for CLI/agent logs.
 - [x] Add tests for diagnostic mapping from fake native and fake WASM errors.

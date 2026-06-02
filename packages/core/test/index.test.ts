@@ -4,6 +4,7 @@ import {
   createBrowserWasmManifest,
   createCacheKey,
   createCapabilityManifest,
+  createRecoveryToken,
   createSchemaDescriptor,
   createTransportCandidates,
   createTransportSelectionSummary,
@@ -11,14 +12,18 @@ import {
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
   NnrpProtocolError,
+  NnrpRecoveryError,
+  NnrpResultDropError,
   NnrpTimeoutError,
   NnrpTransportError,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
   normalizeCancelRequest,
   normalizeOperationRef,
+  normalizeSessionMigrationRequest,
   normalizeSubmitRequest,
   selectTransport,
+  throwIfResultDrop,
   validateEventPollOptions,
   validateSessionMetadata,
 } from "../src/index.ts";
@@ -335,6 +340,62 @@ Deno.test("@nnrp/core normalizes operation references and cancel requests", () =
     NnrpProtocolError,
     "Operation ids must be non-negative",
   );
+});
+
+Deno.test("@nnrp/core normalizes recovery tokens and migration requests", () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  const token = createRecoveryToken(bytes, { route: "standby" });
+  bytes[0] = 9;
+  const migration = normalizeSessionMigrationRequest({
+    recoveryToken: token,
+    targetEndpoint: "nnrp://standby",
+    metadata: { reason: "preempt" },
+  });
+
+  assertEquals(token.token, new Uint8Array([1, 2, 3]));
+  assertEquals(token.metadata, { route: "standby" });
+  assertEquals(migration.targetEndpoint, "nnrp://standby");
+  assertEquals(migration.metadata, { reason: "preempt" });
+
+  assertThrows(
+    () => createRecoveryToken(" "),
+    NnrpProtocolError,
+    "Recovery token strings must be non-empty",
+  );
+  assertThrows(
+    () => createRecoveryToken(new Uint8Array()),
+    NnrpProtocolError,
+    "Recovery token payloads must be non-empty",
+  );
+});
+
+Deno.test("@nnrp/core maps result drops and recovery failures to typed errors", () => {
+  const drop = {
+    type: "drop" as const,
+    frameId: 77,
+    sessionId: "session-a",
+    diagnostic: {
+      code: "NNRP_RESULT_DROPPED",
+      message: "result dropped",
+      source: "runtime" as const,
+      retryable: true,
+    },
+  };
+  const error = assertThrows(
+    () => throwIfResultDrop(drop),
+    NnrpResultDropError,
+  );
+  const recoveryError = new NnrpRecoveryError({
+    code: "NNRP_RECOVERY_UNSUPPORTED",
+    message: "migration unsupported",
+    source: "runtime",
+    retryable: false,
+  });
+
+  assertEquals(error.frameId, 77);
+  assertEquals(error.sessionId, "session-a");
+  assertEquals(error.diagnostic.code, "NNRP_RESULT_DROPPED");
+  assertEquals(recoveryError.name, "NnrpRecoveryError");
 });
 
 Deno.test("@nnrp/core validates event polling options", () => {

@@ -200,6 +200,40 @@ export interface NnrpResult {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
+export interface NnrpRecoveryToken {
+  readonly token: string | Uint8Array;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export interface NnrpSessionMigrationRequest {
+  readonly recoveryToken: NnrpRecoveryToken;
+  readonly targetEndpoint?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export type NnrpSessionMigrationEvent =
+  | {
+    readonly type: "migration-requested";
+    readonly sessionId?: string;
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly diagnostic?: NnrpDiagnostic;
+  }
+  | {
+    readonly type: "migration-accepted";
+    readonly sessionId?: string;
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly diagnostic?: NnrpDiagnostic;
+  }
+  | {
+    readonly type: "migration-rejected";
+    readonly sessionId?: string;
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly diagnostic: NnrpDiagnostic;
+  };
+
 export type NnrpRuntimeEvent =
   | { readonly type: "result"; readonly result: NnrpResult; readonly sessionId?: string }
   | {
@@ -220,6 +254,7 @@ export type NnrpRuntimeEvent =
     readonly sessionId?: string;
     readonly diagnostic: NnrpDiagnostic;
   }
+  | NnrpSessionMigrationEvent
   | { readonly type: "close"; readonly sessionId?: string; readonly diagnostic?: NnrpDiagnostic }
   | { readonly type: "diagnostic"; readonly sessionId?: string; readonly diagnostic: NnrpDiagnostic };
 
@@ -302,6 +337,27 @@ export class NnrpProtocolError extends NnrpError {
   public constructor(diagnostic: NnrpDiagnostic) {
     super(diagnostic);
     this.name = "NnrpProtocolError";
+  }
+}
+
+export class NnrpResultDropError extends NnrpProtocolError {
+  public readonly frameId: number;
+  public readonly sessionId?: string;
+
+  public constructor(event: Extract<NnrpRuntimeEvent, { readonly type: "drop" }>) {
+    super(event.diagnostic);
+    this.name = "NnrpResultDropError";
+    this.frameId = event.frameId;
+    if (event.sessionId !== undefined) {
+      this.sessionId = event.sessionId;
+    }
+  }
+}
+
+export class NnrpRecoveryError extends NnrpCapabilityError {
+  public constructor(diagnostic: NnrpDiagnostic) {
+    super(diagnostic);
+    this.name = "NnrpRecoveryError";
   }
 }
 
@@ -514,6 +570,38 @@ export function normalizeCancelRequest(
   };
 }
 
+export function createRecoveryToken(
+  token: string | NnrpBinaryPayload,
+  metadata?: Readonly<Record<string, string>>,
+): NnrpRecoveryToken {
+  const normalized = typeof token === "string" ? token : normalizeBinaryPayload(token, true);
+  validateRecoveryToken({ token: normalized, ...(metadata === undefined ? {} : { metadata }) });
+
+  return {
+    token: normalized,
+    ...(metadata === undefined ? {} : { metadata: normalizeMetadataMap(metadata) }),
+  };
+}
+
+export function normalizeSessionMigrationRequest(request: NnrpSessionMigrationRequest): NnrpSessionMigrationRequest {
+  validateRecoveryToken(request.recoveryToken);
+  if (request.metadata !== undefined) {
+    normalizeMetadataMap(request.metadata);
+  }
+
+  return {
+    recoveryToken: createRecoveryToken(request.recoveryToken.token, request.recoveryToken.metadata),
+    ...(request.targetEndpoint === undefined ? {} : { targetEndpoint: request.targetEndpoint }),
+    ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
+  };
+}
+
+export function throwIfResultDrop(event: NnrpRuntimeEvent): void {
+  if (event.type === "drop") {
+    throw new NnrpResultDropError(event);
+  }
+}
+
 export function validateEventPollOptions(options: NnrpEventPollOptions = {}): void {
   if (
     options.timeoutMillis !== undefined &&
@@ -661,6 +749,30 @@ function validateSubmitRequestShape(
         });
       }
     }
+  }
+}
+
+function validateRecoveryToken(token: NnrpRecoveryToken): void {
+  if (typeof token.token === "string") {
+    if (token.token.trim().length === 0 || token.token.length > 4096) {
+      throw new NnrpProtocolError({
+        code: "NNRP_RECOVERY_TOKEN_INVALID",
+        message: "Recovery token strings must be non-empty and at most 4096 characters.",
+        source: "core",
+        retryable: false,
+      });
+    }
+  } else if (token.token.byteLength === 0 || token.token.byteLength > 4096) {
+    throw new NnrpProtocolError({
+      code: "NNRP_RECOVERY_TOKEN_INVALID",
+      message: "Recovery token payloads must be non-empty and at most 4096 bytes.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
+  if (token.metadata !== undefined) {
+    normalizeMetadataMap(token.metadata);
   }
 }
 

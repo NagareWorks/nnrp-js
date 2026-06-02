@@ -36,12 +36,12 @@
 
 ## Migration and Recovery
 
-- [ ] Add recovery token/binding type in `@nnrp/core` if exposed by Rust artifacts.
-- [ ] Add client API for session migration when native/WASM backend supports it.
-- [ ] Add event shape for migration requested/accepted/rejected.
-- [ ] Preserve recovery rejection diagnostics.
-- [ ] Add tests for unsupported migration producing typed errors.
-- [ ] Add tests for recovery object validation via fake native/WASM backends.
+- [x] Add recovery token/binding type in `@nnrp/core` if exposed by Rust artifacts.
+- [x] Add client API for session migration when native/WASM backend supports it.
+- [x] Add event shape for migration requested/accepted/rejected.
+- [x] Preserve recovery rejection diagnostics.
+- [x] Add tests for unsupported migration producing typed errors.
+- [x] Add tests for recovery object validation via fake native/WASM backends.
 
 ## Agent-Facing Reporting
 

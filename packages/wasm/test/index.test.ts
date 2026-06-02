@@ -2,6 +2,8 @@ import {
   createCapabilityManifest,
   NnrpCapabilityError,
   NnrpProtocolError,
+  NnrpRecoveryError,
+  NnrpResultDropError,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
@@ -393,6 +395,60 @@ Deno.test("@nnrp/wasm routes events by session id across shared runtimes", async
   assertEquals(await sessionA.nextEvent(), { type: "result", sessionId: "session-a", result: { frameId: 1 } });
   assertEquals(await sessionB.nextEvent(), { type: "result", sessionId: "session-b", result: { frameId: 2 } });
   assertEquals(pollCount, 1);
+});
+
+Deno.test("@nnrp/wasm maps result polling drops to typed errors", async () => {
+  let pollCount = 0;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: () => {
+        pollCount += 1;
+        return pollCount === 1
+          ? [{ type: "diagnostic", diagnostic: diagnostic("NNRP_WASM_SKIP") }]
+          : [{ type: "drop", sessionId: "session-a", frameId: 55, diagnostic: diagnostic("NNRP_WASM_DROP") }];
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession({ sessionId: "session-a" });
+
+  const error = await assertRejects(
+    () => session.nextResult(),
+    NnrpResultDropError,
+  );
+
+  assertEquals(error.frameId, 55);
+  assertEquals(error.sessionId, "session-a");
+  assertEquals(error.diagnostic.code, "NNRP_WASM_DROP");
+});
+
+Deno.test("@nnrp/wasm returns next result after non-result events", async () => {
+  let pollCount = 0;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: () => {
+        pollCount += 1;
+        return pollCount === 1
+          ? [{ type: "diagnostic", diagnostic: diagnostic("NNRP_WASM_SKIP") }]
+          : [{ type: "result", sessionId: "session-a", result: { frameId: 56 } }];
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession({ sessionId: "session-a" });
+
+  assertEquals(await session.nextResult(), { frameId: 56 });
+});
+
+Deno.test("@nnrp/wasm reports unsupported session migration with stable diagnostics", async () => {
+  const runtime = await openBrowserRuntime();
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  const error = await assertRejects(
+    () => session.migrate({ recoveryToken: { token: "resume-token" }, targetEndpoint: "wss://standby.test/nnrp" }),
+    NnrpRecoveryError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_RECOVERY_UNSUPPORTED");
+  assertEquals(error.diagnostic.source, "wasm");
 });
 
 Deno.test("@nnrp/wasm rejects duplicate in-flight frames and releases on completion", async () => {

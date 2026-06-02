@@ -15,16 +15,20 @@ import {
   type NnrpNormalizedSubmitRequest,
   type NnrpOperationRef,
   NnrpProtocolError,
+  NnrpRecoveryError,
   type NnrpResult,
   type NnrpRuntimeEvent,
+  type NnrpSessionMigrationRequest,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
+  normalizeSessionMigrationRequest,
   normalizeSubmitRequest,
   selectTransport,
+  throwIfResultDrop,
   validateEventPollOptions,
   validateSessionMetadata,
 } from "@nnrp/core";
@@ -591,6 +595,27 @@ export class NnrpClientSession {
     });
   }
 
+  public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
+    while (true) {
+      const event = await this.nextEvent(options);
+      throwIfResultDrop(event);
+      if (event.type === "result") {
+        return event.result;
+      }
+    }
+  }
+
+  public migrate(request: NnrpSessionMigrationRequest): Promise<void> {
+    try {
+      this.#ensureOpen();
+      normalizeSessionMigrationRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return Promise.reject(recoveryUnsupportedError("native"));
+  }
+
   public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
     while (!this.closed) {
       yield await this.nextEvent(options);
@@ -1140,6 +1165,15 @@ function eventPollCancelledError(signal: NnrpAbortSignalLike): NnrpTimeoutError 
     source: "runtime",
     retryable: false,
     cause: signal.reason,
+  });
+}
+
+function recoveryUnsupportedError(source: "native" | "wasm"): NnrpRecoveryError {
+  return new NnrpRecoveryError({
+    code: "NNRP_RECOVERY_UNSUPPORTED",
+    message: "Session migration is not supported by this runtime binding yet.",
+    source,
+    retryable: false,
   });
 }
 

@@ -146,6 +146,34 @@ export interface NnrpResult {
     readonly sessionId?: string;
     readonly metadata?: Readonly<Record<string, string>>;
 }
+export interface NnrpRecoveryToken {
+    readonly token: string | Uint8Array;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface NnrpSessionMigrationRequest {
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export type NnrpSessionMigrationEvent = {
+    readonly type: "migration-requested";
+    readonly sessionId?: string;
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly diagnostic?: NnrpDiagnostic;
+} | {
+    readonly type: "migration-accepted";
+    readonly sessionId?: string;
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly diagnostic?: NnrpDiagnostic;
+} | {
+    readonly type: "migration-rejected";
+    readonly sessionId?: string;
+    readonly recoveryToken: NnrpRecoveryToken;
+    readonly targetEndpoint?: string;
+    readonly diagnostic: NnrpDiagnostic;
+};
 export type NnrpRuntimeEvent = {
     readonly type: "result";
     readonly result: NnrpResult;
@@ -165,7 +193,7 @@ export type NnrpRuntimeEvent = {
     readonly frameId: number;
     readonly sessionId?: string;
     readonly diagnostic: NnrpDiagnostic;
-} | {
+} | NnrpSessionMigrationEvent | {
     readonly type: "close";
     readonly sessionId?: string;
     readonly diagnostic?: NnrpDiagnostic;
@@ -228,6 +256,16 @@ export declare class NnrpTimeoutError extends NnrpError {
 export declare class NnrpProtocolError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
 }
+export declare class NnrpResultDropError extends NnrpProtocolError {
+    readonly frameId: number;
+    readonly sessionId?: string;
+    constructor(event: Extract<NnrpRuntimeEvent, {
+        readonly type: "drop";
+    }>);
+}
+export declare class NnrpRecoveryError extends NnrpCapabilityError {
+    constructor(diagnostic: NnrpDiagnostic);
+}
 export interface NnrpCapabilityManifestOptions {
     readonly buildMode: NnrpBuildMode;
     readonly transports?: readonly NnrpTransportKind[];
@@ -251,6 +289,9 @@ export declare function isStandardInputProfile(profile: string): profile is Nnrp
 export declare function normalizeSubmitRequest(request: NnrpSubmitRequest, options?: NormalizeSubmitRequestOptions): NnrpNormalizedSubmitRequest;
 export declare function normalizeOperationRef(operation: NnrpOperationRef): NnrpOperationId;
 export declare function normalizeCancelRequest(operation: NnrpOperationRef, options?: NnrpCancelOptions): NnrpCancelRequest;
+export declare function createRecoveryToken(token: string | NnrpBinaryPayload, metadata?: Readonly<Record<string, string>>): NnrpRecoveryToken;
+export declare function normalizeSessionMigrationRequest(request: NnrpSessionMigrationRequest): NnrpSessionMigrationRequest;
+export declare function throwIfResultDrop(event: NnrpRuntimeEvent): void;
 export declare function validateEventPollOptions(options?: NnrpEventPollOptions): void;
 export declare function validateSessionMetadata(options?: NnrpSessionMetadataOptions): void;
 //# sourceMappingURL=index.d.ts.map

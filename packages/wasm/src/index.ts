@@ -14,8 +14,10 @@ import {
   type NnrpNormalizedSubmitRequest,
   type NnrpOperationRef,
   NnrpProtocolError,
+  NnrpRecoveryError,
   type NnrpResult,
   type NnrpRuntimeEvent,
+  type NnrpSessionMigrationRequest,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
@@ -23,8 +25,10 @@ import {
   type NnrpTransportPolicy,
   type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
+  normalizeSessionMigrationRequest,
   normalizeSubmitRequest,
   selectTransport,
+  throwIfResultDrop,
   validateEventPollOptions,
   validateSessionMetadata,
 } from "@nnrp/core";
@@ -322,7 +326,9 @@ export class NnrpBrowserRuntime {
       local: this.#binding.manifest,
       peer: options.peerManifest,
       ...(options.scores === undefined ? {} : { scores: options.scores }),
-    }).map((candidate) => withBrowserProvider(candidate, providerMap.get(candidate.kind as NnrpBrowserTransportKind)));
+    }).map((candidate: NnrpTransportCandidate) =>
+      withBrowserProvider(candidate, providerMap.get(candidate.kind as NnrpBrowserTransportKind))
+    );
   }
 }
 
@@ -532,6 +538,27 @@ export class NnrpBrowserClientSession {
       this.completeEvent(event);
       return event;
     });
+  }
+
+  public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
+    while (true) {
+      const event = await this.nextEvent(options);
+      throwIfResultDrop(event);
+      if (event.type === "result") {
+        return event.result;
+      }
+    }
+  }
+
+  public migrate(request: NnrpSessionMigrationRequest): Promise<void> {
+    try {
+      this.#ensureOpen();
+      normalizeSessionMigrationRequest(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return Promise.reject(recoveryUnsupportedError("wasm"));
   }
 
   public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
@@ -832,6 +859,15 @@ function eventPollCancelledError(signal: NnrpAbortSignalLike): NnrpTimeoutError 
     source: "runtime",
     retryable: false,
     cause: signal.reason,
+  });
+}
+
+function recoveryUnsupportedError(source: "native" | "wasm"): NnrpRecoveryError {
+  return new NnrpRecoveryError({
+    code: "NNRP_RECOVERY_UNSUPPORTED",
+    message: "Session migration is not supported by this runtime binding yet.",
+    source,
+    retryable: false,
   });
 }
 

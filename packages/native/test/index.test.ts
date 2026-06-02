@@ -3,6 +3,8 @@ import {
   createCapabilityManifest,
   NnrpCapabilityError,
   NnrpProtocolError,
+  NnrpRecoveryError,
+  NnrpResultDropError,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
 } from "@nnrp/core";
@@ -395,6 +397,55 @@ Deno.test("@nnrp/native routes event polling through coarse batch binding when a
   }
 });
 
+Deno.test("@nnrp/native maps result polling drops to typed errors", async () => {
+  let pollCount = 0;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: () => {
+        pollCount += 1;
+        return pollCount === 1
+          ? [{ type: "diagnostic", diagnostic: diagnostic("NNRP_TEST_SKIP") }]
+          : [{ type: "drop", sessionId: "session-a", frameId: 44, diagnostic: diagnostic("NNRP_TEST_DROP") }];
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession({ sessionId: "session-a" });
+
+  const error = await assertRejects(
+    () => session.nextResult(),
+    NnrpResultDropError,
+  );
+
+  assertEquals(error.frameId, 44);
+  assertEquals(error.sessionId, "session-a");
+  assertEquals(error.diagnostic.code, "NNRP_TEST_DROP");
+});
+
+Deno.test("@nnrp/native returns next result after non-result events", async () => {
+  let pollCount = 0;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      awaitEvents: () => {
+        pollCount += 1;
+        return pollCount === 1
+          ? [{ type: "diagnostic", diagnostic: diagnostic("NNRP_TEST_SKIP") }]
+          : [{ type: "result", sessionId: "session-a", result: { frameId: 45 } }];
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession({ sessionId: "session-a" });
+
+  assertEquals(await session.nextResult(), { frameId: 45 });
+});
+
 Deno.test("@nnrp/native routes events by session id across shared runtimes", async () => {
   let pollCount = 0;
   const runtime = await openBackendRuntime({
@@ -425,6 +476,19 @@ Deno.test("@nnrp/native routes events by session id across shared runtimes", asy
   assertEquals(await sessionA.nextEvent(), { type: "result", sessionId: "session-a", result: { frameId: 1 } });
   assertEquals(await sessionB.nextEvent(), { type: "result", sessionId: "session-b", result: { frameId: 2 } });
   assertEquals(pollCount, 1);
+});
+
+Deno.test("@nnrp/native reports unsupported session migration with stable diagnostics", async () => {
+  const runtime = await openBackendRuntime({ env: {}, platform: "linux", arch: "x64" });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  const error = await assertRejects(
+    () => session.migrate({ recoveryToken: { token: "resume-token" }, targetEndpoint: "127.0.0.1:4434" }),
+    NnrpRecoveryError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_RECOVERY_UNSUPPORTED");
+  assertEquals(error.diagnostic.source, "native");
 });
 
 Deno.test("@nnrp/native opens a client-first native client", async () => {
