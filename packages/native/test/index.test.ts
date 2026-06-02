@@ -580,6 +580,63 @@ Deno.test("@nnrp/native selects transports from local and peer manifests", async
   assertEquals(summary.rejected.map((candidate) => candidate.reason), ["peer-unsupported", "policy-rejected"]);
 });
 
+Deno.test("@nnrp/native delegates transport scoring to native bindings when available", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      runtimeCapabilities: () => ({
+        ...nativeCapabilities(),
+        transportSlots: 0x00000003,
+      }),
+      scoreTransportCandidates: ({ candidates, policy }) => {
+        assertEquals(policy, "score");
+        return candidates.map((candidate) => ({
+          ...candidate,
+          score: candidate.kind === "tcp" ? 100 : candidate.score,
+          diagnostic: candidate.kind === "tcp" ? diagnostic("NNRP_NATIVE_SCORE") : candidate.diagnostic,
+        }));
+      },
+    },
+  });
+  const summary = await runtime.selectTransportWithNative({
+    peerManifest: createCapabilityManifest({
+      buildMode: "backend-native",
+      transports: ["tcp", "quic"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, "tcp");
+  assertEquals(summary.candidates.find((candidate) => candidate.kind === "tcp")?.diagnostic?.code, "NNRP_NATIVE_SCORE");
+});
+
+Deno.test("@nnrp/native falls back to deterministic transport scoring without native hooks", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      runtimeCapabilities: () => ({
+        ...nativeCapabilities(),
+        transportSlots: 0x00000003,
+      }),
+    },
+  });
+  const summary = await runtime.selectTransportWithNative({
+    peerManifest: createCapabilityManifest({
+      buildMode: "backend-native",
+      transports: ["tcp", "quic"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, "quic");
+});
+
 Deno.test("@nnrp/native narrows transport manifest from runtime capability slots", async () => {
   const runtime = await openBackendRuntime({
     env: {},

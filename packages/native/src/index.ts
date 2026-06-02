@@ -21,6 +21,7 @@ import {
   type NnrpSessionMigrationRequest,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
+  type NnrpTransportCandidate,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportSelectionSummary,
@@ -128,9 +129,17 @@ export interface NnrpNativeEventBatchRequest {
   readonly maxEvents: number;
 }
 
+export interface NnrpNativeTransportScoreRequest {
+  readonly candidates: readonly NnrpTransportCandidate[];
+  readonly policy: NnrpTransportPolicy;
+}
+
 export interface NnrpNativeFfiBinding {
   readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
+  scoreTransportCandidates?(
+    request: NnrpNativeTransportScoreRequest,
+  ): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
   submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
@@ -360,11 +369,26 @@ export class NnrpBackendRuntime {
 
     return createTransportSelectionSummary(
       selectTransport(
-        createTransportCandidates({
-          local: this.#binding.manifest,
-          peer: options.peerManifest,
-          ...(options.scores === undefined ? {} : { scores: options.scores }),
-        }),
+        this.#createTransportCandidates(options),
+        this.#transportPolicy,
+      ),
+    );
+  }
+
+  public async selectTransportWithNative(
+    options: NnrpTransportSelectionOptions,
+  ): Promise<NnrpTransportSelectionSummary> {
+    this.#ensureOpen();
+    const candidates = this.#createTransportCandidates(options);
+    const scoreTransportCandidates = this.#binding.ffi?.scoreTransportCandidates;
+    const scoredCandidates = scoreTransportCandidates === undefined ? candidates : await scoreTransportCandidates({
+      candidates,
+      policy: this.#transportPolicy,
+    });
+
+    return createTransportSelectionSummary(
+      selectTransport(
+        scoredCandidates,
         this.#transportPolicy,
       ),
     );
@@ -383,6 +407,14 @@ export class NnrpBackendRuntime {
     if (this.#closed) {
       throw closedError("runtime");
     }
+  }
+
+  #createTransportCandidates(options: NnrpTransportSelectionOptions): readonly NnrpTransportCandidate[] {
+    return createTransportCandidates({
+      local: this.#binding.manifest,
+      peer: options.peerManifest,
+      ...(options.scores === undefined ? {} : { scores: options.scores }),
+    });
   }
 }
 

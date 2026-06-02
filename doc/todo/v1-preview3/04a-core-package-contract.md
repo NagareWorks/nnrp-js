@@ -31,7 +31,7 @@
 - [x] Add typed rejection reason codes.
 - [x] Add policy type for `score`, `tcp-only`, `quic-only`, and future extension values.
 - [x] Add deterministic selection helper only for non-protocol-critical local ordering.
-- [ ] Delegate provider score calculation to Rust/WASM/native primitives when available.
+- [x] Delegate provider score calculation to Rust/WASM/native primitives when available.
 - [x] Add tests for candidate copying and selection stability.
 
 ## Request, Result, and Event Types

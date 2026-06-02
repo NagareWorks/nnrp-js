@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -37,9 +37,14 @@ export interface NnrpNativeCancelRequest {
 export interface NnrpNativeEventBatchRequest {
     readonly maxEvents: number;
 }
+export interface NnrpNativeTransportScoreRequest {
+    readonly candidates: readonly NnrpTransportCandidate[];
+    readonly policy: NnrpTransportPolicy;
+}
 export interface NnrpNativeFfiBinding {
     readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
+    scoreTransportCandidates?(request: NnrpNativeTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
     submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
@@ -141,6 +146,7 @@ export declare class NnrpBackendRuntime {
     connect(options: NnrpConnectOptions): NnrpClient;
     listen(options: NnrpListenOptions): NnrpServer;
     selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
+    selectTransportWithNative(options: NnrpTransportSelectionOptions): Promise<NnrpTransportSelectionSummary>;
     close(): Promise<void>;
     get closed(): boolean;
 }

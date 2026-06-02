@@ -9,7 +9,7 @@
 ## Transport Selection
 
 - [x] Represent `NnrpTransportCandidate` and `NnrpTransportSelection` in `@nnrp/core`.
-- [ ] Use Rust-backed scoring for native transport providers when the artifact exposes it.
+- [x] Use Rust-backed scoring for native transport providers when the artifact exposes it.
 - [x] Use WASM primitive scoring for browser provider candidates when available.
 - [x] Keep candidate scoring stable and deterministic for tests.
 - [x] Expose rejected candidates with reason codes.
@@ -27,12 +27,12 @@
 
 ## Browser Transport Slots
 
-- [ ] Define `NnrpBrowserTransportProvider` interface.
-- [ ] Add WebSocket adapter slot.
+- [x] Define `NnrpBrowserTransportProvider` interface.
+- [x] Add WebSocket adapter slot.
 - [ ] Add WebTransport adapter slot only after browser protocol mapping is frozen.
-- [ ] Keep browser transport adapters optional so WASM primitive tests can run without network access.
-- [ ] Ensure browser package exports no server transport APIs.
-- [ ] Add bundling smoke that verifies adapter slots do not import Node built-ins.
+- [x] Keep browser transport adapters optional so WASM primitive tests can run without network access.
+- [x] Ensure browser package exports no server transport APIs.
+- [x] Add bundling smoke that verifies adapter slots do not import Node built-ins.
 
 ## Migration and Recovery
 
