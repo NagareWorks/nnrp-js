@@ -19,14 +19,14 @@
 
 ## Cross-Runtime Consistency Gates
 
-- [ ] Native and browser client sessions expose the same submit/cancel/result/event method names unless a runtime cannot
+- [x] Native and browser client sessions expose the same submit/cancel/result/event method names unless a runtime cannot
       support a capability.
-- [ ] Native and browser errors map to the same diagnostic families.
-- [ ] Operation ids use `bigint` where they can exceed JavaScript safe integer range.
-- [ ] Binary payload parameters accept `Uint8Array` or `ArrayBufferView`.
-- [ ] Retained binary payloads are copied unless an API explicitly states ownership transfer.
-- [ ] Cancellation and close semantics are explicit for all async methods.
-- [ ] Runtime event objects can be pattern-matched without string parsing.
+- [x] Native and browser errors map to the same diagnostic families.
+- [x] Operation ids use `bigint` where they can exceed JavaScript safe integer range.
+- [x] Binary payload parameters accept `Uint8Array` or `ArrayBufferView`.
+- [x] Retained binary payloads are copied unless an API explicitly states ownership transfer.
+- [x] Cancellation and close semantics are explicit for all async methods.
+- [x] Runtime event objects can be pattern-matched without string parsing.
 
 ## Dependency Order
 
