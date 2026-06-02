@@ -116,6 +116,38 @@ export interface NnrpCacheMetadata {
   readonly dependencies?: readonly NnrpCacheKey[];
 }
 
+export type NnrpCacheOperationStatus = "accepted" | "stored" | "invalidated" | "miss" | "rejected";
+
+export interface NnrpCachePutRequest {
+  readonly key: NnrpCacheKey;
+  readonly payload?: NnrpBinaryPayload;
+  readonly descriptor?: NnrpPayloadDescriptor;
+  readonly leaseMillis?: number;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export interface NnrpCachePutResult {
+  readonly key: NnrpCacheKey;
+  readonly status: Extract<NnrpCacheOperationStatus, "accepted" | "stored" | "rejected">;
+  readonly version?: bigint | number | string;
+  readonly diagnostic?: NnrpDiagnostic;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export interface NnrpCacheInvalidateRequest {
+  readonly key: NnrpCacheKey;
+  readonly version?: bigint | number | string;
+  readonly recursive?: boolean;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+export interface NnrpCacheInvalidateResult {
+  readonly key: NnrpCacheKey;
+  readonly status: Extract<NnrpCacheOperationStatus, "invalidated" | "miss" | "rejected">;
+  readonly diagnostic?: NnrpDiagnostic;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
 export type NnrpSchemaFlag = "required" | "streamable" | "lossless" | "opaque";
 
 export interface NnrpSchemaDescriptor {
@@ -205,6 +237,10 @@ export interface NnrpCancelResult {
 
 export interface NnrpEventPollOptions {
   readonly timeoutMillis?: number;
+}
+
+export interface NnrpSessionMetadataOptions {
+  readonly metadata?: Readonly<Record<string, string>>;
 }
 
 export class NnrpError extends Error {
@@ -359,6 +395,32 @@ export function createSchemaDescriptor(descriptor: NnrpSchemaDescriptor): NnrpSc
   };
 }
 
+export function normalizeCachePutRequest(request: NnrpCachePutRequest): NnrpCachePutRequest {
+  validateCacheKey(request.key);
+  validateLeaseMillis(request.leaseMillis);
+
+  return {
+    key: createCacheKey(request.key.kind, request.key.key, request.key.namespaceId),
+    ...(request.payload === undefined ? {} : { payload: normalizeBinaryPayload(request.payload, true) }),
+    ...(request.descriptor === undefined ? {} : { descriptor: createPayloadDescriptor(request.descriptor) }),
+    ...(request.leaseMillis === undefined ? {} : { leaseMillis: request.leaseMillis }),
+    ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
+  };
+}
+
+export function normalizeCacheInvalidateRequest(
+  request: NnrpCacheInvalidateRequest,
+): NnrpCacheInvalidateRequest {
+  validateCacheKey(request.key);
+
+  return {
+    key: createCacheKey(request.key.kind, request.key.key, request.key.namespaceId),
+    ...(request.version === undefined ? {} : { version: request.version }),
+    ...(request.recursive === undefined ? {} : { recursive: request.recursive }),
+    ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
+  };
+}
+
 export function isStandardInputProfile(profile: string): profile is NnrpInputProfile {
   return (NNRP_STANDARD_INPUT_PROFILES as readonly string[]).includes(profile);
 }
@@ -383,7 +445,7 @@ export function normalizeSubmitRequest(
     ...(request.submitMode === undefined ? {} : { submitMode: request.submitMode }),
     ...(request.cacheKey === undefined ? {} : { cacheKey: request.cacheKey }),
     ...(request.descriptor === undefined ? {} : { descriptor: createPayloadDescriptor(request.descriptor) }),
-    ...(request.metadata === undefined ? {} : { metadata: { ...request.metadata } }),
+    ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
   };
 }
 
@@ -439,6 +501,12 @@ export function validateEventPollOptions(options: NnrpEventPollOptions = {}): vo
       source: "core",
       retryable: false,
     });
+  }
+}
+
+export function validateSessionMetadata(options: NnrpSessionMetadataOptions = {}): void {
+  if (options.metadata !== undefined) {
+    normalizeMetadataMap(options.metadata);
   }
 }
 
@@ -511,6 +579,7 @@ function createPayloadDescriptor(descriptor: NnrpPayloadDescriptor): NnrpPayload
 
 function createCacheMetadata(metadata: NnrpCacheMetadata): NnrpCacheMetadata {
   validateCacheKey(metadata.key);
+  validateLeaseMillis(metadata.leaseMillis);
 
   return {
     key: metadata.key,
@@ -543,6 +612,10 @@ function validateSubmitRequestShape(
     validateCacheKey(request.cacheKey);
   }
 
+  if (request.metadata !== undefined) {
+    normalizeMetadataMap(request.metadata);
+  }
+
   if (request.tensors !== undefined) {
     for (const section of request.tensors) {
       if (section.codecId !== undefined && (!Number.isSafeInteger(section.codecId) || section.codecId < 0)) {
@@ -555,6 +628,54 @@ function validateSubmitRequestShape(
       }
     }
   }
+}
+
+function validateLeaseMillis(leaseMillis: number | undefined): void {
+  if (leaseMillis !== undefined && (!Number.isSafeInteger(leaseMillis) || leaseMillis < 0)) {
+    throw new NnrpProtocolError({
+      code: "NNRP_CACHE_LEASE_INVALID",
+      message: "Cache leaseMillis must be a non-negative safe integer.",
+      source: "core",
+      retryable: false,
+    });
+  }
+}
+
+function normalizeMetadataMap(metadata: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  const entries = Object.entries(metadata);
+  if (entries.length > 32) {
+    throw new NnrpProtocolError({
+      code: "NNRP_METADATA_TOO_MANY_ENTRIES",
+      message: "Metadata maps must contain at most 32 entries.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    if (key.trim().length === 0 || key.length > 64) {
+      throw new NnrpProtocolError({
+        code: "NNRP_METADATA_KEY_INVALID",
+        message: "Metadata keys must be non-empty and at most 64 characters.",
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    if (value.length > 1024) {
+      throw new NnrpProtocolError({
+        code: "NNRP_METADATA_VALUE_INVALID",
+        message: "Metadata values must be at most 1024 characters.",
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    normalized[key] = value;
+  }
+
+  return normalized;
 }
 
 function validateInputProfile(profile: string, strictProfiles: boolean): void {

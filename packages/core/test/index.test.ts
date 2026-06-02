@@ -11,11 +11,14 @@ import {
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
   NnrpProtocolError,
+  normalizeCacheInvalidateRequest,
+  normalizeCachePutRequest,
   normalizeCancelRequest,
   normalizeOperationRef,
   normalizeSubmitRequest,
   selectTransport,
   validateEventPollOptions,
+  validateSessionMetadata,
 } from "../src/index.ts";
 
 Deno.test("@nnrp/core creates a backend native manifest", () => {
@@ -190,6 +193,46 @@ Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () =>
     () => normalizeSubmitRequest({ frameId: 1, inputProfile: "custom" as never }),
     NnrpProtocolError,
     "Unknown NNRP input profile",
+  );
+});
+
+Deno.test("@nnrp/core normalizes cache put and invalidate operations", () => {
+  const put = normalizeCachePutRequest({
+    key: createCacheKey("tensor", "kv-block", 3),
+    payload: new Uint8Array([1, 2]),
+    descriptor: {
+      profile: "tensor",
+      cache: { key: createCacheKey("tensor", "kv-block", 3), leaseMillis: 1000 },
+    },
+    metadata: { pool: "gpu-0" },
+  });
+  const invalidate = normalizeCacheInvalidateRequest({
+    key: createCacheKey("tensor", "kv-block", 3),
+    recursive: true,
+    metadata: { reason: "evict" },
+  });
+
+  assertEquals(put.payload, new Uint8Array([1, 2]));
+  assertEquals(put.descriptor?.cache?.leaseMillis, 1000);
+  assertEquals(invalidate.recursive, true);
+  assertEquals(invalidate.metadata, { reason: "evict" });
+});
+
+Deno.test("@nnrp/core rejects invalid cache leases and metadata boundaries", () => {
+  assertThrows(
+    () => normalizeCachePutRequest({ key: createCacheKey("tensor", "a"), leaseMillis: -1 }),
+    NnrpProtocolError,
+    "leaseMillis must be a non-negative",
+  );
+  assertThrows(
+    () => validateSessionMetadata({ metadata: { "": "value" } }),
+    NnrpProtocolError,
+    "Metadata keys must be non-empty",
+  );
+  assertThrows(
+    () => validateSessionMetadata({ metadata: { key: "x".repeat(1025) } }),
+    NnrpProtocolError,
+    "Metadata values must be at most",
   );
 });
 

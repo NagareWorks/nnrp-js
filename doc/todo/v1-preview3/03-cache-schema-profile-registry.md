@@ -11,7 +11,7 @@
 - [x] Add `NnrpCacheKey` to `@nnrp/core`.
 - [x] Add cache object kind enum/union matching the canonical contract.
 - [x] Add cache lease/version/dependency metadata types.
-- [ ] Add cache put/ack/invalidate request/result types where exposed through public APIs.
+- [x] Add cache put/ack/invalidate request/result types where exposed through public APIs.
 - [x] Validate simple shape constraints in TypeScript before calling runtime backends.
 - [ ] Delegate protocol-critical cache descriptor validation to Rust/WASM/native primitives.
 - [x] Add tests for cache key normalization and invalid value rejection.
@@ -45,7 +45,7 @@
 
 ## Runtime Integration
 
-- [ ] Native submit APIs accept cache/schema/profile fields and pass them to FFI wrappers.
-- [ ] Browser submit APIs accept cache/schema/profile fields and pass them to WASM wrappers.
+- [x] Native submit APIs accept cache/schema/profile fields and pass them to FFI wrappers.
+- [x] Browser submit APIs accept cache/schema/profile fields and pass them to WASM wrappers.
 - [ ] Server receive APIs expose decoded cache/schema/profile metadata when available.
-- [ ] Conformance adapter includes cache/schema/profile capability claims only when implemented.
+- [x] Conformance adapter includes cache/schema/profile capability claims only when implemented.

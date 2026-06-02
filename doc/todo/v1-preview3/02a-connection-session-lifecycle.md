@@ -31,12 +31,12 @@
 ## Browser Runtime Lifecycle
 
 - [x] Add public `openBrowserRuntime(options)` or documented equivalent in `@nnrp/wasm`.
-- [ ] Validate WASM manifest before instantiation.
+- [x] Validate WASM manifest before instantiation.
 - [x] Instantiate WASM lazily, not during module import.
 - [x] Add `NnrpBrowserRuntime.connect(options)`.
 - [x] Add `NnrpBrowserClient` with explicit close/dispose semantics.
 - [x] Exclude server listen/accept APIs from browser exports.
-- [ ] Add browser bundling smoke that imports the runtime without Node built-ins.
+- [x] Add browser bundling smoke that imports the runtime without Node built-ins.
 
 ## Session Lifecycle
 
@@ -57,4 +57,4 @@
 - [x] Add `NnrpConnectOptions` and `NnrpListenOptions`.
 - [x] Add `NnrpSessionOptions` with input profile, target cadence, quality tier, and metadata.
 - [x] Validate endpoints before invoking native/WASM backends.
-- [ ] Validate session metadata key/value size limits before sending.
+- [x] Validate session metadata key/value size limits before sending.

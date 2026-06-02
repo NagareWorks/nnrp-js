@@ -14,7 +14,14 @@ Deno.test("@nnrp/wasm creates a default wasm binding descriptor", () => {
   const binding = createWasmRuntimeBinding();
 
   assertEquals(binding.moduleUrl, "./nnrp_wasm.wasm");
-  assertEquals(binding.manifest.capabilities, ["client.session", "wasm.loader"]);
+  assertEquals(binding.manifest.capabilities, [
+    "client.session",
+    "wasm.loader",
+    "cache",
+    "schema",
+    "flow.update",
+    "result.hint",
+  ]);
   assertEquals(binding.manifest.buildMode, "browser-wasm");
 });
 
@@ -176,6 +183,53 @@ Deno.test("@nnrp/wasm session methods preserve not-instantiated diagnostics", as
   assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 });
 
+Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected primitives", async () => {
+  const seen: string[] = [];
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      submit: ({ submit }) => {
+        seen.push(`submit:${submit.frameId}:${submit.descriptor?.cache?.key.key ?? ""}`);
+        return { frameId: submit.frameId, metadata: { profile: submit.descriptor?.profile ?? "" } };
+      },
+      cancel: ({ cancel }) => {
+        seen.push(`cancel:${cancel.operation}:${cancel.options?.reason ?? ""}`);
+      },
+      awaitEvents: ({ maxEvents }) => [{
+        type: "diagnostic",
+        diagnostic: {
+          code: `NNRP_WASM_TEST_EVENTS_${maxEvents}`,
+          message: "event batch",
+          source: "wasm",
+          retryable: false,
+        },
+      }],
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  assertEquals(
+    await session.submit({
+      frameId: 11,
+      descriptor: {
+        profile: "tensor",
+        cache: { key: { kind: "tensor", key: "kv-block" } },
+      },
+    }),
+    {
+      frameId: 11,
+      metadata: { profile: "tensor" },
+    },
+  );
+  await session.cancel(11, { reason: "done" });
+  const event = await session.nextEvent();
+
+  assertEquals(seen, ["submit:11:kv-block", "cancel:11:done"]);
+  assertEquals(event.type, "diagnostic");
+  if (event.type === "diagnostic") {
+    assertEquals(event.diagnostic.code, "NNRP_WASM_TEST_EVENTS_1");
+  }
+});
+
 Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
@@ -187,6 +241,17 @@ Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () 
   );
 
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
+});
+
+Deno.test("@nnrp/wasm validates session metadata before opening sessions", async () => {
+  const runtime = await openBrowserRuntime();
+  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
+
+  assertThrows(
+    () => client.openSession({ metadata: { "": "bad" } }),
+    NnrpProtocolError,
+    "Metadata keys must be non-empty",
+  );
 });
 
 Deno.test("@nnrp/wasm validates cancel and event polling before WASM dispatch", async () => {

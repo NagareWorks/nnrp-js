@@ -74,6 +74,33 @@ export interface NnrpCacheMetadata {
     readonly leaseMillis?: number;
     readonly dependencies?: readonly NnrpCacheKey[];
 }
+export type NnrpCacheOperationStatus = "accepted" | "stored" | "invalidated" | "miss" | "rejected";
+export interface NnrpCachePutRequest {
+    readonly key: NnrpCacheKey;
+    readonly payload?: NnrpBinaryPayload;
+    readonly descriptor?: NnrpPayloadDescriptor;
+    readonly leaseMillis?: number;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface NnrpCachePutResult {
+    readonly key: NnrpCacheKey;
+    readonly status: Extract<NnrpCacheOperationStatus, "accepted" | "stored" | "rejected">;
+    readonly version?: bigint | number | string;
+    readonly diagnostic?: NnrpDiagnostic;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface NnrpCacheInvalidateRequest {
+    readonly key: NnrpCacheKey;
+    readonly version?: bigint | number | string;
+    readonly recursive?: boolean;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
+export interface NnrpCacheInvalidateResult {
+    readonly key: NnrpCacheKey;
+    readonly status: Extract<NnrpCacheOperationStatus, "invalidated" | "miss" | "rejected">;
+    readonly diagnostic?: NnrpDiagnostic;
+    readonly metadata?: Readonly<Record<string, string>>;
+}
 export type NnrpSchemaFlag = "required" | "streamable" | "lossless" | "opaque";
 export interface NnrpSchemaDescriptor {
     readonly id: string;
@@ -166,6 +193,9 @@ export interface NnrpCancelResult {
 export interface NnrpEventPollOptions {
     readonly timeoutMillis?: number;
 }
+export interface NnrpSessionMetadataOptions {
+    readonly metadata?: Readonly<Record<string, string>>;
+}
 export declare class NnrpError extends Error {
     readonly diagnostic: NnrpDiagnostic;
     constructor(diagnostic: NnrpDiagnostic);
@@ -199,9 +229,12 @@ export interface NormalizeSubmitRequestOptions {
 }
 export declare function createCacheKey(kind: NnrpCacheObjectKind, key: bigint | number | string, namespaceId?: number): NnrpCacheKey;
 export declare function createSchemaDescriptor(descriptor: NnrpSchemaDescriptor): NnrpSchemaDescriptor;
+export declare function normalizeCachePutRequest(request: NnrpCachePutRequest): NnrpCachePutRequest;
+export declare function normalizeCacheInvalidateRequest(request: NnrpCacheInvalidateRequest): NnrpCacheInvalidateRequest;
 export declare function isStandardInputProfile(profile: string): profile is NnrpInputProfile;
 export declare function normalizeSubmitRequest(request: NnrpSubmitRequest, options?: NormalizeSubmitRequestOptions): NnrpNormalizedSubmitRequest;
 export declare function normalizeOperationRef(operation: NnrpOperationRef): NnrpOperationId;
 export declare function normalizeCancelRequest(operation: NnrpOperationRef, options?: NnrpCancelOptions): NnrpCancelRequest;
 export declare function validateEventPollOptions(options?: NnrpEventPollOptions): void;
+export declare function validateSessionMetadata(options?: NnrpSessionMetadataOptions): void;
 //# sourceMappingURL=index.d.ts.map

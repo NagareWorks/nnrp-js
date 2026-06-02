@@ -21,6 +21,7 @@ import {
   normalizeSubmitRequest,
   selectTransport,
   validateEventPollOptions,
+  validateSessionMetadata,
 } from "@nnrp/core";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -399,6 +400,7 @@ export class NnrpClient {
 
   public openSession(options: NnrpSessionOptions = {}): NnrpClientSession {
     this.#ensureOpen();
+    validateSessionMetadata(options);
 
     return new NnrpClientSession({
       client: this,
@@ -628,7 +630,7 @@ export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {
   const requiredSymbols = requiredNativeSymbols(options.nativeLibrary);
 
   return {
-    manifest: createBackendNativeManifest(),
+    manifest: createBackendNativeManifest(["cache", "schema", "recovery", "flow.update", "result.hint"]),
     libraryPath: artifact?.libraryPath ?? explicit ?? resolveNativeLibraryPath(options),
     requiredSymbols,
     ...(artifact === null ? {} : { artifact }),
@@ -886,7 +888,7 @@ function mergeSessionOptions(
   defaults: NnrpSessionOptions | undefined,
   options: NnrpSessionOptions,
 ): NnrpSessionOptions {
-  return {
+  const merged = {
     ...defaults,
     ...options,
     metadata: {
@@ -894,6 +896,8 @@ function mergeSessionOptions(
       ...(options.metadata ?? {}),
     },
   };
+  validateSessionMetadata(merged);
+  return merged;
 }
 
 function closedError(target: string): NnrpCapabilityError {

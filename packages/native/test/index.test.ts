@@ -73,7 +73,16 @@ Deno.test("@nnrp/native creates a native binding descriptor", () => {
     nativeLibrary: { requiredSymbols: ["nnrp_ffi_version"] },
   });
 
-  assertEquals(binding.manifest.capabilities, ["client.session", "server.session", "native.loader"]);
+  assertEquals(binding.manifest.capabilities, [
+    "client.session",
+    "server.session",
+    "native.loader",
+    "cache",
+    "schema",
+    "recovery",
+    "flow.update",
+    "result.hint",
+  ]);
   assertEquals(binding.manifest.buildMode, "backend-native");
   assertEquals(binding.libraryPath, "native/linux-x86_64/libnnrp_ffi.so");
   assertEquals(binding.requiredSymbols, [
@@ -150,6 +159,8 @@ Deno.test("@nnrp/native validates runtime capability feature probes", () => {
 });
 
 Deno.test("@nnrp/native routes submit through coarse submit/result binding when available", async () => {
+  let descriptorProfile: string | undefined;
+  let cacheKey: string | number | bigint | undefined;
   const runtime = await openBackendRuntime({
     env: {},
     platform: "linux",
@@ -159,7 +170,11 @@ Deno.test("@nnrp/native routes submit through coarse submit/result binding when 
       runtimeCapabilities: () => nativeCapabilities(),
       submitResultCompact: ({ submit, maxEvents }) => ({
         frameId: submit.frameId,
-        payload: new Uint8Array([maxEvents ?? 0, submit.payload?.[0] ?? 0]),
+        payload: (() => {
+          descriptorProfile = submit.descriptor?.profile;
+          cacheKey = submit.descriptor?.cache?.key.key;
+          return new Uint8Array([maxEvents ?? 0, submit.payload?.[0] ?? 0]);
+        })(),
       }),
     },
   });
@@ -168,10 +183,22 @@ Deno.test("@nnrp/native routes submit through coarse submit/result binding when 
 
   assertEquals(runtime.bindingMode, "test");
   assertEquals(runtime.runtimeCapabilities?.abiMinor, 5);
-  assertEquals(await session.submit({ frameId: 7, payload: new Uint8Array([9]) }), {
-    frameId: 7,
-    payload: new Uint8Array([1, 9]),
-  });
+  assertEquals(
+    await session.submit({
+      frameId: 7,
+      payload: new Uint8Array([9]),
+      descriptor: {
+        profile: "tensor",
+        cache: { key: { kind: "tensor", key: "kv-block" } },
+      },
+    }),
+    {
+      frameId: 7,
+      payload: new Uint8Array([1, 9]),
+    },
+  );
+  assertEquals(descriptorProfile, "tensor");
+  assertEquals(cacheKey, "kv-block");
 });
 
 Deno.test("@nnrp/native routes no-wait submit and cancel through coarse bindings", async () => {
@@ -310,6 +337,16 @@ Deno.test("@nnrp/native validates submit requests before native dispatch", async
   );
 
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
+});
+
+Deno.test("@nnrp/native validates session metadata before opening sessions", async () => {
+  const client = await openNativeClient({ endpoint: "127.0.0.1:4433", env: {} });
+
+  assertThrows(
+    () => client.openSession({ metadata: { "": "bad" } }),
+    NnrpProtocolError,
+    "Metadata keys must be non-empty",
+  );
 });
 
 Deno.test("@nnrp/native validates cancel and event polling before native dispatch", async () => {

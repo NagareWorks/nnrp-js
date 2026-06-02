@@ -1,10 +1,11 @@
-import { type NnrpCancelOptions, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
     readonly artifact?: NnrpWasmArtifactOptions;
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
+    readonly primitives?: NnrpWasmPrimitiveBinding;
 }
 export interface NnrpBrowserConnectOptions {
     readonly endpoint: string | URL;
@@ -33,6 +34,7 @@ export interface NnrpWasmBindingOptions {
     readonly module?: WebAssembly.Module;
     readonly artifact?: NnrpWasmArtifactOptions;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
+    readonly primitives?: NnrpWasmPrimitiveBinding;
 }
 export interface NnrpWasmRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
@@ -40,6 +42,24 @@ export interface NnrpWasmRuntimeBinding {
     readonly module?: WebAssembly.Module;
     readonly artifact?: NnrpResolvedWasmArtifact;
     readonly transportProviders: readonly NnrpBrowserTransportProvider[];
+    readonly primitives?: NnrpWasmPrimitiveBinding;
+}
+export interface NnrpWasmSubmitRequest {
+    readonly sessionOptions: NnrpBrowserSessionOptions;
+    readonly submit: NnrpNormalizedSubmitRequest;
+}
+export interface NnrpWasmCancelRequest {
+    readonly sessionOptions: NnrpBrowserSessionOptions;
+    readonly cancel: NnrpCancelRequest;
+}
+export interface NnrpWasmEventBatchRequest {
+    readonly maxEvents: number;
+}
+export interface NnrpWasmPrimitiveBinding {
+    submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
+    cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
+    awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
+    close?(): void | Promise<void>;
 }
 export interface NnrpWasmArtifactOptions {
     readonly manifest: NnrpWasmArtifactManifest;
@@ -72,6 +92,9 @@ export declare class NnrpBrowserRuntime {
     get artifact(): NnrpResolvedWasmArtifact | undefined;
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
+    submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult>;
+    cancel(request: NnrpWasmCancelRequest): Promise<void>;
+    awaitEvents(request: NnrpWasmEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     close(): Promise<void>;
     get closed(): boolean;
 }
@@ -86,6 +109,7 @@ export declare class NnrpBrowserClient {
     constructor(state: NnrpBrowserClientState);
     get endpoint(): string;
     get transportPolicy(): NnrpTransportPolicy;
+    get runtime(): NnrpBrowserRuntime;
     openSession(options?: NnrpBrowserSessionOptions): NnrpBrowserClientSession;
     close(): Promise<void>;
     get closed(): boolean;

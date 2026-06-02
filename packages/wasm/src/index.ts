@@ -3,11 +3,13 @@ import {
   createTransportCandidates,
   createTransportSelectionSummary,
   type NnrpCancelOptions,
+  type NnrpCancelRequest,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
   type NnrpInputProfile,
+  type NnrpNormalizedSubmitRequest,
   type NnrpOperationRef,
   type NnrpResult,
   type NnrpRuntimeEvent,
@@ -20,6 +22,7 @@ import {
   normalizeSubmitRequest,
   selectTransport,
   validateEventPollOptions,
+  validateSessionMetadata,
 } from "@nnrp/core";
 
 export interface NnrpWasmRuntimeOptions {
@@ -28,6 +31,7 @@ export interface NnrpWasmRuntimeOptions {
   readonly artifact?: NnrpWasmArtifactOptions;
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
+  readonly primitives?: NnrpWasmPrimitiveBinding;
 }
 
 export interface NnrpBrowserConnectOptions {
@@ -62,6 +66,7 @@ export interface NnrpWasmBindingOptions {
   readonly module?: WebAssembly.Module;
   readonly artifact?: NnrpWasmArtifactOptions;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
+  readonly primitives?: NnrpWasmPrimitiveBinding;
 }
 
 export interface NnrpWasmRuntimeBinding {
@@ -70,6 +75,28 @@ export interface NnrpWasmRuntimeBinding {
   readonly module?: WebAssembly.Module;
   readonly artifact?: NnrpResolvedWasmArtifact;
   readonly transportProviders: readonly NnrpBrowserTransportProvider[];
+  readonly primitives?: NnrpWasmPrimitiveBinding;
+}
+
+export interface NnrpWasmSubmitRequest {
+  readonly sessionOptions: NnrpBrowserSessionOptions;
+  readonly submit: NnrpNormalizedSubmitRequest;
+}
+
+export interface NnrpWasmCancelRequest {
+  readonly sessionOptions: NnrpBrowserSessionOptions;
+  readonly cancel: NnrpCancelRequest;
+}
+
+export interface NnrpWasmEventBatchRequest {
+  readonly maxEvents: number;
+}
+
+export interface NnrpWasmPrimitiveBinding {
+  submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
+  cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
+  awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
+  close?(): void | Promise<void>;
 }
 
 export interface NnrpWasmArtifactOptions {
@@ -156,9 +183,39 @@ export class NnrpBrowserRuntime {
     );
   }
 
+  public submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult> {
+    this.#ensureOpen();
+    const submit = this.#binding.primitives?.submit;
+    if (submit === undefined) {
+      return Promise.reject(bindingNotInstantiatedError("submit"));
+    }
+
+    return Promise.resolve(submit(request));
+  }
+
+  public cancel(request: NnrpWasmCancelRequest): Promise<void> {
+    this.#ensureOpen();
+    const cancel = this.#binding.primitives?.cancel;
+    if (cancel === undefined) {
+      return Promise.reject(bindingNotInstantiatedError("cancel"));
+    }
+
+    return Promise.resolve(cancel(request));
+  }
+
+  public async awaitEvents(request: NnrpWasmEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]> {
+    this.#ensureOpen();
+    const awaitEvents = this.#binding.primitives?.awaitEvents;
+    if (awaitEvents === undefined) {
+      throw bindingNotInstantiatedError("nextEvent");
+    }
+
+    return await awaitEvents(request);
+  }
+
   public close(): Promise<void> {
     this.#closed = true;
-    return Promise.resolve();
+    return Promise.resolve(this.#binding.primitives?.close?.());
   }
 
   public get closed(): boolean {
@@ -195,8 +252,13 @@ export class NnrpBrowserClient {
     return this.#state.transportPolicy;
   }
 
+  public get runtime(): NnrpBrowserRuntime {
+    return this.#state.runtime;
+  }
+
   public openSession(options: NnrpBrowserSessionOptions = {}): NnrpBrowserClientSession {
     this.#ensureOpen();
+    validateSessionMetadata(options);
 
     return new NnrpBrowserClientSession({
       client: this,
@@ -238,25 +300,33 @@ export class NnrpBrowserClientSession {
   }
 
   public submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
+    let normalized: NnrpNormalizedSubmitRequest;
     try {
       this.#ensureOpen();
-      normalizeSubmitRequest(request);
+      normalized = normalizeSubmitRequest(request);
     } catch (error) {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotInstantiatedError("submit"));
+    return this.#state.client.runtime.submit({
+      sessionOptions: this.#state.options,
+      submit: normalized,
+    });
   }
 
   public cancel(operation: NnrpOperationRef, options: NnrpCancelOptions = {}): Promise<void> {
+    let normalized: NnrpCancelRequest;
     try {
       this.#ensureOpen();
-      normalizeCancelRequest(operation, options);
+      normalized = normalizeCancelRequest(operation, options);
     } catch (error) {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotInstantiatedError("cancel"));
+    return this.#state.client.runtime.cancel({
+      sessionOptions: this.#state.options,
+      cancel: normalized,
+    });
   }
 
   public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
@@ -267,7 +337,14 @@ export class NnrpBrowserClientSession {
       return Promise.reject(error);
     }
 
-    return Promise.reject(bindingNotInstantiatedError("nextEvent"));
+    return this.#state.client.runtime.awaitEvents({ maxEvents: 1 }).then((events) => {
+      const [event] = events;
+      if (event === undefined) {
+        throw bindingNotInstantiatedError("nextEvent");
+      }
+
+      return event;
+    });
   }
 
   public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
@@ -296,11 +373,12 @@ export function createWasmRuntimeBinding(options: NnrpWasmBindingOptions = {}): 
   const artifact = options.artifact === undefined ? undefined : resolveWasmArtifact(options.artifact);
 
   return {
-    manifest: createBrowserWasmManifest(),
+    manifest: createBrowserWasmManifest(["cache", "schema", "flow.update", "result.hint"]),
     moduleUrl: normalizeModuleUrl(options.moduleUrl ?? artifact?.moduleUrl ?? "./nnrp_wasm.wasm"),
     ...(options.module === undefined ? {} : { module: options.module }),
     ...(artifact === undefined ? {} : { artifact }),
     transportProviders: [...(options.transportProviders ?? [])],
+    ...(options.primitives === undefined ? {} : { primitives: options.primitives }),
   };
 }
 
@@ -431,7 +509,7 @@ function mergeSessionOptions(
   defaults: NnrpBrowserSessionOptions | undefined,
   options: NnrpBrowserSessionOptions,
 ): NnrpBrowserSessionOptions {
-  return {
+  const merged = {
     ...defaults,
     ...options,
     metadata: {
@@ -439,6 +517,8 @@ function mergeSessionOptions(
       ...(options.metadata ?? {}),
     },
   };
+  validateSessionMetadata(merged);
+  return merged;
 }
 
 function closedError(target: string): NnrpCapabilityError {
