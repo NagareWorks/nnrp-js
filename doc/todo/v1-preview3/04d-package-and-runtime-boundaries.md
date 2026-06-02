@@ -32,7 +32,7 @@
 - [x] Assert `@nnrp/native` package contains no browser-only implementation files.
 - [x] Assert `@nnrp/wasm` package contains no native loader files.
 - [x] Assert browser package contains no server exports.
-- [ ] Assert native package contains required native artifact metadata when artifact packaging is enabled.
+- [x] Assert native package contains required native artifact metadata when artifact packaging is enabled.
 - [x] Assert README/license/package metadata are present.
 
 ## Runtime Policy CI

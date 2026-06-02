@@ -39,6 +39,7 @@ const packages: readonly PackagePackPolicy[] = [
 
 const failures: string[] = [];
 const packageVersions = new Map<string, string>();
+const nativeArtifactManifestPattern = /^native\/[^/]+\/manifest\.json$/;
 
 for (const policy of packages) {
   const packageJson = await readPackageJson(policy);
@@ -56,6 +57,7 @@ for (const policy of packages) {
   }
 
   const packedFiles = pack.files.map((file) => normalizePackPath(file.path)).sort();
+  checkNativeArtifactMetadata(policy, packageJson, packedFiles);
   for (const expected of policy.expectedFiles) {
     if (!packedFiles.includes(expected)) {
       failures.push(`${policy.name}: npm pack output missing ${expected}`);
@@ -88,6 +90,25 @@ if (failures.length > 0) {
   Deno.exit(1);
 }
 
+function checkNativeArtifactMetadata(
+  policy: PackagePackPolicy,
+  packageJson: Record<string, unknown>,
+  packedFiles: readonly string[],
+): void {
+  if (!isNativeArtifactPackagingEnabled(packageJson)) {
+    return;
+  }
+
+  if (policy.name !== "@nnrp/native") {
+    failures.push(`${policy.name}: native artifact packaging can only be enabled on @nnrp/native`);
+    return;
+  }
+
+  if (!packedFiles.some((file) => nativeArtifactManifestPattern.test(file))) {
+    failures.push(`${policy.name}: native artifact packaging requires native/<tag>/manifest.json in npm pack output`);
+  }
+}
+
 async function npmPackDryRun(policy: PackagePackPolicy): Promise<NpmPackResult> {
   if (Deno.build.os === "windows" && Deno.env.get("NNRP_JS_FORCE_NPM_PACK") !== "1") {
     return emulatePackDryRun(policy);
@@ -113,6 +134,20 @@ async function npmPackDryRun(policy: PackagePackPolicy): Promise<NpmPackResult> 
   }
 
   return parsed[0];
+}
+
+function isNativeArtifactPackagingEnabled(packageJson: Record<string, unknown>): boolean {
+  const nnrp = packageJson.nnrp;
+  if (!nnrp || typeof nnrp !== "object" || Array.isArray(nnrp)) {
+    return false;
+  }
+
+  const nativeArtifacts = (nnrp as Record<string, unknown>).nativeArtifacts;
+  if (!nativeArtifacts || typeof nativeArtifacts !== "object" || Array.isArray(nativeArtifacts)) {
+    return false;
+  }
+
+  return (nativeArtifacts as Record<string, unknown>).enabled === true;
 }
 
 async function emulatePackDryRun(policy: PackagePackPolicy): Promise<NpmPackResult> {

@@ -20,11 +20,13 @@ const packages: readonly PackagePolicy[] = [
 ];
 
 const failures: string[] = [];
+const nativeArtifactManifestPattern = /^native\/[^/]+\/manifest\.json$/;
 
 for (const policy of packages) {
   const packageJson = await readPackageJson(policy);
   const declaredFiles = readDeclaredFiles(policy, packageJson);
   checkPackageMetadata(policy, packageJson);
+  checkNativeArtifactMetadata(policy, packageJson, declaredFiles);
 
   for (const required of policy.requiredFiles) {
     if (!declaredFiles.includes(required)) {
@@ -41,6 +43,25 @@ for (const policy of packages) {
         failures.push(`${policy.name}: forbidden package file declaration ${file}`);
       }
     }
+  }
+}
+
+function checkNativeArtifactMetadata(
+  policy: PackagePolicy,
+  packageJson: Record<string, unknown>,
+  declaredFiles: readonly string[],
+): void {
+  if (!isNativeArtifactPackagingEnabled(packageJson)) {
+    return;
+  }
+
+  if (policy.name !== "@nnrp/native") {
+    failures.push(`${policy.name}: native artifact packaging can only be enabled on @nnrp/native`);
+    return;
+  }
+
+  if (!declaredFiles.some((file) => nativeArtifactManifestPattern.test(file))) {
+    failures.push(`${policy.name}: native artifact packaging requires native/<tag>/manifest.json`);
   }
 }
 
@@ -62,6 +83,20 @@ function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string,
   if (packageJson.private !== true) {
     failures.push(`${policy.name}: package.json must stay private until release gates are enabled`);
   }
+}
+
+function isNativeArtifactPackagingEnabled(packageJson: Record<string, unknown>): boolean {
+  const nnrp = packageJson.nnrp;
+  if (!nnrp || typeof nnrp !== "object" || Array.isArray(nnrp)) {
+    return false;
+  }
+
+  const nativeArtifacts = (nnrp as Record<string, unknown>).nativeArtifacts;
+  if (!nativeArtifacts || typeof nativeArtifacts !== "object" || Array.isArray(nativeArtifacts)) {
+    return false;
+  }
+
+  return (nativeArtifacts as Record<string, unknown>).enabled === true;
 }
 
 if (failures.length > 0) {

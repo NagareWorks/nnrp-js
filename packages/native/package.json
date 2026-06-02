@@ -17,6 +17,11 @@
     "dist/index.d.ts",
     "dist/index.d.ts.map"
   ],
+  "nnrp": {
+    "nativeArtifacts": {
+      "enabled": false
+    }
+  },
   "dependencies": {
     "@nnrp/core": "workspace:*"
   }
