@@ -227,6 +227,68 @@ Deno.test("@nnrp/native routes no-wait submit and cancel through coarse bindings
   assertEquals(seen, ["submit:9", "cancel:99:done"]);
 });
 
+Deno.test("@nnrp/native rejects duplicate in-flight frames and releases on completion", async () => {
+  let resolveSubmit: ((result: { readonly frameId: number }) => void) | undefined;
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      submitResultCompact: ({ submit }) =>
+        new Promise((resolve) => {
+          resolveSubmit = () => resolve({ frameId: submit.frameId });
+        }),
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+  const pending = session.submit({ frameId: 5 });
+
+  assertEquals(session.inFlightFrames(), [5]);
+  await assertRejects(
+    () => session.submit({ frameId: 5 }),
+    NnrpProtocolError,
+    "already in flight",
+  );
+
+  resolveSubmit?.({ frameId: 5 });
+  assertEquals(await pending, { frameId: 5 });
+  assertEquals(session.inFlightFrames(), []);
+});
+
+Deno.test("@nnrp/native tracks no-wait frames until cancel or terminal events", async () => {
+  const runtime = await openBackendRuntime({
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    ffi: {
+      mode: "test",
+      submitNoWait: ({ submit }) => BigInt(submit.frameId),
+      cancel: () => {},
+    },
+  });
+  const session = runtime.connect({ endpoint: "127.0.0.1:4433" }).openSession();
+
+  assertEquals(await session.submitNoWait({ frameId: 6 }), 6n);
+  assertEquals(session.inFlightFrames(), [6]);
+  await assertRejects(
+    () => session.submitNoWait({ frameId: 6 }),
+    NnrpProtocolError,
+    "already in flight",
+  );
+
+  await session.cancel(6);
+  assertEquals(session.inFlightFrames(), []);
+
+  assertEquals(await session.submitNoWait({ frameId: 7 }), 7n);
+  session.completeEvent({ type: "drop", frameId: 7, diagnostic: diagnostic("NNRP_TEST_DROP") });
+  assertEquals(session.inFlightFrames(), []);
+
+  assertEquals(await session.submitNoWait({ frameId: 8 }), 8n);
+  session.completeEvent({ type: "close" });
+  assertEquals(session.inFlightFrames(), []);
+});
+
 Deno.test("@nnrp/native routes event polling through coarse batch binding when available", async () => {
   const runtime = await openBackendRuntime({
     env: {},
@@ -521,5 +583,14 @@ function nativeCapabilities(): NnrpNativeRuntimeCapabilities {
     sdkRevision: 6,
     transportSlots: 0x00000002,
     featureFlags: 0x000000000001ffffn,
+  };
+}
+
+function diagnostic(code: string) {
+  return {
+    code,
+    message: code,
+    source: "native" as const,
+    retryable: false,
   };
 }

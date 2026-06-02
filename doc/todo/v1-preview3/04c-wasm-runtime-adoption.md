@@ -37,7 +37,7 @@
 - [x] Add `NnrpBrowserClient.close()`.
 - [x] Add `NnrpBrowserClientSession.submit(request)`.
 - [x] Add browser event delivery when runtime support is available.
-- [ ] Add browser cancel API when runtime support is available.
+- [x] Add browser cancel API when runtime support is available.
 - [x] Add tests for open/connect/session/close lifecycle.
 
 ## Browser Transport Adapters

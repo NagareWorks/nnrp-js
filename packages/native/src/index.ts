@@ -11,6 +11,7 @@ import {
   type NnrpInputProfile,
   type NnrpNormalizedSubmitRequest,
   type NnrpOperationRef,
+  NnrpProtocolError,
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
@@ -431,6 +432,7 @@ export interface NnrpClientSessionState {
 
 export class NnrpClientSession {
   readonly #state: NnrpClientSessionState;
+  readonly #inFlightFrames = new Set<number>();
   #closed = false;
 
   public constructor(state: NnrpClientSessionState) {
@@ -446,6 +448,7 @@ export class NnrpClientSession {
     try {
       this.#ensureOpen();
       normalized = normalizeSubmitRequest(request);
+      this.#beginFrame(normalized.frameId);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -454,7 +457,7 @@ export class NnrpClientSession {
       sessionOptions: this.#state.options,
       submit: normalized,
       maxEvents: 1,
-    });
+    }).finally(() => this.#finishFrame(normalized.frameId));
   }
 
   public submitNoWait(request: NnrpSubmitRequest): Promise<bigint> {
@@ -462,6 +465,7 @@ export class NnrpClientSession {
     try {
       this.#ensureOpen();
       normalized = normalizeSubmitRequest(request);
+      this.#beginFrame(normalized.frameId);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -469,6 +473,9 @@ export class NnrpClientSession {
     return this.#state.client.runtime.submitNoWait({
       sessionOptions: this.#state.options,
       submit: normalized,
+    }).catch((error) => {
+      this.#finishFrame(normalized.frameId);
+      throw error;
     });
   }
 
@@ -484,7 +491,27 @@ export class NnrpClientSession {
     return this.#state.client.runtime.cancel({
       sessionOptions: this.#state.options,
       cancel: normalized,
-    });
+    }).finally(() => this.#finishOperation(normalized.operation));
+  }
+
+  public inFlightFrames(): readonly number[] {
+    return [...this.#inFlightFrames].sort((left, right) => left - right);
+  }
+
+  public completeEvent(event: NnrpRuntimeEvent): void {
+    if (event.type === "result") {
+      this.#finishFrame(event.result.frameId);
+      return;
+    }
+
+    if (event.type === "drop") {
+      this.#finishFrame(event.frameId);
+      return;
+    }
+
+    if (event.type === "close") {
+      this.#inFlightFrames.clear();
+    }
   }
 
   public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
@@ -501,6 +528,7 @@ export class NnrpClientSession {
         throw bindingNotConnectedError("nextEvent");
       }
 
+      this.completeEvent(event);
       return event;
     });
   }
@@ -513,6 +541,7 @@ export class NnrpClientSession {
 
   public close(): Promise<void> {
     this.#closed = true;
+    this.#inFlightFrames.clear();
     return Promise.resolve();
   }
 
@@ -523,6 +552,34 @@ export class NnrpClientSession {
   #ensureOpen(): void {
     if (this.closed) {
       throw closedError("client session");
+    }
+  }
+
+  #beginFrame(frameId: number): void {
+    if (this.#inFlightFrames.has(frameId)) {
+      throw new NnrpProtocolError({
+        code: "NNRP_FRAME_IN_FLIGHT",
+        message: `Frame ${frameId} is already in flight for this session.`,
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    this.#inFlightFrames.add(frameId);
+  }
+
+  #finishFrame(frameId: number): void {
+    this.#inFlightFrames.delete(frameId);
+  }
+
+  #finishOperation(operation: NnrpOperationRef): void {
+    if (typeof operation === "number") {
+      this.#finishFrame(operation);
+      return;
+    }
+
+    if (operation <= BigInt(Number.MAX_SAFE_INTEGER)) {
+      this.#finishFrame(Number(operation));
     }
   }
 }

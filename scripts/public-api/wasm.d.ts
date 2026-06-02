@@ -52,11 +52,16 @@ export interface NnrpWasmCancelRequest {
     readonly sessionOptions: NnrpBrowserSessionOptions;
     readonly cancel: NnrpCancelRequest;
 }
+export interface NnrpWasmSubmitNoWaitRequest {
+    readonly sessionOptions: NnrpBrowserSessionOptions;
+    readonly submit: NnrpNormalizedSubmitRequest;
+}
 export interface NnrpWasmEventBatchRequest {
     readonly maxEvents: number;
 }
 export interface NnrpWasmPrimitiveBinding {
     submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
+    submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
     cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
     awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     close?(): void | Promise<void>;
@@ -93,6 +98,7 @@ export declare class NnrpBrowserRuntime {
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
     submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult>;
+    submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint>;
     cancel(request: NnrpWasmCancelRequest): Promise<void>;
     awaitEvents(request: NnrpWasmEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     close(): Promise<void>;
@@ -123,7 +129,10 @@ export declare class NnrpBrowserClientSession {
     constructor(state: NnrpBrowserClientSessionState);
     get options(): NnrpBrowserSessionOptions;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
+    submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
     cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;
+    inFlightFrames(): readonly number[];
+    completeEvent(event: NnrpRuntimeEvent): void;
     nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
     close(): Promise<void>;

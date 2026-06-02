@@ -215,6 +215,13 @@ Deno.test("@nnrp/wasm session methods preserve not-instantiated diagnostics", as
   );
 
   assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
+
+  const noWaitError = await assertRejects(
+    () => session.submitNoWait({ frameId: 2, payload: new Uint8Array([2]) }),
+    NnrpWasmBindingUnavailableError,
+  );
+
+  assertEquals(noWaitError.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 });
 
 Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected primitives", async () => {
@@ -224,6 +231,10 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
       submit: ({ submit }) => {
         seen.push(`submit:${submit.frameId}:${submit.descriptor?.cache?.key.key ?? ""}`);
         return { frameId: submit.frameId, metadata: { profile: submit.descriptor?.profile ?? "" } };
+      },
+      submitNoWait: ({ submit }) => {
+        seen.push(`submitNoWait:${submit.frameId}`);
+        return BigInt(submit.frameId);
       },
       cancel: ({ cancel }) => {
         seen.push(`cancel:${cancel.operation}:${cancel.options?.reason ?? ""}`);
@@ -255,13 +266,85 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
     },
   );
   await session.cancel(11, { reason: "done" });
+  assertEquals(await session.submitNoWait({ frameId: 12 }), 12n);
   const event = await session.nextEvent();
 
-  assertEquals(seen, ["submit:11:kv-block", "cancel:11:done"]);
+  assertEquals(seen, ["submit:11:kv-block", "cancel:11:done", "submitNoWait:12"]);
   assertEquals(event.type, "diagnostic");
   if (event.type === "diagnostic") {
     assertEquals(event.diagnostic.code, "NNRP_WASM_TEST_EVENTS_1");
   }
+});
+
+Deno.test("@nnrp/wasm rejects duplicate in-flight frames and releases on completion", async () => {
+  let resolveSubmit: ((result: { readonly frameId: number }) => void) | undefined;
+  let holdNextSubmit = true;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      submit: ({ submit }) =>
+        new Promise((resolve) => {
+          resolveSubmit = (result) => resolve(result);
+          if (!holdNextSubmit) {
+            resolve({ frameId: submit.frameId });
+            return;
+          }
+
+          holdNextSubmit = false;
+          if (submit.frameId !== 5) {
+            resolve({ frameId: submit.frameId });
+          }
+        }),
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  const pending = session.submit({ frameId: 5 });
+
+  assertEquals(session.inFlightFrames(), [5]);
+  const duplicate = await assertRejects(
+    () => session.submit({ frameId: 5 }),
+    NnrpProtocolError,
+  );
+
+  assertEquals(duplicate.diagnostic.code, "NNRP_FRAME_IN_FLIGHT");
+  resolveSubmit?.({ frameId: 5 });
+  assertEquals(await pending, { frameId: 5 });
+  assertEquals(session.inFlightFrames(), []);
+  assertEquals(await session.submit({ frameId: 5 }), { frameId: 5 });
+});
+
+Deno.test("@nnrp/wasm tracks no-wait frames until cancel or terminal events", async () => {
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      submitNoWait: ({ submit }) => BigInt(submit.frameId),
+      cancel: () => {},
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+
+  assertEquals(await session.submitNoWait({ frameId: 21 }), 21n);
+  assertEquals(session.inFlightFrames(), [21]);
+
+  const duplicate = await assertRejects(
+    () => session.submitNoWait({ frameId: 21 }),
+    NnrpProtocolError,
+  );
+  assertEquals(duplicate.diagnostic.code, "NNRP_FRAME_IN_FLIGHT");
+
+  await session.cancel(21);
+  assertEquals(session.inFlightFrames(), []);
+
+  await session.submitNoWait({ frameId: 22 });
+  session.completeEvent({ type: "result", result: { frameId: 22, metadata: {} } });
+  assertEquals(session.inFlightFrames(), []);
+
+  await session.submitNoWait({ frameId: 23 });
+  session.completeEvent({ type: "drop", frameId: 23, diagnostic: diagnostic("NNRP_WASM_DROP") });
+  assertEquals(session.inFlightFrames(), []);
+
+  await session.submitNoWait({ frameId: 24 });
+  session.completeEvent({ type: "close", diagnostic: diagnostic("NNRP_WASM_CLOSE") });
+  assertEquals(session.inFlightFrames(), []);
 });
 
 Deno.test("@nnrp/wasm closes injected primitives", async () => {
@@ -285,6 +368,10 @@ Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for direct missing 
 
   await assertRejects(
     () => runtime.submit({ sessionOptions: {}, submit: { frameId: 1 } }),
+    NnrpWasmBindingUnavailableError,
+  );
+  await assertRejects(
+    () => runtime.submitNoWait({ sessionOptions: {}, submit: { frameId: 1 } }),
     NnrpWasmBindingUnavailableError,
   );
   await assertRejects(
@@ -381,5 +468,14 @@ function wasmManifest(): NnrpWasmArtifactManifest {
       "selectTransportWithProbeJson",
       "scoreProviderProbeJson",
     ],
+  };
+}
+
+function diagnostic(code: string) {
+  return {
+    code,
+    message: code,
+    source: "wasm" as const,
+    retryable: false,
   };
 }

@@ -170,6 +170,8 @@ export declare class NnrpClientSession {
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
     cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;
+    inFlightFrames(): readonly number[];
+    completeEvent(event: NnrpRuntimeEvent): void;
     nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
     close(): Promise<void>;

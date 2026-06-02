@@ -11,10 +11,10 @@
 - [x] Add `NnrpClientSession.submit(request)` for native client sessions.
 - [x] Add `NnrpBrowserClientSession.submit(request)` for browser client sessions.
 - [x] Add `NnrpClientSession.submitNoWait(request)` returning a `bigint` operation id.
-- [ ] Add browser `submitNoWait` only if WASM/runtime support can deliver events safely.
+- [x] Add browser `submitNoWait` only if WASM/runtime support can deliver events safely.
 - [x] Add `NnrpServerSession.receive()` for server-side submit/control events.
 - [x] Add `NnrpServerSession.sendResult(result)`.
-- [ ] Validate `frameId` uniqueness while in flight.
+- [x] Validate `frameId` uniqueness while in flight.
 - [x] Validate payload ownership rules before calling native/WASM backends.
 - [ ] Map result drops to typed JS errors with diagnostics.
 - [ ] Add tests for submit success, result drop, and close-during-submit.
@@ -50,7 +50,7 @@
 - [x] Expose result hint metadata in `@nnrp/core`.
 - [ ] Preserve transport/backpressure diagnostics from native/WASM backends.
 - [ ] Ensure `submit` awaits capacity when runtime policy requires it.
-- [ ] Ensure `submitNoWait` reports backpressure rejection without losing diagnostics.
+- [x] Ensure `submitNoWait` reports backpressure rejection without losing diagnostics.
 - [ ] Add tests for credit exhaustion and credit recovery.
 
 ## Diagnostics and Errors

@@ -11,6 +11,7 @@ import {
   type NnrpInputProfile,
   type NnrpNormalizedSubmitRequest,
   type NnrpOperationRef,
+  NnrpProtocolError,
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
@@ -88,12 +89,18 @@ export interface NnrpWasmCancelRequest {
   readonly cancel: NnrpCancelRequest;
 }
 
+export interface NnrpWasmSubmitNoWaitRequest {
+  readonly sessionOptions: NnrpBrowserSessionOptions;
+  readonly submit: NnrpNormalizedSubmitRequest;
+}
+
 export interface NnrpWasmEventBatchRequest {
   readonly maxEvents: number;
 }
 
 export interface NnrpWasmPrimitiveBinding {
   submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
+  submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
   cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
   awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
   close?(): void | Promise<void>;
@@ -193,6 +200,16 @@ export class NnrpBrowserRuntime {
     return Promise.resolve(submit(request));
   }
 
+  public submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint> {
+    this.#ensureOpen();
+    const submitNoWait = this.#binding.primitives?.submitNoWait;
+    if (submitNoWait === undefined) {
+      return Promise.reject(bindingNotInstantiatedError("submitNoWait"));
+    }
+
+    return Promise.resolve(submitNoWait(request));
+  }
+
   public cancel(request: NnrpWasmCancelRequest): Promise<void> {
     this.#ensureOpen();
     const cancel = this.#binding.primitives?.cancel;
@@ -289,6 +306,7 @@ export interface NnrpBrowserClientSessionState {
 
 export class NnrpBrowserClientSession {
   readonly #state: NnrpBrowserClientSessionState;
+  readonly #inFlightFrames = new Set<number>();
   #closed = false;
 
   public constructor(state: NnrpBrowserClientSessionState) {
@@ -304,6 +322,7 @@ export class NnrpBrowserClientSession {
     try {
       this.#ensureOpen();
       normalized = normalizeSubmitRequest(request);
+      this.#beginFrame(normalized.frameId);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -311,6 +330,25 @@ export class NnrpBrowserClientSession {
     return this.#state.client.runtime.submit({
       sessionOptions: this.#state.options,
       submit: normalized,
+    }).finally(() => this.#finishFrame(normalized.frameId));
+  }
+
+  public submitNoWait(request: NnrpSubmitRequest): Promise<bigint> {
+    let normalized: NnrpNormalizedSubmitRequest;
+    try {
+      this.#ensureOpen();
+      normalized = normalizeSubmitRequest(request);
+      this.#beginFrame(normalized.frameId);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    return this.#state.client.runtime.submitNoWait({
+      sessionOptions: this.#state.options,
+      submit: normalized,
+    }).catch((error) => {
+      this.#finishFrame(normalized.frameId);
+      throw error;
     });
   }
 
@@ -326,7 +364,27 @@ export class NnrpBrowserClientSession {
     return this.#state.client.runtime.cancel({
       sessionOptions: this.#state.options,
       cancel: normalized,
-    });
+    }).finally(() => this.#finishOperation(normalized.operation));
+  }
+
+  public inFlightFrames(): readonly number[] {
+    return [...this.#inFlightFrames].sort((left, right) => left - right);
+  }
+
+  public completeEvent(event: NnrpRuntimeEvent): void {
+    if (event.type === "result") {
+      this.#finishFrame(event.result.frameId);
+      return;
+    }
+
+    if (event.type === "drop") {
+      this.#finishFrame(event.frameId);
+      return;
+    }
+
+    if (event.type === "close") {
+      this.#inFlightFrames.clear();
+    }
   }
 
   public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
@@ -343,6 +401,7 @@ export class NnrpBrowserClientSession {
         throw bindingNotInstantiatedError("nextEvent");
       }
 
+      this.completeEvent(event);
       return event;
     });
   }
@@ -355,6 +414,7 @@ export class NnrpBrowserClientSession {
 
   public close(): Promise<void> {
     this.#closed = true;
+    this.#inFlightFrames.clear();
     return Promise.resolve();
   }
 
@@ -365,6 +425,34 @@ export class NnrpBrowserClientSession {
   #ensureOpen(): void {
     if (this.closed) {
       throw closedError("browser client session");
+    }
+  }
+
+  #beginFrame(frameId: number): void {
+    if (this.#inFlightFrames.has(frameId)) {
+      throw new NnrpProtocolError({
+        code: "NNRP_FRAME_IN_FLIGHT",
+        message: `Frame ${frameId} is already in flight for this session.`,
+        source: "core",
+        retryable: false,
+      });
+    }
+
+    this.#inFlightFrames.add(frameId);
+  }
+
+  #finishFrame(frameId: number): void {
+    this.#inFlightFrames.delete(frameId);
+  }
+
+  #finishOperation(operation: NnrpOperationRef): void {
+    if (typeof operation === "number") {
+      this.#finishFrame(operation);
+      return;
+    }
+
+    if (operation <= BigInt(Number.MAX_SAFE_INTEGER)) {
+      this.#finishFrame(Number(operation));
     }
   }
 }
