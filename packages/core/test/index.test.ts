@@ -340,12 +340,22 @@ Deno.test("@nnrp/core normalizes operation references and cancel requests", () =
 Deno.test("@nnrp/core validates event polling options", () => {
   validateEventPollOptions({ timeoutMillis: 0 });
   validateEventPollOptions({ timeoutMillis: 10 });
+  validateEventPollOptions({ signal: { aborted: false } });
 
   assertThrows(
     () => validateEventPollOptions({ timeoutMillis: -1 }),
     NnrpProtocolError,
     "timeoutMillis must be a non-negative",
   );
+
+  const cancelled = assertThrows(
+    () => validateEventPollOptions({ signal: { aborted: true, reason: "test-stop" } }),
+    NnrpTimeoutError,
+    "Event polling was cancelled",
+  );
+
+  assertEquals(cancelled.diagnostic.code, "NNRP_EVENT_POLL_CANCELLED");
+  assertEquals(cancelled.diagnostic.cause, "test-stop");
 });
 
 Deno.test("@nnrp/core keeps diagnostics on typed errors", () => {

@@ -251,8 +251,16 @@ export interface NnrpCancelResult {
   readonly diagnostic?: NnrpDiagnostic;
 }
 
+export interface NnrpAbortSignalLike {
+  readonly aborted: boolean;
+  readonly reason?: unknown;
+  addEventListener?(type: "abort", listener: () => void, options?: { readonly once?: boolean }): void;
+  removeEventListener?(type: "abort", listener: () => void): void;
+}
+
 export interface NnrpEventPollOptions {
   readonly timeoutMillis?: number;
+  readonly signal?: NnrpAbortSignalLike;
 }
 
 export interface NnrpSessionMetadataOptions {
@@ -516,6 +524,16 @@ export function validateEventPollOptions(options: NnrpEventPollOptions = {}): vo
       message: "Event timeoutMillis must be a non-negative finite number.",
       source: "core",
       retryable: false,
+    });
+  }
+
+  if (options.signal?.aborted) {
+    throw new NnrpTimeoutError({
+      code: "NNRP_EVENT_POLL_CANCELLED",
+      message: "Event polling was cancelled.",
+      source: "runtime",
+      retryable: false,
+      cause: options.signal.reason,
     });
   }
 }

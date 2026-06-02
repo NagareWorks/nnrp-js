@@ -1,4 +1,10 @@
-import { createCapabilityManifest, NnrpCapabilityError, NnrpProtocolError } from "@nnrp/core";
+import {
+  createCapabilityManifest,
+  NnrpCapabilityError,
+  NnrpProtocolError,
+  type NnrpRuntimeEvent,
+  NnrpTimeoutError,
+} from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   createBrowserTransportProvider,
@@ -534,6 +540,42 @@ Deno.test("@nnrp/wasm validates cancel and event polling before WASM dispatch", 
 
   assertEquals(cancelError.diagnostic.code, "NNRP_OPERATION_ID_INVALID");
   assertEquals(eventError.diagnostic.code, "NNRP_EVENT_TIMEOUT_INVALID");
+});
+
+Deno.test("@nnrp/wasm cancels event polling with abort signals", async () => {
+  let resolvePoll: ((events: readonly NnrpRuntimeEvent[]) => void) | undefined;
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      awaitEvents: () =>
+        new Promise((resolve) => {
+          resolvePoll = resolve;
+        }),
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
+  const preAborted = new AbortController();
+  preAborted.abort("before");
+
+  const preAbortError = await assertRejects(
+    () => session.nextEvent({ signal: preAborted.signal }),
+    NnrpTimeoutError,
+  );
+
+  assertEquals(preAbortError.diagnostic.code, "NNRP_EVENT_POLL_CANCELLED");
+  assertEquals(preAbortError.diagnostic.cause, "before");
+
+  const controller = new AbortController();
+  const pending = session.nextEvent({ signal: controller.signal });
+  controller.abort("during");
+
+  const duringAbortError = await assertRejects(
+    () => pending,
+    NnrpTimeoutError,
+  );
+
+  assertEquals(duringAbortError.diagnostic.code, "NNRP_EVENT_POLL_CANCELLED");
+  assertEquals(duringAbortError.diagnostic.cause, "during");
+  resolvePoll?.([]);
 });
 
 Deno.test("@nnrp/wasm exposes async event iterator convenience", async () => {

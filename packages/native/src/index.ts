@@ -2,6 +2,7 @@ import {
   createBackendNativeManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
+  type NnrpAbortSignalLike,
   type NnrpCancelOptions,
   type NnrpCancelRequest,
   NnrpCapabilityError,
@@ -15,6 +16,7 @@ import {
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
+  NnrpTimeoutError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportSelectionSummary,
@@ -423,7 +425,7 @@ export class NnrpClient {
     }
 
     while (true) {
-      const events = await this.#state.runtime.awaitEvents({ maxEvents: 16 });
+      const events = await raceEventPoll(this.#state.runtime.awaitEvents({ maxEvents: 16 }), options.signal);
       if (events.length === 0) {
         throw bindingNotConnectedError("nextEvent");
       }
@@ -1075,6 +1077,32 @@ function bindingNotConnectedError(operation: string): NnrpNativeBindingUnavailab
     message: `Native binding operation '${operation}' is not connected to an FFI implementation yet.`,
     source: "native",
     retryable: false,
+  });
+}
+
+function raceEventPoll<T>(promise: Promise<T>, signal: NnrpAbortSignalLike | undefined): Promise<T> {
+  if (signal === undefined || signal.addEventListener === undefined || signal.removeEventListener === undefined) {
+    return promise;
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(eventPollCancelledError(signal));
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(eventPollCancelledError(signal));
+    signal.addEventListener?.("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener?.("abort", onAbort));
+  });
+}
+
+function eventPollCancelledError(signal: NnrpAbortSignalLike): NnrpTimeoutError {
+  return new NnrpTimeoutError({
+    code: "NNRP_EVENT_POLL_CANCELLED",
+    message: "Event polling was cancelled.",
+    source: "runtime",
+    retryable: false,
+    cause: signal.reason,
   });
 }
 

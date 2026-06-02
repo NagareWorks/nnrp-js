@@ -37,7 +37,7 @@
 - [x] Add `NnrpServerSession.receive()` event shape for server sessions.
 - [x] Define event discriminants for result, flow update, result hint, drop, close, and diagnostic events.
 - [x] Support timeout for event polling.
-- [ ] Support cancellation for event polling.
+- [x] Support cancellation for event polling.
 - [x] Avoid unbounded event queues.
 - [x] Add tests for event ordering under multiple in-flight operations.
 - [x] Add tests for invalid no-event timeout behavior.

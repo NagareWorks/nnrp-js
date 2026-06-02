@@ -2,6 +2,7 @@ import {
   createBrowserWasmManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
+  type NnrpAbortSignalLike,
   type NnrpCancelOptions,
   type NnrpCancelRequest,
   NnrpCapabilityError,
@@ -15,6 +16,7 @@ import {
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpSubmitRequest,
+  NnrpTimeoutError,
   type NnrpTransportCandidate,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
@@ -297,7 +299,7 @@ export class NnrpBrowserClient {
     }
 
     while (true) {
-      const events = await this.#state.runtime.awaitEvents({ maxEvents: 16 });
+      const events = await raceEventPoll(this.#state.runtime.awaitEvents({ maxEvents: 16 }), options.signal);
       if (events.length === 0) {
         throw bindingNotInstantiatedError("nextEvent");
       }
@@ -727,6 +729,32 @@ function bindingNotInstantiatedError(operation: string): NnrpWasmBindingUnavaila
     message: `WASM binding operation '${operation}' is not connected to instantiated primitives yet.`,
     source: "wasm",
     retryable: false,
+  });
+}
+
+function raceEventPoll<T>(promise: Promise<T>, signal: NnrpAbortSignalLike | undefined): Promise<T> {
+  if (signal === undefined || signal.addEventListener === undefined || signal.removeEventListener === undefined) {
+    return promise;
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(eventPollCancelledError(signal));
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(eventPollCancelledError(signal));
+    signal.addEventListener?.("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener?.("abort", onAbort));
+  });
+}
+
+function eventPollCancelledError(signal: NnrpAbortSignalLike): NnrpTimeoutError {
+  return new NnrpTimeoutError({
+    code: "NNRP_EVENT_POLL_CANCELLED",
+    message: "Event polling was cancelled.",
+    source: "runtime",
+    retryable: false,
+    cause: signal.reason,
   });
 }
 
