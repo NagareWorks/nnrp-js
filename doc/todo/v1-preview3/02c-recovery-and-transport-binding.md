@@ -29,7 +29,7 @@
 
 - [x] Define `NnrpBrowserTransportProvider` interface.
 - [x] Add WebSocket adapter slot.
-- [ ] Defer WebTransport adapter slot to preview4 or a later browser mapping pass.
+- [x] Defer WebTransport adapter slot to preview4 or a later browser mapping pass.
 - [x] Keep browser transport adapters optional so WASM primitive tests can run without network access.
 - [x] Ensure browser package exports no server transport APIs.
 - [x] Add bundling smoke that verifies adapter slots do not import Node built-ins.

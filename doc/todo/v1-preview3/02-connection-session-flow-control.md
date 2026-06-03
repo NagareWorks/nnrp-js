@@ -8,14 +8,14 @@
 
 ## Shard Ownership
 
-- [ ] Use `02a-connection-session-lifecycle.md` for runtime open/connect/listen, session open/patch/close, and handle
+- [x] Use `02a-connection-session-lifecycle.md` for runtime open/connect/listen, session open/patch/close, and handle
       ownership.
-- [ ] Use `02b-scheduling-events-and-diagnostics.md` for submit/cancel/result, flow updates, result hints, priority,
+- [x] Use `02b-scheduling-events-and-diagnostics.md` for submit/cancel/result, flow updates, result hints, priority,
       diagnostics, and event pumps.
-- [ ] Use `02c-recovery-and-transport-binding.md` for transport provider selection, migration, recovery, and browser
+- [x] Use `02c-recovery-and-transport-binding.md` for transport provider selection, migration, recovery, and browser
       transport adapter slots.
-- [ ] Keep semantic API items in `02*` and implementation package wiring in `04*`.
-- [ ] Update `05-validation-and-docs.md` when a lifecycle or event shape affects conformance and benchmark output.
+- [x] Keep semantic API items in `02*` and implementation package wiring in `04*`.
+- [x] Update `05-validation-and-docs.md` when a lifecycle or event shape affects conformance and benchmark output.
 
 ## Cross-Runtime Consistency Gates
 
@@ -30,8 +30,8 @@
 
 ## Dependency Order
 
-- [ ] Finish `01` public naming and build-mode contract before exposing lifecycle APIs.
-- [ ] Finish `04a` shared core types before finalizing session and event object types.
-- [ ] Finish `04b` native handle wrappers before enabling backend adapter conformance.
-- [ ] Finish `04c` WASM loading before enabling browser adapter conformance.
-- [ ] Finish `04d` package gates before publishing any runtime package.
+- [x] Finish `01` public naming and build-mode contract before exposing lifecycle APIs.
+- [x] Finish `04a` shared core types before finalizing session and event object types.
+- [x] Finish `04b` native handle wrappers before enabling backend adapter conformance.
+- [x] Finish `04c` WASM loading before enabling browser adapter conformance.
+- [x] Finish `04d` package gates before publishing any runtime package.

@@ -21,7 +21,9 @@
 
 ## Native Binding Layer
 
-- [ ] Choose a production binding mechanism that works for Node-compatible packages and release artifacts.
+- [x] Choose externally injected coarse FFI bindings as the production package boundary for preview3 release artifacts.
+- [x] Keep concrete `native-addon`, `node-ffi`, and `nano-ffi` adapters outside the core package boundary until preview4
+      binding policy is finalized.
 - [x] Define a coarse FFI binding contract that batches submit/result and event polling work.
 - [x] Keep raw FFI handles private.
 - [x] Wrap runtime handles.

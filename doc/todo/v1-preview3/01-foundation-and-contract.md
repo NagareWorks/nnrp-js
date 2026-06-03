@@ -14,7 +14,7 @@
 - [x] Create `@nnrp/wasm` package skeleton.
 - [x] Freeze public package names before npm publication.
 - [x] Rename placeholder exports to the documented `Nnrp*` public names.
-- [ ] Add compatibility aliases only when they avoid needless churn before first publication.
+- [x] Decide not to add compatibility aliases before first publication because no published JS/TS names need migration.
 - [x] Add package export maps for ESM runtime entrypoints.
 - [x] Add package export maps for `.d.ts` type entrypoints.
 - [x] Add package export maps for future subpath exports.
