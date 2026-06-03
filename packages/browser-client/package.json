@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/browser-client",
-  "version": "1.0.0-preview.3.1",
+  "version": "1.0.0-preview.3.3",
   "description": "Browser and edge client SDK for NNRP.",
   "keywords": [
     "nnrp",
@@ -35,10 +35,16 @@
     "README.md",
     "dist/index.js",
     "dist/index.d.ts",
-    "dist/index.d.ts.map"
+    "dist/index.d.ts.map",
+    "wasm/**"
   ],
   "dependencies": {
     "@nnrp/core": "workspace:*"
+  },
+  "nnrp": {
+    "wasmArtifacts": {
+      "enabled": true
+    }
   },
   "peerDependencies": {
     "@nnrp/transport-websocket": "workspace:*"

@@ -1,67 +1,9 @@
-# JS/TS Preview3 Browser Client Runtime Adoption
+# 04c. Browser Runtime Adoption
 
-## Scope
-
-1. Implement `@nnrp/browser-client` on top of `nnrp-rs` WASM primitives.
-2. Support browser/edge client usage without server APIs, native loaders, or Node built-ins.
-3. Keep WASM loading explicit, cacheable, and bundler-friendly.
-4. Keep browser transport installation independent from the client package: `@nnrp/browser-client` consumes installed or
-   explicitly supplied WebSocket adapters instead of bundling the adapter.
-
-## WASM Artifact Resolution
-
-- [x] Consume `nnrp-rs` WASM primitive package.
-- [x] Validate WASM artifact manifest before instantiation.
-- [x] Support explicit WASM URL injection.
-- [x] Support explicit `WebAssembly.Module` injection.
-- [x] Support package-default WASM asset resolution for bundlers.
-- [x] Surface missing or mismatched WASM primitive diagnostics.
-- [x] Add tests for URL, module, and package-default artifact paths.
-- [x] Add tests for rs primitive artifact manifests and required exports.
-- [x] Add tests for missing artifact paths once runtime instantiation is wired.
-
-## WASM Primitive Binding
-
-- [x] Wrap protocol/version primitive calls.
-- [x] Wrap transport selection primitive calls.
-- [x] Wrap payload/schema validation primitive calls where available.
-- [x] Wrap submit/result encode/decode primitives where available.
-- [x] Keep raw WASM memory details private.
-- [x] Normalize binary payload inputs without unnecessary copies.
-- [x] Add tests with fake primitive module.
-
-## Browser Runtime API
-
-- [x] Add `openBrowserRuntime(options)`.
-- [x] Add `NnrpBrowserRuntime.connect(options)`.
-- [x] Add `NnrpBrowserRuntime.close()`.
-- [x] Add `NnrpBrowserClient.openSession(options)`.
-- [x] Add `NnrpBrowserClient.close()`.
-- [x] Add `NnrpBrowserClientSession.submit(request)`.
-- [x] Add browser event delivery when runtime support is available.
-- [x] Add browser cancel API when runtime support is available.
-- [x] Add tests for open/connect/session/close lifecycle.
-
-## Browser Transport Adapters
-
-- [x] Define `NnrpBrowserTransportProvider`.
-- [x] Expose WebSocket provider construction through `@nnrp/transport-websocket`.
-- [x] Defer WebTransport provider slot to preview4 or a later browser mapping pass.
-- [x] Keep transport providers optional.
-- [x] Add installed package discovery path for WebSocket provider package.
-- [x] Add probe tests where WebSocket is installed.
-- [x] Add probe tests where no WebSocket package is installed and an explicit provider is supplied.
-- [x] Add diagnostics when no browser transport package is installed or supplied.
-- [x] Keep network-free WASM primitive tests possible.
-- [x] Use the same candidate/rejection type shapes as native mode.
-- [x] Add bundling tests with no adapter installed.
-
-## Browser Package Gates
-
-- [x] Packed browser client package contains WASM loader and browser client APIs.
-- [x] Packed browser client package does not contain native FFI loader code.
-- [x] Packed browser client package does not contain server APIs.
-- [x] Packed browser client package does not import `node:*` modules.
-- [x] Packed browser client package contains WASM assets or documents external asset injection.
-- [x] Packed WebSocket transport package contains no native loader or server APIs.
-- [x] CI runs browser bundling smoke.
+- [x] Embed browser WASM payload inside `@nnrp/browser-client`.
+- [x] Embed transport WASM payloads inside `@nnrp/transport-tcp`.
+- [x] Embed transport WASM payloads inside `@nnrp/transport-quic`.
+- [x] Keep `@nnrp/browser-client` as the user-facing browser package.
+- [x] Resolve browser runtime artifacts through browser client options and packaged WASM paths.
+- [x] Keep browser package free of native libraries.
+- [x] Keep WebSocket transport browser-native because rs does not expose a WebSocket transport implementation.

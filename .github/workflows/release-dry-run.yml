@@ -18,6 +18,8 @@ jobs:
         with:
           deno-version: v2.x
       - name: Verify release gates
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: deno task benchmark:smoke && deno task release-dry-run
       - name: Upload dry-run artifacts
         uses: actions/upload-artifact@v4

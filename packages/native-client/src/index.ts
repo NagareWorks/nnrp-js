@@ -42,6 +42,7 @@ import {
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const EXPECTED_PROTOCOL_MAJOR = 1;
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
@@ -1253,6 +1254,10 @@ export function resolveNativeLibraryPath(options: NnrpNativeBindingOptions = {})
     return systemPolicy;
   }
 
+  return defaultNativeLibraryPath(options);
+}
+
+function defaultNativeLibraryPath(options: NnrpNativeBindingOptions): string {
   const platform = options.platform ?? process.platform;
   const suffix = nativeLibrarySuffix(platform);
   const artifactDir = options.nativeLibrary?.artifactDir ?? "native";
@@ -1263,12 +1268,13 @@ export function resolveNativeLibraryPath(options: NnrpNativeBindingOptions = {})
 
 export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {}): NnrpNativeRuntimeBinding {
   const explicit = resolveExplicitNativeLibraryPath(options);
-  const artifact = explicit === undefined ? resolveNativeArtifact(options) : null;
+  const shouldResolveArtifact = explicit === undefined && options.nativeLibrary?.manifestPath !== undefined;
+  const artifact = shouldResolveArtifact ? resolveNativeArtifact(options) : null;
   const requiredSymbols = requiredNativeSymbols(options.nativeLibrary);
 
   return {
     manifest: createNativeRuntimeManifest(),
-    libraryPath: artifact?.libraryPath ?? explicit ?? resolveNativeLibraryPath(options),
+    libraryPath: artifact?.libraryPath ?? explicit ?? defaultNativeLibraryPath(options),
     requiredSymbols,
     ...(artifact === null ? {} : { artifact }),
     ...(options.ffi === undefined ? {} : { ffi: options.ffi }),
@@ -1770,7 +1776,7 @@ export function resolveNativeArtifact(options: NnrpNativeBindingOptions): NnrpRe
 }
 
 function defaultManifestPath(options: NnrpNativeBindingOptions): string {
-  const artifactDir = options.nativeLibrary?.artifactDir ?? "native";
+  const artifactDir = options.nativeLibrary?.artifactDir ?? path.join(packageRootDir(), "native");
   const packageName = options.nativeLibrary?.packageName ?? nativePackageName(
     options.platform ?? process.platform,
     options.arch ?? process.arch,
@@ -1890,6 +1896,10 @@ function nativeArtifactArch(arch: NodeArchitecture): string {
   }
 
   return arch;
+}
+
+function packageRootDir(): string {
+  return path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 }
 
 function toPosixPath(value: string): string {

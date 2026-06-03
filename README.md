@@ -27,9 +27,9 @@ orchestration experiments.
 | `@nnrp/native-client`       | Node.js and Deno native client/session entrypoint.                                       |
 | `@nnrp/native-server`       | Node.js and Deno native server/listen/session entrypoint.                                |
 | `@nnrp/browser-client`      | Browser and edge client/session entrypoint backed by browser runtime primitives.         |
-| `@nnrp/transport-tcp`       | TCP transport adapter descriptor for native clients and servers.                         |
-| `@nnrp/transport-quic`      | QUIC transport adapter descriptor for native clients and servers.                        |
-| `@nnrp/transport-websocket` | WebSocket transport adapter descriptor for browser clients.                              |
+| `@nnrp/transport-tcp`       | TCP transport adapter with packaged native and WASM transport artifacts.                 |
+| `@nnrp/transport-quic`      | QUIC transport adapter with packaged native and WASM transport artifacts.                |
+| `@nnrp/transport-websocket` | Browser-native WebSocket transport adapter for browser clients.                          |
 
 ## Build Modes
 
@@ -37,7 +37,7 @@ orchestration experiments.
 | ---------------- | -------------------------------------------- | -------------------------------------- | --------------------------------------------- |
 | `core`           | `@nnrp/core`                                 | Runtime-neutral TypeScript contract    | None                                          |
 | `backend-native` | `@nnrp/native-client`, `@nnrp/native-server` | Node-compatible services, CLIs, agents | `@nnrp/transport-tcp`, `@nnrp/transport-quic` |
-| `browser-wasm`   | `@nnrp/browser-client`                       | Browser and edge clients               | `@nnrp/transport-websocket`                   |
+| `browser-client` | `@nnrp/browser-client`                       | Browser and edge clients               | `@nnrp/transport-websocket`                   |
 
 The backend-native packages target Node.js 20.11 or newer compatible runtimes. Browser packages target modern ES2022
 browser and edge environments with `WebAssembly.Module`. Transport packages are independent install units: install one
@@ -95,9 +95,11 @@ The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure tru
 with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN` secret is
 required for the default path.
 
-Native artifacts are not bundled in the JavaScript package yet. Native role packages accept explicit library paths,
-artifact directories, or injected FFI bindings so services can choose local packaging policy without forcing one npm
-asset layout. Browser runtime assets are likewise injected by URL, manifest, or precompiled `WebAssembly.Module`.
+TCP and QUIC transport packages bundle the supported platform artifacts inside their own package payloads. Runtime
+resolution first looks inside the installed transport package and still accepts explicit library paths, artifact
+directories, or injected FFI bindings for controlled deployments. The browser client bundles browser runtime primitives,
+while TCP and QUIC transport packages carry their transport WASM payloads. WebSocket stays browser-native because the
+Rust runtime does not expose a WebSocket transport implementation.
 
 ## Contributors
 

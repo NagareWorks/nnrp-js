@@ -2,9 +2,10 @@
 
 # @nnrp/transport-tcp
 
-TCP transport adapter descriptors for NNRP native clients and servers.
+TCP transport adapter for NNRP native clients and servers.
 
-Install this package when a Node.js or Deno native runtime should consider TCP during transport probing.
+Install this package when a Node.js or Deno native runtime should consider TCP during transport probing. The package
+carries the supported native and WASM transport artifacts; role packages do not bundle TCP artifacts on its behalf.
 
 ```ts
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";

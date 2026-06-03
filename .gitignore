@@ -5,6 +5,13 @@ artifacts/
 .turbo/
 .pnpm-store/
 *.tsbuildinfo
+packages/native-client/native/
+packages/native-server/native/
+packages/browser-client/wasm/
+packages/transport-tcp/native/
+packages/transport-tcp/wasm/
+packages/transport-quic/native/
+packages/transport-quic/wasm/
 
 # Local environment
 .env

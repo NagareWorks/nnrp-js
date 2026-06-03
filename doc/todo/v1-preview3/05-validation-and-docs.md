@@ -1,75 +1,10 @@
-# JS/TS Preview3 Validation and Docs
+# 05. Validation and Docs
 
-## Scope
-
-1. Prove the JS/TS packages match the frozen public API and active runtime capabilities.
-2. Add conformance and benchmark entrypoints by build mode.
-3. Keep docs, examples, and release gates synchronized with package exports.
-
-## Static Validation
-
-- [x] Deno format task exists.
-- [x] Deno lint task exists.
-- [x] Deno typecheck task exists.
-- [x] Deno test task exists.
-- [x] Add package declaration diff check.
-- [x] Add package export snapshot check.
-- [x] Add runtime-policy checks for core, role-package, and transport-package import boundaries.
-- [x] Add content-policy checks for docs and examples.
-- [x] Add coverage gate once implementation tests cover real logic.
-
-## Conformance
-
-- [x] Add JS/TS capability manifest generator.
-- [x] Add conformance adapter command for backend native mode.
-- [x] Add conformance adapter command for browser WASM mode where behavior can be exercised headlessly.
-- [x] Ensure capability claims are build-mode specific.
-- [x] Include artifact/build-mode diagnostics in adapter output.
-- [x] Add CI job that runs public suite smoke cases through the adapter.
-- [x] Add negative conformance cases for unavailable native/WASM artifacts.
-
-## Benchmarks
-
-- [x] Add backend native benchmark smoke command for release dry runs.
-- [x] Add browser WASM benchmark smoke command for release dry runs.
-- [x] Add conformance benchmark command that consumes benchmark execution plans and emits benchmark-results schema JSON.
-- [x] Report latency and throughput separately in conformance benchmark results.
-- [x] Skip native throughput conformance scenarios unless a real Rust-backed FFI benchmark module is provided.
-- [x] Block release until real Rust-backed JS throughput is measured and clears the Python native fast-path baseline.
-- [x] Report native artifact version or WASM artifact version.
-- [x] Report selected transport and rejected provider diagnostics.
-- [x] Add smoke thresholds only after first stable local baseline.
-- [x] Store benchmark JSON artifacts in CI when benchmark workflow is explicitly requested.
-
-## Examples
-
-- [x] Add Node native client example for CLI/agent usage using `@nnrp/native-client` and transport packages.
-- [x] Add Node native server/adapter example using `@nnrp/native-server` and transport packages.
-- [x] Add browser client example using `@nnrp/browser-client` and `@nnrp/transport-websocket`.
-- [x] Add example showing one installed transport package.
-- [x] Add example showing multiple installed transport packages and probe-based selection.
-- [x] Add example showing explicit provider injection when auto-discovery is not desired.
-- [x] Add opencode-style native client sketch once API names are implemented.
-- [x] Ensure examples import package entrypoints, not source files.
-- [x] Keep examples small enough for users to copy without reading internals.
-
-## Docs Synchronization
-
-- [x] Keep `nnrp-doc` English JS/TS SDK pages synchronized.
-- [x] Keep `nnrp-doc` Chinese JS/TS SDK pages synchronized.
-- [x] Update local README for corrected role and transport package layout.
-- [x] Add non-empty package keywords for every published package.
-- [x] Add README header image to root and all npm package READMEs.
-- [x] Add contributors section to root README.
-- [x] Add docs links from package READMEs after package names are corrected.
-- [x] Add API change checklist to PR template if one is introduced.
-
-## Release Gates
-
-- [x] Add release workflow only after corrected npm package names are frozen.
-- [x] Add npm publish dry run.
-- [x] Add package artifact verification for corrected package set before enabling registry publish.
-- [x] Document environment secrets required for npm publish.
-- [x] Add trusted-publishing release workflow that publishes corrected packages after release gates pass.
-- [x] Manually tag release from the release workflow only after docs, conformance smoke, package pack checks, and import
-      smoke pass.
+- [x] Build, typecheck, lint, test, package, public API, and release dry-run checks cover the final preview3 package
+      shape.
+- [x] npm pack checks validate embedded native and WASM payloads in TCP and QUIC transport packages.
+- [x] Release workflow publishes the user-facing package set with a canonical npm tag.
+- [x] README describes role packages, transport packages, contributors, and preview install guidance.
+- [x] Todo files contain no platform-package or standalone-WASM package narrative.
+- [x] Preview3 release is complete only after the corrected package boundary is published as a new preview3 patch
+      version.
