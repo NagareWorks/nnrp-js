@@ -64,7 +64,7 @@ export interface NnrpNativeServerReceiveRequest {
     readonly timeoutMillis?: number;
 }
 export interface NnrpNativeFfiBinding {
-    readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
+    readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
     scoreTransportCandidates?(request: NnrpNativeTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
     validateSubmit?(request: NnrpNativeSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
@@ -143,6 +143,23 @@ export interface NnrpNativeBindingOptions {
     readonly platform?: NodePlatform;
     readonly arch?: NodeArchitecture;
     readonly ffi?: NnrpNativeFfiBinding;
+}
+export interface NnrpDenoNativeFfiBindingOptions {
+    readonly libraryPath?: string;
+    readonly nativeLibrary?: NnrpNativeLibraryOptions;
+    readonly env?: Record<string, string | undefined>;
+    readonly platform?: NodePlatform;
+    readonly arch?: NodeArchitecture;
+}
+export interface NnrpDenoNativeCompactSubmitterOptions extends NnrpDenoNativeFfiBindingOptions {
+    readonly sessionId?: number;
+}
+export interface NnrpDenoNativeCompactSubmitter {
+    readonly mode: "deno-ffi";
+    runtimeCapabilities(): NnrpNativeRuntimeCapabilities;
+    submit(frameId: number, payload: Uint8Array, resultPayload?: Uint8Array): void;
+    submitBatch(frameIdStart: number, iterations: number, payload: Uint8Array, resultPayload?: Uint8Array): number;
+    close(): void;
 }
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
@@ -249,6 +266,8 @@ declare class NnrpServerSession {
 }
 export declare function resolveNativeLibraryPath(options?: NnrpNativeBindingOptions): string;
 export declare function createNativeRuntimeBinding(options?: NnrpNativeBindingOptions): NnrpNativeRuntimeBinding;
+export declare function createDenoNativeFfiBinding(options?: NnrpDenoNativeFfiBindingOptions): NnrpNativeFfiBinding;
+export declare function createDenoNativeCompactSubmitter(options?: NnrpDenoNativeCompactSubmitterOptions): NnrpDenoNativeCompactSubmitter;
 export declare function validateNativeRuntimeCapabilities(capabilities: NnrpNativeRuntimeCapabilities): void;
 export declare function resolveNativeArtifact(options: NnrpNativeBindingOptions): NnrpResolvedNativeArtifact | null;
 export declare function readNativeArtifactManifest(manifestPath: string): NnrpNativeArtifactManifest;

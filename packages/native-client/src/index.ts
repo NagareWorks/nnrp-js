@@ -299,6 +299,31 @@ export interface NnrpDenoNativeCompactSubmitter {
   close(): void;
 }
 
+interface DenoNativeSymbols {
+  readonly nnrp_runtime_capabilities: () => Uint8Array;
+  readonly nnrp_client_connect: (request: Uint8Array, outConnection: Uint8Array) => Uint8Array;
+  readonly nnrp_client_open_session: (request: Uint8Array, outSession: Uint8Array) => Uint8Array;
+  readonly nnrp_client_submit_result_compact: (request: Uint8Array, outResult: Uint8Array) => Uint8Array;
+  readonly nnrp_client_submit_result_compact_batch: (
+    request: Uint8Array,
+    outLastResult: Uint8Array,
+    outCompleted: Uint8Array,
+  ) => Uint8Array;
+}
+
+interface DenoNativeLibrary {
+  readonly symbols: DenoNativeSymbols;
+  close(): void;
+}
+
+interface DenoRuntime {
+  readonly UnsafePointer: {
+    of(payload: Uint8Array<ArrayBuffer>): unknown;
+    value(pointer: unknown): bigint;
+  };
+  dlopen(path: string, symbols: typeof DENO_NATIVE_SYMBOLS): DenoNativeLibrary;
+}
+
 export interface NnrpNativeRuntimeBinding {
   readonly manifest: NnrpCapabilityManifest;
   readonly libraryPath: string;
@@ -1252,7 +1277,7 @@ export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {
 
 export function createDenoNativeFfiBinding(options: NnrpDenoNativeFfiBindingOptions = {}): NnrpNativeFfiBinding {
   const libraryPath = resolveNativeLibraryPath(options);
-  const library = Deno.dlopen(libraryPath, DENO_NATIVE_SYMBOLS);
+  const library = denoRuntime().dlopen(libraryPath, DENO_NATIVE_SYMBOLS);
   const sessions = new Map<string, FfiHandle>();
   let nextConnectionId = 1n;
   let nextSessionId = 1;
@@ -1278,8 +1303,8 @@ export function createDenoNativeFfiBinding(options: NnrpDenoNativeFfiBindingOpti
 
       return {
         frameId: request.submit.frameId,
-        sessionId: request.sessionOptions.sessionId,
         payload: resultPayload,
+        ...(request.sessionOptions.sessionId === undefined ? {} : { sessionId: request.sessionOptions.sessionId }),
       };
     },
     awaitEvents: () => [],
@@ -1287,7 +1312,7 @@ export function createDenoNativeFfiBinding(options: NnrpDenoNativeFfiBindingOpti
   };
 
   function ensureDenoFfiSession(
-    dylib: Deno.DynamicLibrary<typeof DENO_NATIVE_SYMBOLS>,
+    dylib: DenoNativeLibrary,
     cache: Map<string, FfiHandle>,
     options: NnrpSessionOptions,
   ): { readonly cacheKey: string; readonly handle: FfiHandle } {
@@ -1311,7 +1336,7 @@ export function createDenoNativeCompactSubmitter(
   options: NnrpDenoNativeCompactSubmitterOptions = {},
 ): NnrpDenoNativeCompactSubmitter {
   const libraryPath = resolveNativeLibraryPath(options);
-  const library = Deno.dlopen(libraryPath, DENO_NATIVE_SYMBOLS);
+  const library = denoRuntime().dlopen(libraryPath, DENO_NATIVE_SYMBOLS);
   const session = createDenoFfiSession(library, 1n, options.sessionId ?? 1);
   const requestBuffer = bytes(NNRP_CLIENT_SUBMIT_RESULT_REQUEST_SIZE);
   const requestView = new DataView(requestBuffer.buffer);
@@ -1355,7 +1380,7 @@ export function createDenoNativeCompactSubmitter(
 }
 
 function createDenoFfiSession(
-  dylib: Deno.DynamicLibrary<typeof DENO_NATIVE_SYMBOLS>,
+  dylib: DenoNativeLibrary,
   connectionId: bigint,
   sessionId: number,
 ): FfiHandle {
@@ -1533,9 +1558,20 @@ function writeHandle(view: DataView, offset: number, handle: FfiHandle): void {
 function writeBufferView(view: DataView, offset: number, payload: Uint8Array): void {
   const pointer = payload.byteLength === 0
     ? 0n
-    : Deno.UnsafePointer.value(Deno.UnsafePointer.of(payload as Uint8Array<ArrayBuffer>));
+    : denoRuntime().UnsafePointer.value(denoRuntime().UnsafePointer.of(payload as Uint8Array<ArrayBuffer>));
   view.setBigUint64(offset, pointer, true);
   view.setBigUint64(offset + 8, BigInt(payload.byteLength), true);
+}
+
+function denoRuntime(): DenoRuntime {
+  const runtime = (globalThis as typeof globalThis & { readonly Deno?: DenoRuntime }).Deno;
+  if (runtime === undefined) {
+    throw nativeArtifactError(
+      "NNRP_DENO_FFI_UNAVAILABLE",
+      "Deno native FFI helpers require a Deno runtime with dlopen and UnsafePointer support.",
+    );
+  }
+  return runtime;
 }
 
 function bytes(size: number): Uint8Array<ArrayBuffer> {
