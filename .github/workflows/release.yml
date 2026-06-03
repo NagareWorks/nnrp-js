@@ -6,6 +6,25 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      ref:
+        description: Git ref to release when running manually.
+        required: true
+        default: main
+      create_tag:
+        description: Create and push the resolved release tag before publishing.
+        required: true
+        type: boolean
+        default: false
+      publish_github_release:
+        description: Publish or update the GitHub Release.
+        required: true
+        type: boolean
+        default: false
+      publish_to_npm:
+        description: Publish packages to npm.
+        required: true
+        type: boolean
+        default: false
       npm_tag:
         description: npm dist-tag to publish.
         required: true
@@ -17,7 +36,7 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -28,6 +47,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
@@ -37,9 +59,84 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          echo "package_version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$version" >> "$GITHUB_OUTPUT"
+          echo "release_name=nnrp-js v$version" >> "$GITHUB_OUTPUT"
+      - name: Validate pushed tag
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected_tag="${{ steps.version.outputs.tag_name }}"
+          actual_tag="${{ github.ref_name }}"
+
+          if [ "$actual_tag" != "$expected_tag" ]; then
+            echo "Release tag mismatch: expected $expected_tag but workflow was triggered by $actual_tag."
+            exit 1
+          fi
+      - name: Validate manual release options
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.publish_github_release }}" = "true" ] && [ "${{ inputs.create_tag }}" != "true" ]; then
+            echo "Manual GitHub Release publishing requires create_tag=true so the release is anchored to an explicit tag."
+            exit 1
+          fi
+
+          if [ "${{ inputs.publish_to_npm }}" = "true" ] && [ "${{ inputs.create_tag }}" != "true" ]; then
+            echo "Manual npm publishing requires create_tag=true so package publication cannot start from an untagged ref."
+            exit 1
+          fi
+      - name: Create git tag
+        if: github.event_name == 'workflow_dispatch' && inputs.create_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags
+          tag="${{ steps.version.outputs.tag_name }}"
+          if [ -z "$(git tag --list "$tag")" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$tag"
+            git push origin "$tag"
+          fi
       - name: Verify release gates
-        run: deno task benchmark:smoke && deno task release-dry-run
+        run: deno task todo:check && deno task benchmark:smoke && deno task release-dry-run
+      - name: Pack GitHub release assets
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release-assets
+          deno task build
+          deno run \
+            --allow-read \
+            --allow-write=artifacts/npm-publish \
+            --allow-env=ComSpec \
+            --allow-run=npm,cmd \
+            scripts/publish-packages.ts --skip-publish
+          for package_dir in artifacts/npm-publish/nnrp-core artifacts/npm-publish/nnrp-native artifacts/npm-publish/nnrp-wasm; do
+            npm pack "./$package_dir" --pack-destination artifacts/release-assets
+          done
+      - name: Publish GitHub release
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: ${{ steps.version.outputs.release_name }}
+          files: artifacts/release-assets/*.tgz
       - name: Publish packages
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         env:
           NPM_TAG: ${{ inputs.npm_tag || 'preview' }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}

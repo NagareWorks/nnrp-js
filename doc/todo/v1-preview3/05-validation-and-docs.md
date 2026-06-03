@@ -62,5 +62,5 @@
 - [x] Add package artifact verification before enabling registry publish.
 - [x] Document environment secrets required for npm publish.
 - [x] Add trusted-publishing release workflow that publishes packages after release gates pass.
-- [ ] Manually tag release from the release workflow only after docs, conformance smoke, package pack checks, and import
+- [x] Manually tag release from the release workflow only after docs, conformance smoke, package pack checks, and import
       smoke pass.

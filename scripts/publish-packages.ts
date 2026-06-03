@@ -24,7 +24,9 @@ for (const policy of packages) {
     `${stageDir}/package.json`,
     `${JSON.stringify(publishablePackageJson(packageJson), null, 2)}\n`,
   );
-  await npmPublish(policy.name, stageDir, options, rootNpmrc);
+  if (!options.skipPublish) {
+    await npmPublish(policy.name, stageDir, options, rootNpmrc);
+  }
 }
 
 function parsePublishOptions(args: readonly string[]): PublishOptions {
@@ -32,6 +34,7 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
   let outputDir = "artifacts/npm-publish";
   let dryRun = false;
   let provenance = false;
+  let skipPublish = false;
   let otp: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -60,6 +63,11 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
       continue;
     }
 
+    if (arg === "--skip-publish") {
+      skipPublish = true;
+      continue;
+    }
+
     if (arg === "--otp" && next) {
       otp = next;
       index += 1;
@@ -78,6 +86,7 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
     outputDir,
     dryRun,
     provenance,
+    skipPublish,
     ...(otp === undefined ? {} : { otp }),
   };
 }
@@ -250,5 +259,6 @@ interface PublishOptions {
   readonly outputDir: string;
   readonly dryRun: boolean;
   readonly provenance: boolean;
+  readonly skipPublish: boolean;
   readonly otp?: string;
 }
