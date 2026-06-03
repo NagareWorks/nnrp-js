@@ -228,7 +228,7 @@ function createBuildManifest(buildMode: NnrpBuildMode, options: SdkCommandOption
     artifactVersion: options.artifactVersion ?? null,
     manifest: buildMode === "backend-native"
       ? createBackendNativeManifest(["transport.tcp", "transport.quic", "cache", "schema", "recovery"])
-      : createBrowserWasmManifest(["transport.websocket", "transport.webtransport", "cache", "schema"]),
+      : createBrowserWasmManifest(["transport.websocket", "cache", "schema"]),
   };
 }
 

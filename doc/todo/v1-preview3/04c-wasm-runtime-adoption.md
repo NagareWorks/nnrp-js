@@ -44,7 +44,7 @@
 
 - [x] Define `NnrpBrowserTransportProvider`.
 - [x] Add WebSocket provider slot.
-- [ ] Add WebTransport provider slot after mapping is frozen.
+- [ ] Defer WebTransport provider slot to preview4 or a later browser mapping pass.
 - [x] Keep transport providers optional.
 - [x] Keep network-free WASM primitive tests possible.
 - [x] Use the same candidate/rejection type shapes as native mode.

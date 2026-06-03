@@ -420,7 +420,7 @@ export function createBrowserWasmManifest(
 ): NnrpCapabilityManifest {
   return createCapabilityManifest({
     buildMode: "browser-wasm",
-    transports: ["websocket", "webtransport"],
+    transports: ["websocket"],
     capabilities: ["client.session", "wasm.loader", ...capabilities],
   });
 }

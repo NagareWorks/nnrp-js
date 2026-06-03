@@ -29,15 +29,15 @@ orchestration experiments.
 
 ## Build Modes
 
-| Build mode       | Package        | Runtime target                         | Transport slots                  |
-| ---------------- | -------------- | -------------------------------------- | -------------------------------- |
-| `core`           | `@nnrp/core`   | Runtime-neutral TypeScript contract    | None                             |
-| `backend-native` | `@nnrp/native` | Node-compatible services, CLIs, agents | TCP and QUIC native providers    |
-| `browser-wasm`   | `@nnrp/wasm`   | Browser and edge WASM clients          | WebSocket and WebTransport slots |
+| Build mode       | Package        | Runtime target                         | Transport slots               |
+| ---------------- | -------------- | -------------------------------------- | ----------------------------- |
+| `core`           | `@nnrp/core`   | Runtime-neutral TypeScript contract    | None                          |
+| `backend-native` | `@nnrp/native` | Node-compatible services, CLIs, agents | TCP and QUIC native providers |
+| `browser-wasm`   | `@nnrp/wasm`   | Browser and edge WASM clients          | WebSocket provider slot       |
 
 The backend-native packages target Node.js 20.11 or newer compatible runtimes. Browser-WASM packages target modern
-ES2022 browser and edge environments with `WebAssembly.Module`; WebSocket/WebTransport providers remain optional slots
-until the browser transport mapping is frozen.
+ES2022 browser and edge environments with `WebAssembly.Module`; WebSocket providers remain optional slots until the
+browser transport mapping is frozen.
 
 ## Quick Start
 

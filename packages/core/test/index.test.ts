@@ -43,7 +43,7 @@ Deno.test("@nnrp/core creates a browser wasm manifest", () => {
   const manifest = createBrowserWasmManifest(["result.hint"]);
 
   assertEquals(manifest.buildMode, "browser-wasm");
-  assertEquals(manifest.transports, ["websocket", "webtransport"]);
+  assertEquals(manifest.transports, ["websocket"]);
   assertEquals(manifest.capabilities, ["client.session", "wasm.loader", "result.hint"]);
 });
 
@@ -90,7 +90,7 @@ Deno.test("@nnrp/core selects the highest scored mutually supported transport", 
   const selection = selectTransport([
     { kind: "quic", peerSupported: true, localAvailable: true, score: 50 },
     { kind: "tcp", peerSupported: true, localAvailable: true, score: 80 },
-    { kind: "webtransport", peerSupported: false, localAvailable: true, score: 100 },
+    { kind: "websocket", peerSupported: false, localAvailable: true, score: 100 },
   ]);
 
   assertEquals(selection.selected?.kind, "tcp");

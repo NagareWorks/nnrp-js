@@ -205,7 +205,7 @@ Deno.test("@nnrp/wasm selects browser transport slots from local and peer manife
   });
 
   assertEquals(summary.selected, "websocket");
-  assertEquals(summary.rejected, [{ kind: "webtransport", reason: "peer-unsupported", score: 90 }]);
+  assertEquals(summary.rejected, []);
 });
 
 Deno.test("@nnrp/wasm applies browser transport provider availability", async () => {
@@ -233,9 +233,8 @@ Deno.test("@nnrp/wasm applies browser transport provider availability", async ()
   });
 
   assertEquals(summary.selected, null);
-  assertEquals(summary.rejected[0]?.reason, "peer-unsupported");
-  assertEquals(summary.rejected[1]?.reason, "local-unavailable");
-  assertEquals(summary.rejected[1]?.diagnostic?.code, "NNRP_BROWSER_WEBSOCKET_DISABLED");
+  assertEquals(summary.rejected[0]?.reason, "local-unavailable");
+  assertEquals(summary.rejected[0]?.diagnostic?.code, "NNRP_BROWSER_WEBSOCKET_DISABLED");
 });
 
 Deno.test("@nnrp/wasm exposes protocol version primitives with manifest fallback", async () => {
@@ -280,13 +279,13 @@ Deno.test("@nnrp/wasm routes transport scoring through primitive candidates when
   const summary = await runtime.selectTransportWithPrimitives({
     peerManifest: createCapabilityManifest({
       buildMode: "browser-wasm",
-      transports: ["websocket", "webtransport"],
+      transports: ["websocket"],
       capabilities: ["client.session"],
     }),
   });
 
   assertEquals(seenPolicy, "score");
-  assertEquals(seenCandidateKinds, ["webtransport", "websocket"]);
+  assertEquals(seenCandidateKinds, ["websocket"]);
   assertEquals(summary.selected, "websocket");
 });
 
@@ -295,12 +294,12 @@ Deno.test("@nnrp/wasm transport primitive path falls back to local browser scori
   const summary = await runtime.selectTransportWithPrimitives({
     peerManifest: createCapabilityManifest({
       buildMode: "browser-wasm",
-      transports: ["websocket", "webtransport"],
+      transports: ["websocket"],
       capabilities: ["client.session"],
     }),
   });
 
-  assertEquals(summary.selected, "webtransport");
+  assertEquals(summary.selected, "websocket");
 });
 
 Deno.test("@nnrp/wasm rejects empty endpoints", async () => {

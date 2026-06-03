@@ -16,7 +16,7 @@ export interface NnrpBrowserTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
     readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
-export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket" | "webtransport">;
+export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 export interface NnrpBrowserTransportProvider {
     readonly kind: NnrpBrowserTransportKind;
     readonly available?: boolean;
