@@ -2,14 +2,19 @@
 
 # @nnrp/transport-websocket
 
-WebSocket transport adapter descriptors for NNRP browser clients.
+WebSocket transport provider for NNRP browser clients.
 
-Install this package when a browser runtime should consider WebSocket during transport probing.
+Install this package when a browser runtime should own WebSocket connect, send, close, and probe behavior through a
+transport package.
 
 ```ts
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
-const websocket = createWebSocketTransportProvider({ endpointScheme: "wss" });
+const websocket = createWebSocketTransportProvider();
+const connection = await websocket.connect({ endpoint: "wss://example.test/nnrp" });
+
+connection.send(new Uint8Array([1, 2, 3]));
+connection.close();
 ```
 
 SDK reference: https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/api/transport-websocket

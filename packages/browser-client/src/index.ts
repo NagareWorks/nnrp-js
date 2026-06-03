@@ -217,6 +217,10 @@ export class NnrpBrowserRuntime {
     return this.#binding.artifact;
   }
 
+  public get transportProviders(): readonly NnrpBrowserTransportProvider[] {
+    return this.#binding.transportProviders;
+  }
+
   public connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient {
     this.#ensureOpen();
     this.#ensureConnectReady();
@@ -970,11 +974,16 @@ async function discoverBrowserTransportProviders(): Promise<readonly NnrpBrowser
 
   const provider = websocket.createWebSocketTransportProvider();
   const candidate = await provider.probe();
-  return [createBrowserTransportProvider("websocket", {
+  if (!isBrowserTransportProvider(provider)) {
+    return [];
+  }
+
+  return [{
+    ...provider,
     available: candidate.localAvailable,
     score: candidate.score,
     ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
-  })];
+  }];
 }
 
 async function importOptionalTransportModule(specifier: string): Promise<Record<string, unknown> | undefined> {
@@ -989,6 +998,18 @@ function isTransportFactory(value: unknown): value is () => {
   probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
 } {
   return typeof value === "function";
+}
+
+function isBrowserTransportProvider(value: unknown): value is NnrpBrowserTransportProvider {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const provider = value as Record<string, unknown>;
+  return provider.kind === "websocket" &&
+    Array.isArray(provider.endpointSchemes) &&
+    provider.endpointSchemes.every((scheme) => scheme === "ws" || scheme === "wss") &&
+    typeof provider.probe === "function";
 }
 
 function normalizeEndpoint(endpoint: string | URL): string {

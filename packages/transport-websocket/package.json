@@ -1,7 +1,7 @@
 {
   "name": "@nnrp/transport-websocket",
   "version": "1.0.0-preview.3.1",
-  "description": "WebSocket transport adapter descriptors for NNRP browser clients.",
+  "description": "WebSocket transport provider for NNRP browser clients.",
   "keywords": [
     "nnrp",
     "ai",

@@ -133,6 +133,15 @@ Deno.test("@nnrp/browser-client preserves injected browser transport providers",
   assertEquals(binding.transportProviders, [provider]);
 });
 
+Deno.test("@nnrp/browser-client preserves discovered WebSocket provider behavior", async () => {
+  const runtime = await openBrowserRuntime();
+  const [provider] = runtime.transportProviders;
+
+  assertEquals(provider?.kind, "websocket");
+  assertEquals(provider?.endpointSchemes, ["ws", "wss"]);
+  assertEquals(typeof provider?.connect, "function");
+});
+
 Deno.test("@nnrp/browser-client opens a browser runtime and client session", async () => {
   const runtime = await openBrowserRuntime({ moduleUrl: "/assets/nnrp.wasm", transportPolicy: "score" });
   const client = runtime.connect({

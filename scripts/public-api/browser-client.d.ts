@@ -123,6 +123,7 @@ export declare class NnrpBrowserRuntime {
     get manifest(): NnrpCapabilityManifest;
     get moduleUrl(): string;
     get artifact(): NnrpResolvedWasmArtifact | undefined;
+    get transportProviders(): readonly NnrpBrowserTransportProvider[];
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
     selectTransportWithPrimitives(options: NnrpBrowserTransportSelectionOptions): Promise<NnrpTransportSelectionSummary>;
