@@ -21,6 +21,8 @@
     "package-check": "deno run --allow-read scripts/check-package-entrypoints.ts && deno run --allow-read scripts/check-package-contents.ts && deno task node-import-smoke && deno task package-pack && deno task public-api && deno task browser-bundle-smoke",
     "package-smoke": "deno task build && deno task package-check",
     "release-dry-run": "deno task package-smoke && deno run --allow-read --allow-write=artifacts/release-dry-run --allow-env=ComSpec,NNRP_JS_FORCE_NPM_PACK --allow-run=deno,npm,cmd scripts/create-release-dry-run-artifacts.ts artifacts/release-dry-run",
+    "publish:dry-run": "deno task build && deno run --allow-read --allow-write=artifacts/npm-publish --allow-env=ComSpec --allow-run=npm,cmd scripts/publish-packages.ts --dry-run",
+    "publish": "deno task build && deno run --allow-read --allow-write=artifacts/npm-publish --allow-env=ComSpec --allow-run=npm,cmd scripts/publish-packages.ts",
     "api-consistency": "deno run scripts/check-api-consistency.ts",
     "format": "deno fmt",
     "format:check": "deno fmt --check",

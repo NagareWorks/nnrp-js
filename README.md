@@ -72,11 +72,16 @@ Examples use package entrypoint names through the repository import map. They ar
 
 ## Repository Status
 
-This repository is being bootstrapped for Preview3-era SDK integration. Public package publishing is intentionally
-deferred until the package names, native artifact matrix, and WASM distribution shape are frozen.
+This repository is being bootstrapped for Preview3-era SDK integration. Public package publishing is gated by the
+release workflow until package checks, conformance smoke, benchmark smoke, and import smoke pass.
 
-Preview package versions are synchronized across `@nnrp/core`, `@nnrp/native`, and `@nnrp/wasm` until the first npm
-publication. Package manifests stay `private: true` while release gates are dry-run only.
+Preview package versions are synchronized across `@nnrp/core`, `@nnrp/native`, and `@nnrp/wasm`. Source package
+manifests stay `private: true` for workspace safety; the release workflow stages publishable manifests before running
+`npm publish`.
+
+The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure trusted publishers for all three npm
+packages with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN`
+secret is required for the default path.
 
 Native artifacts are not bundled in the JavaScript package yet. `@nnrp/native` accepts explicit library paths, artifact
 directories, or injected FFI bindings so services can choose local packaging policy without forcing one npm asset

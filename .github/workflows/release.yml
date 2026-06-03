@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: npm dist-tag to publish.
+        required: true
+        default: preview
+      dry_run:
+        description: Run npm publish in dry-run mode.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Verify release gates
+        run: deno task benchmark:smoke && deno task release-dry-run
+      - name: Publish packages
+        env:
+          NPM_TAG: ${{ inputs.npm_tag || 'preview' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--tag "$NPM_TAG")
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          deno task build
+          deno run \
+            --allow-read \
+            --allow-write=artifacts/npm-publish \
+            --allow-env=ComSpec \
+            --allow-run=npm,cmd \
+            scripts/publish-packages.ts "${args[@]}"
