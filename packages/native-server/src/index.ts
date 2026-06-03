@@ -28,6 +28,7 @@ import {
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportProvider,
   type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
   normalizeSessionMigrationRequest,
@@ -257,7 +258,7 @@ export interface NnrpListenOptions {
   readonly transportPolicy?: NnrpTransportPolicy;
 }
 
-export interface NnrpNativeTransportProvider {
+export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
   readonly kind: Extract<NnrpTransportKind, "tcp" | "quic">;
   probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
 }

@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -17,8 +17,13 @@ export interface NnrpBrowserTransportSelectionOptions {
     readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
-export interface NnrpBrowserTransportProvider {
+export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
     readonly kind: NnrpBrowserTransportKind;
+    readonly available?: boolean;
+    readonly score?: number;
+    readonly diagnostic?: NnrpDiagnostic;
+}
+export interface NnrpBrowserTransportProviderOptions {
     readonly available?: boolean;
     readonly score?: number;
     readonly diagnostic?: NnrpDiagnostic;
@@ -172,5 +177,5 @@ export declare class NnrpBrowserClientSession {
 export declare function createWasmRuntimeBinding(options?: NnrpWasmBindingOptions): NnrpWasmRuntimeBinding;
 export declare function resolveWasmArtifact(options: NnrpWasmArtifactOptions): NnrpResolvedWasmArtifact;
 export declare function validateWasmArtifactManifest(manifest: NnrpWasmArtifactManifest, requiredExports?: readonly string[]): void;
-export declare function createBrowserTransportProvider(kind: NnrpBrowserTransportKind, options?: Omit<NnrpBrowserTransportProvider, "kind">): NnrpBrowserTransportProvider;
+export declare function createBrowserTransportProvider(kind: NnrpBrowserTransportKind, options?: NnrpBrowserTransportProviderOptions): NnrpBrowserTransportProvider;
 //# sourceMappingURL=index.d.ts.map

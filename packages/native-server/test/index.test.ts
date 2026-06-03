@@ -1,7 +1,7 @@
 import { createBackendNativeManifest, NnrpTransportError } from "@nnrp/core";
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { openBackendRuntime } from "../src/index.ts";
-import { createQuicTransportProvider } from "@nnrp/transport-quic";
+import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 Deno.test("@nnrp/native-server opens backend runtime and listens with explicit providers", async () => {
@@ -10,7 +10,7 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
     platform: "linux",
     arch: "x64",
     transportPolicy: "tcp-only",
-    transports: [createTcpTransportProvider(), createQuicTransportProvider()],
+    transports: [createTcpTransportProvider(), createQuicTransportProvider({ native: fakeQuicNativeBinding() })],
   });
   const server = runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "quic-only" });
 
@@ -67,3 +67,21 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED");
   assertEquals(error.diagnostic.transport, "quic");
 });
+
+function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
+  return {
+    connect: ({ endpoint }) => ({
+      kind: "quic",
+      endpoint: String(endpoint),
+      connected: true,
+      send: () => {},
+      close: () => {},
+    }),
+    listen: ({ endpoint }) => ({
+      kind: "quic",
+      endpoint: String(endpoint),
+      listening: true,
+      close: () => {},
+    }),
+  };
+}

@@ -15,6 +15,7 @@ await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
 await run(Deno.execPath(), [
   "test",
   "--allow-env",
+  "--allow-net=127.0.0.1",
   "--allow-read",
   "--allow-write",
   `--coverage=${coverageDir}`,

@@ -34,7 +34,7 @@
     "content-policy": "deno run --allow-read scripts/check-content-policy.ts",
     "todo:check": "deno run --allow-read scripts/check-preview3-todo.ts",
     "runtime-policy": "deno run --allow-read scripts/check-runtime-policy.ts",
-    "test": "deno test --allow-env --allow-read --allow-write packages/*/test/*.test.ts scripts/*.test.ts",
+    "test": "deno test --allow-env --allow-net=127.0.0.1 --allow-read --allow-write packages/*/test/*.test.ts scripts/*.test.ts",
     "coverage": "deno run --allow-read --allow-write=artifacts/coverage --allow-run scripts/run-coverage-gate.ts --line 90",
     "typecheck": "deno check packages/*/src/index.ts packages/*/test/*.test.ts scripts/*.ts examples/*.ts"
   },

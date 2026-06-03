@@ -62,6 +62,33 @@ export interface NnrpTransportCandidate {
   readonly diagnostic?: NnrpDiagnostic;
 }
 
+export interface NnrpTransportEndpoint {
+  readonly endpoint: string | URL;
+}
+
+export interface NnrpTransportConnection {
+  readonly kind: NnrpTransportKind;
+  readonly endpoint: string;
+  readonly connected: boolean;
+  send(payload: Uint8Array): void | Promise<void>;
+  close(): void | Promise<void>;
+}
+
+export interface NnrpTransportServer {
+  readonly kind: NnrpTransportKind;
+  readonly endpoint: string;
+  readonly listening: boolean;
+  close(): void | Promise<void>;
+}
+
+export interface NnrpTransportProvider {
+  readonly kind: NnrpTransportKind;
+  readonly endpointSchemes: readonly string[];
+  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
+  connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
+  listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
+}
+
 export interface NnrpTransportSelection {
   readonly selected: NnrpTransportCandidate | null;
   readonly candidates: readonly NnrpTransportCandidate[];

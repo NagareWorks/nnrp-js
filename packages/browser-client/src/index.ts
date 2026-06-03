@@ -27,6 +27,7 @@ import {
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportProvider,
   type NnrpTransportSelectionSummary,
   normalizeCancelRequest,
   normalizeSessionMigrationRequest,
@@ -60,8 +61,14 @@ export interface NnrpBrowserTransportSelectionOptions {
 
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 
-export interface NnrpBrowserTransportProvider {
+export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
   readonly kind: NnrpBrowserTransportKind;
+  readonly available?: boolean;
+  readonly score?: number;
+  readonly diagnostic?: NnrpDiagnostic;
+}
+
+export interface NnrpBrowserTransportProviderOptions {
   readonly available?: boolean;
   readonly score?: number;
   readonly diagnostic?: NnrpDiagnostic;
@@ -850,10 +857,18 @@ export function validateWasmArtifactManifest(
 
 export function createBrowserTransportProvider(
   kind: NnrpBrowserTransportKind,
-  options: Omit<NnrpBrowserTransportProvider, "kind"> = {},
+  options: NnrpBrowserTransportProviderOptions = {},
 ): NnrpBrowserTransportProvider {
   return {
     kind,
+    endpointSchemes: ["ws", "wss"],
+    probe: () => ({
+      kind,
+      peerSupported: true,
+      localAvailable: options.available ?? true,
+      score: options.score ?? 70,
+      ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
+    }),
     ...(options.available === undefined ? {} : { available: options.available }),
     ...(options.score === undefined ? {} : { score: options.score }),
     ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),

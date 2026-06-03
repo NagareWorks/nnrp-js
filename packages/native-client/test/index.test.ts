@@ -1,7 +1,7 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { createBackendNativeManifest, NnrpCapabilityError, NnrpTransportError } from "@nnrp/core";
 import { NnrpNativeBindingUnavailableError, openNativeClient } from "../src/index.ts";
-import { createQuicTransportProvider } from "@nnrp/transport-quic";
+import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 Deno.test("@nnrp/native-client opens a client with explicit transport providers", async () => {
@@ -67,7 +67,7 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
     arch: "x64",
     transports: [
       createTcpTransportProvider({ score: 60 }),
-      createQuicTransportProvider({ score: 90 }),
+      createQuicTransportProvider({ score: 90, native: fakeQuicNativeBinding() }),
     ],
   });
 
@@ -112,3 +112,21 @@ Deno.test("@nnrp/native-client rejects policy mismatches at connect time", async
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED");
   assertEquals(error.diagnostic.transport, "quic");
 });
+
+function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
+  return {
+    connect: ({ endpoint }) => ({
+      kind: "quic",
+      endpoint: String(endpoint),
+      connected: true,
+      send: () => {},
+      close: () => {},
+    }),
+    listen: ({ endpoint }) => ({
+      kind: "quic",
+      endpoint: String(endpoint),
+      listening: true,
+      close: () => {},
+    }),
+  };
+}
