@@ -11,8 +11,9 @@
   "tasks": {
     "clean": "deno run --allow-write=packages/core/dist,packages/native-client/dist,packages/native-server/dist,packages/browser-client/dist,packages/transport-tcp/dist,packages/transport-quic/dist,packages/transport-websocket/dist scripts/clean-build-output.ts",
     "build": "deno task clean && deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/transport-tcp packages/transport-quic packages/transport-websocket packages/native-client packages/native-server packages/browser-client",
-    "benchmark:backend": "deno run --allow-env scripts/run-benchmark.ts --mode backend-native",
-    "benchmark:browser": "deno run --allow-env scripts/run-benchmark.ts --mode browser-wasm",
+    "benchmark:backend": "deno run --allow-env --allow-net=127.0.0.1 --allow-read --allow-write=artifacts scripts/run-benchmark.ts --mode backend-native",
+    "benchmark:browser": "deno run --allow-env --allow-net=127.0.0.1 --allow-read --allow-write=artifacts scripts/run-benchmark.ts --mode browser-wasm",
+    "benchmark:conformance": "deno run --allow-env --allow-net=127.0.0.1 --allow-read --allow-write=artifacts scripts/run-benchmark.ts",
     "benchmark:smoke": "deno run --allow-env scripts/check-benchmark-smoke.ts",
     "conformance:backend": "deno run --allow-env scripts/run-conformance-adapter.ts --mode backend-native",
     "conformance:browser": "deno run --allow-env scripts/run-conformance-adapter.ts --mode browser-wasm",

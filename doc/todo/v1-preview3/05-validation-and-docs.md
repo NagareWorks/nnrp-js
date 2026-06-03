@@ -30,9 +30,10 @@
 
 ## Benchmarks
 
-- [x] Add backend native benchmark command.
-- [x] Add browser WASM benchmark command.
-- [x] Report latency and throughput separately by build mode.
+- [x] Add backend native benchmark smoke command for release dry runs.
+- [x] Add browser WASM benchmark smoke command for release dry runs.
+- [x] Add conformance benchmark command that consumes benchmark execution plans and emits benchmark-results schema JSON.
+- [x] Report latency and throughput separately in conformance benchmark results.
 - [x] Report native artifact version or WASM artifact version.
 - [x] Report selected transport and rejected provider diagnostics.
 - [x] Add smoke thresholds only after first stable local baseline.

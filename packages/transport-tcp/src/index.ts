@@ -53,6 +53,7 @@ export function createTcpTransportProvider(
 async function connectTcp(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportConnection> {
   const endpoint = normalizeTcpEndpoint(options.endpoint, { allowEphemeralPort: false });
   const socket = connectSocket(endpoint.port, endpoint.host);
+  socket.setNoDelay(true);
 
   await new Promise<void>((resolve, reject) => {
     socket.once("connect", resolve);
@@ -66,10 +67,7 @@ async function connectTcp(options: NnrpTransportEndpoint): Promise<NnrpTcpTransp
     get connected() {
       return !socket.destroyed;
     },
-    send: (payload) =>
-      new Promise<void>((resolve, reject) => {
-        socket.write(payload, (error) => error === undefined ? resolve() : reject(error));
-      }),
+    send: (payload) => writeTcpPayload(socket, payload),
     close: () => {
       socket.destroy();
     },
@@ -128,4 +126,28 @@ function resolveListeningEndpoint(server: Server, fallbackHost: string): string 
   }
 
   return `${address.address}:${address.port}`;
+}
+
+function writeTcpPayload(socket: Socket, payload: Uint8Array): Promise<void> {
+  if (socket.write(payload)) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      socket.off("drain", onDrain);
+      socket.off("error", onError);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    socket.once("drain", onDrain);
+    socket.once("error", onError);
+  });
 }

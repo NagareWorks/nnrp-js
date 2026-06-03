@@ -53,12 +53,17 @@ deno task build
 deno task manifest
 deno task conformance:backend
 deno task benchmark:backend
+deno task benchmark:conformance --plan ../nnrp-conformance/docs/examples/benchmark-execution-plan.sample.json --output artifacts/benchmark-results.json
 ```
 
 The first preview keeps the JavaScript layer thin: Deno drives formatting, linting, tests, and TypeScript builds. The
 published package shape remains Node-compatible ESM with declaration files, but Node.js is treated as a compatibility
 target rather than the repository tooling base. Rust remains the preferred implementation for protocol-critical native
 and WASM primitives.
+
+`benchmark:backend` and `benchmark:browser` keep SDK-local smoke reports for release dry runs. `benchmark:conformance`
+is the cross-SDK benchmark entrypoint: it consumes a conformance benchmark execution plan and emits a results document
+that validates against the conformance benchmark-results schema.
 
 `nnrp-js` uses Deno for repository tooling and keeps Node.js compatibility for package consumers. Bun is not a supported
 runtime, build tool, compatibility target, or CI axis for this SDK.
