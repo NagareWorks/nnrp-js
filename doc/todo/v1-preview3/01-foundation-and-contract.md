@@ -12,7 +12,7 @@
 - [x] Create `@nnrp/core` package skeleton.
 - [x] Create `@nnrp/native` package skeleton.
 - [x] Create `@nnrp/wasm` package skeleton.
-- [ ] Freeze public package names before npm publication.
+- [x] Freeze public package names before npm publication.
 - [x] Rename placeholder exports to the documented `Nnrp*` public names.
 - [ ] Add compatibility aliases only when they avoid needless churn before first publication.
 - [x] Add package export maps for ESM runtime entrypoints.
@@ -60,6 +60,6 @@
 
 - [x] Keep `nnrp-doc/docs/en/sdk/javascript` aligned with package exports.
 - [x] Keep `nnrp-doc/docs/zh/sdk/javascript` aligned with package exports.
-- [ ] Update docs in the same PR when public API names or package boundaries change.
+- [x] Update docs in the same PR when public API names or package boundaries change.
 - [x] Link method parameters to shared core types in docs.
 - [x] Keep code blocks as usage examples, not duplicate interface dumps.

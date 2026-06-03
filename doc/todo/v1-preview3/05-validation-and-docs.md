@@ -61,4 +61,5 @@
 - [x] Add npm publish dry run.
 - [x] Add package artifact verification before enabling registry publish.
 - [x] Document environment secrets required for npm publish.
-- [ ] Tag release only after docs, conformance smoke, package pack checks, and import smoke pass.
+- [ ] Manually tag release from the release workflow only after docs, conformance smoke, package pack checks, and import
+      smoke pass.
