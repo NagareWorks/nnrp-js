@@ -9,6 +9,7 @@
     "build": "deno task clean && deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
     "benchmark:backend": "deno run --allow-env scripts/run-benchmark.ts --mode backend-native",
     "benchmark:browser": "deno run --allow-env scripts/run-benchmark.ts --mode browser-wasm",
+    "benchmark:smoke": "deno run --allow-env scripts/check-benchmark-smoke.ts",
     "conformance:backend": "deno run --allow-env scripts/run-conformance-adapter.ts --mode backend-native",
     "conformance:browser": "deno run --allow-env scripts/run-conformance-adapter.ts --mode browser-wasm",
     "examples:check": "deno check examples/*.ts",

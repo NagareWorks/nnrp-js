@@ -69,6 +69,16 @@ export interface SdkBenchmarkResult {
   readonly diagnostic?: NnrpDiagnostic;
 }
 
+export interface SdkBenchmarkSmokeThresholds {
+  readonly minCapabilities: number;
+  readonly minTransportCandidates: number;
+}
+
+export const DEFAULT_BENCHMARK_SMOKE_THRESHOLDS: SdkBenchmarkSmokeThresholds = {
+  minCapabilities: 3,
+  minTransportCandidates: 1,
+};
+
 export function createCapabilityManifestReport(options: SdkCommandOptions): SdkCapabilityManifestReport {
   return {
     sdk: "nnrp-js",
@@ -159,6 +169,37 @@ export function createBenchmarkReport(
     ],
     diagnostics: [benchmarkDiagnostic(buildMode), ...transportDiagnostics(buildMode, transport)],
   };
+}
+
+export function assertBenchmarkSmokeThresholds(
+  report: SdkBenchmarkReport,
+  thresholds: SdkBenchmarkSmokeThresholds = DEFAULT_BENCHMARK_SMOKE_THRESHOLDS,
+): void {
+  const capabilityCount = benchmarkValue(report, "capability_manifest_generation");
+  if (capabilityCount < thresholds.minCapabilities) {
+    throw new Error(
+      `${report.buildMode} benchmark smoke capability count ${capabilityCount} is below ${thresholds.minCapabilities}`,
+    );
+  }
+
+  const transportCandidateCount = benchmarkValue(report, "transport_candidates");
+  if (transportCandidateCount < thresholds.minTransportCandidates) {
+    throw new Error(
+      `${report.buildMode} benchmark smoke transport candidate count ${transportCandidateCount} is below ${thresholds.minTransportCandidates}`,
+    );
+  }
+
+  if (report.transport.selected === null) {
+    throw new Error(`${report.buildMode} benchmark smoke did not select a transport`);
+  }
+}
+
+function benchmarkValue(report: SdkBenchmarkReport, name: string): number {
+  const result = report.results.find((entry) => entry.name === name);
+  if (result === undefined || result.status !== "measured") {
+    throw new Error(`${report.buildMode} benchmark smoke is missing measured result ${name}`);
+  }
+  return result.value;
 }
 
 function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTransportSelectionSummary {

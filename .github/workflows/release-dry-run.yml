@@ -18,7 +18,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Verify release gates
-        run: deno task release-dry-run
+        run: deno task benchmark:smoke && deno task release-dry-run
       - name: Upload dry-run artifacts
         uses: actions/upload-artifact@v4
         with:

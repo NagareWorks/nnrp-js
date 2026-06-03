@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
+  assertBenchmarkSmokeThresholds,
   createBenchmarkReport,
   createCapabilityManifestReport,
   createConformanceReport,
@@ -42,6 +43,22 @@ Deno.test("sdk reporting creates benchmark smoke results", () => {
   assertEquals(report.results[3]?.name, "transport_candidates");
   assertEquals(report.transport.selected, "websocket");
   assertEquals(report.diagnostics.some((entry) => entry.code === "NNRP_JS_TRANSPORT_SELECTION"), true);
+  assertBenchmarkSmokeThresholds(report);
+});
+
+Deno.test("sdk reporting rejects benchmark smoke reports below structural thresholds", () => {
+  assertThrows(() =>
+    assertBenchmarkSmokeThresholds({
+      ...createBenchmarkReport("backend-native"),
+      transport: {
+        selected: null,
+        candidates: [],
+        rejected: [],
+        policy: "score",
+      },
+      results: [],
+    })
+  );
 });
 
 Deno.test("sdk reporting parses command options", () => {

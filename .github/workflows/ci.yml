@@ -183,6 +183,7 @@ jobs:
           deno task conformance:browser >/tmp/nnrp-js-conformance-browser.json
           deno task benchmark:backend >/tmp/nnrp-js-benchmark-backend.json
           deno task benchmark:browser >/tmp/nnrp-js-benchmark-browser.json
+          deno task benchmark:smoke
 
   runtime-policy:
     name: runtime-policy

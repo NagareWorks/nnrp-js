@@ -35,7 +35,7 @@
 - [x] Report latency and throughput separately by build mode.
 - [x] Report native artifact version or WASM artifact version.
 - [x] Report selected transport and rejected provider diagnostics.
-- [ ] Add smoke thresholds only after first stable local baseline.
+- [x] Add smoke thresholds only after first stable local baseline.
 - [x] Store benchmark JSON artifacts in CI when benchmark workflow is explicitly requested.
 
 ## Examples
