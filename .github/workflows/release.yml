@@ -56,4 +56,4 @@ jobs:
             --allow-write=artifacts/npm-publish \
             --allow-env=ComSpec \
             --allow-run=npm,cmd \
-            scripts/publish-packages.ts "${args[@]}"
+            scripts/publish-packages.ts --provenance "${args[@]}"

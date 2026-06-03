@@ -30,6 +30,7 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
   let tag = "preview";
   let outputDir = "artifacts/npm-publish";
   let dryRun = false;
+  let provenance = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -52,6 +53,11 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
       continue;
     }
 
+    if (arg === "--provenance") {
+      provenance = true;
+      continue;
+    }
+
     throw new Error(`Unsupported publish option: ${arg}`);
   }
 
@@ -59,7 +65,7 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
     throw new Error(`Invalid npm dist-tag: ${tag}`);
   }
 
-  return { tag, outputDir, dryRun };
+  return { tag, outputDir, dryRun, provenance };
 }
 
 async function readWorkspaceVersion(): Promise<string> {
@@ -121,7 +127,7 @@ async function npmPublish(packageName: string, stageDir: string, options: Publis
     "public",
     "--tag",
     options.tag,
-    "--provenance",
+    ...(options.provenance ? ["--provenance"] : []),
     ...(options.dryRun ? ["--dry-run"] : []),
   ];
   const output = await new Deno.Command(npmCommand(), {
@@ -209,4 +215,5 @@ interface PublishOptions {
   readonly tag: string;
   readonly outputDir: string;
   readonly dryRun: boolean;
+  readonly provenance: boolean;
 }
