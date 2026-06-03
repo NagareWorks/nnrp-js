@@ -1,8 +1,14 @@
-import { createCapabilityManifest, type NnrpResult, type NnrpTransportKind } from "@nnrp/core";
+import { createCapabilityManifest, type NnrpTransportKind } from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
-import { type NnrpNativeFfiBinding, openNativeClient } from "@nnrp/native-client";
+import {
+  createDenoNativeCompactSubmitter,
+  createDenoNativeFfiBinding,
+  type NnrpNativeFfiBinding,
+  openNativeClient,
+} from "@nnrp/native-client";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
+import { pathToFileURL } from "node:url";
 import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson } from "./sdk-reporting.ts";
 
 const RESULT_SCHEMA_URL =
@@ -11,6 +17,7 @@ const DEFAULT_DURATION_SECONDS = 10;
 const DEFAULT_ITERATIONS = 100_000;
 const DEFAULT_WARMUP_ITERATIONS = 1_000;
 const INLINE_PAYLOAD_BYTES = 1024;
+const DEFAULT_NATIVE_BATCH_SIZE = 1024;
 
 interface BenchmarkExecutionPlan {
   readonly protocol_version: string;
@@ -164,17 +171,22 @@ async function runSessionLifecycle(scenario: BenchmarkScenario): Promise<Benchma
 }
 
 async function runSubmitResultLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
+  const nativeLibraryPath = nativeBenchmarkLibraryPath();
+  if (nativeLibraryPath !== undefined) {
+    return runDenoNativeSubmitResultLoop(scenario, nativeLibraryPath);
+  }
+
+  const ffi = await loadNativeBenchmarkFfi();
+  if (ffi === undefined) {
+    return skipResult(
+      scenario.id,
+      "Native submit/result benchmark requires NNRP_JS_BENCHMARK_NATIVE_LIBRARY, NNRP_NATIVE_LIBRARY, or NNRP_JS_BENCHMARK_FFI_MODULE with a real Rust-backed FFI binding.",
+    );
+  }
+
   const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
   const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
   const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
-  const ffi: NnrpNativeFfiBinding = {
-    mode: "test",
-    submitResultCompact: ({ submit }): NnrpResult => ({
-      frameId: submit.frameId,
-      payload,
-    }),
-    awaitEvents: () => [],
-  };
   const client = await openNativeClient({
     endpoint: "127.0.0.1:4433",
     env: {},
@@ -197,6 +209,31 @@ async function runSubmitResultLoop(scenario: BenchmarkScenario): Promise<Benchma
     return measuredThroughputResult(scenario.id, await measureAsyncThroughput(operation, durationSeconds));
   } finally {
     await client.runtime.close();
+  }
+}
+
+function runDenoNativeSubmitResultLoop(scenario: BenchmarkScenario, libraryPath: string): BenchmarkScenarioResult {
+  const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
+  const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
+  const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
+  const submitter = createDenoNativeCompactSubmitter({ libraryPath });
+  let frameId = 0;
+
+  const operation = () => {
+    const start = frameId + 1;
+    const completed = submitter.submitBatch(start, DEFAULT_NATIVE_BATCH_SIZE, payload);
+    frameId += completed;
+    return completed;
+  };
+
+  for (let index = 0; index < Math.ceil(warmupIterations / DEFAULT_NATIVE_BATCH_SIZE); index += 1) {
+    operation();
+  }
+
+  try {
+    return measuredThroughputResult(scenario.id, measureCountedSyncThroughput(operation, durationSeconds));
+  } finally {
+    submitter.close();
   }
 }
 
@@ -241,6 +278,57 @@ async function runTransportLoopback(scenario: BenchmarkScenario): Promise<Benchm
   }
 }
 
+async function loadNativeBenchmarkFfi(): Promise<NnrpNativeFfiBinding | undefined> {
+  const nativeLibraryPath = nativeBenchmarkLibraryPath();
+  if (nativeLibraryPath !== undefined && nativeLibraryPath.trim().length > 0) {
+    return createDenoNativeFfiBinding({ libraryPath: nativeLibraryPath });
+  }
+
+  const modulePath = Deno.env.get("NNRP_JS_BENCHMARK_FFI_MODULE");
+  if (modulePath === undefined || modulePath.trim().length === 0) {
+    return undefined;
+  }
+
+  const imported = await import(normalizeImportSpecifier(modulePath));
+  const bindingFactory = imported.createNativeFfiBinding ?? imported.createFfiBinding;
+  const binding = typeof bindingFactory === "function"
+    ? await bindingFactory()
+    : imported.default ?? imported.ffi ?? imported.nativeFfiBinding;
+
+  if (!isNativeBenchmarkFfi(binding)) {
+    throw new Error(
+      "NNRP_JS_BENCHMARK_FFI_MODULE must export default, ffi, nativeFfiBinding, or createNativeFfiBinding() with submitResultCompact().",
+    );
+  }
+  if (binding.mode === "test") {
+    throw new Error("Conformance benchmark cannot use a test/fake FFI binding.");
+  }
+
+  return binding;
+}
+
+function nativeBenchmarkLibraryPath(): string | undefined {
+  return Deno.env.get("NNRP_JS_BENCHMARK_NATIVE_LIBRARY") ?? Deno.env.get("NNRP_NATIVE_LIBRARY");
+}
+
+function normalizeImportSpecifier(value: string): string {
+  if (/^(?:file|https?|npm|jsr):/.test(value)) {
+    return value;
+  }
+
+  if (value.startsWith(".") || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) {
+    return pathToFileURL(value).href;
+  }
+
+  return value;
+}
+
+function isNativeBenchmarkFfi(value: unknown): value is NnrpNativeFfiBinding {
+  return typeof value === "object" &&
+    value !== null &&
+    typeof (value as NnrpNativeFfiBinding).submitResultCompact === "function";
+}
+
 function createTcpEchoReader(
   socket: { on(event: "data", listener: (chunk: Uint8Array) => void): void },
 ): () => Promise<Uint8Array> {
@@ -275,6 +363,26 @@ async function measureAsyncThroughput(operation: () => Promise<void>, durationSe
     await operation();
     samplesUs.push((performance.now() - before) * 1000);
     iterations += 1;
+  }
+
+  return {
+    iterations,
+    seconds: (performance.now() - started) / 1000,
+    samplesUs,
+  };
+}
+
+function measureCountedSyncThroughput(operation: () => number, durationSeconds: number): Measurement {
+  const samplesUs: number[] = [];
+  let iterations = 0;
+  const started = performance.now();
+  const deadline = started + durationSeconds * 1000;
+  while (performance.now() < deadline) {
+    const before = performance.now();
+    const completed = operation();
+    const elapsedUs = (performance.now() - before) * 1000;
+    samplesUs.push(completed === 0 ? elapsedUs : elapsedUs / completed);
+    iterations += completed;
   }
 
   return {
@@ -344,7 +452,7 @@ function buildEnvironment(): BenchmarkEnvironment {
     os: Deno.build.os,
     arch: Deno.build.arch,
     notes:
-      "JS benchmark results use the conformance benchmark-results schema; unavailable protocol codec scenarios are skipped until the JS SDK exposes those primitives.",
+      "JS benchmark results use the conformance benchmark-results schema; native throughput scenarios require a real Rust-backed FFI module.",
   };
 }
 

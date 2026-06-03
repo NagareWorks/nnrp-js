@@ -71,6 +71,7 @@ const RUNTIME_FEATURE_CLIENT_COMPACT_RESULT_HELPERS = 0x0000000000010000n;
 const REQUIRED_NATIVE_SYMBOLS = [
   "nnrp_runtime_capabilities",
   "nnrp_client_submit_result_compact",
+  "nnrp_client_submit_result_compact_batch",
   "nnrp_client_await_events",
 ] as const;
 const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
@@ -168,7 +169,7 @@ export interface NnrpNativeServerReceiveRequest {
 }
 
 export interface NnrpNativeFfiBinding {
-  readonly mode?: "native-addon" | "node-ffi" | "nano-ffi" | "test";
+  readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
   scoreTransportCandidates?(
     request: NnrpNativeTransportScoreRequest,
@@ -276,6 +277,26 @@ export interface NnrpNativeBindingOptions {
   readonly platform?: NodePlatform;
   readonly arch?: NodeArchitecture;
   readonly ffi?: NnrpNativeFfiBinding;
+}
+
+export interface NnrpDenoNativeFfiBindingOptions {
+  readonly libraryPath?: string;
+  readonly nativeLibrary?: NnrpNativeLibraryOptions;
+  readonly env?: Record<string, string | undefined>;
+  readonly platform?: NodePlatform;
+  readonly arch?: NodeArchitecture;
+}
+
+export interface NnrpDenoNativeCompactSubmitterOptions extends NnrpDenoNativeFfiBindingOptions {
+  readonly sessionId?: number;
+}
+
+export interface NnrpDenoNativeCompactSubmitter {
+  readonly mode: "deno-ffi";
+  runtimeCapabilities(): NnrpNativeRuntimeCapabilities;
+  submit(frameId: number, payload: Uint8Array, resultPayload?: Uint8Array): void;
+  submitBatch(frameIdStart: number, iterations: number, payload: Uint8Array, resultPayload?: Uint8Array): number;
+  close(): void;
 }
 
 export interface NnrpNativeRuntimeBinding {
@@ -791,7 +812,7 @@ export class NnrpClientSession {
       if (capacityWait !== undefined) {
         await capacityWait;
       }
-      normalized = normalizeSubmitRequest(request);
+      normalized = normalizeSubmitRequest(request, { copyPayloads: false });
       this.#beginFrame(normalized.frameId);
     } catch (error) {
       return Promise.reject(error);
@@ -809,7 +830,7 @@ export class NnrpClientSession {
     try {
       this.#ensureOpen();
       this.#reserveImmediateCapacity();
-      normalized = normalizeSubmitRequest(request);
+      normalized = normalizeSubmitRequest(request, { copyPayloads: false });
       this.#beginFrame(normalized.frameId);
     } catch (error) {
       return Promise.reject(error);
@@ -1227,6 +1248,316 @@ export function createNativeRuntimeBinding(options: NnrpNativeBindingOptions = {
     ...(artifact === null ? {} : { artifact }),
     ...(options.ffi === undefined ? {} : { ffi: options.ffi }),
   };
+}
+
+export function createDenoNativeFfiBinding(options: NnrpDenoNativeFfiBindingOptions = {}): NnrpNativeFfiBinding {
+  const libraryPath = resolveNativeLibraryPath(options);
+  const library = Deno.dlopen(libraryPath, DENO_NATIVE_SYMBOLS);
+  const sessions = new Map<string, FfiHandle>();
+  let nextConnectionId = 1n;
+  let nextSessionId = 1;
+
+  const ffi: NnrpNativeFfiBinding = {
+    mode: "deno-ffi",
+    runtimeCapabilities: () => decodeRuntimeCapabilities(library.symbols.nnrp_runtime_capabilities()),
+    submitResultCompact: (request) => {
+      const session = ensureDenoFfiSession(library, sessions, request.sessionOptions);
+
+      const submitPayload = request.submit.payload ?? EMPTY_PAYLOAD;
+      const resultPayload = request.resultPayload ?? submitPayload;
+      const outResult = new Uint8Array(NNRP_COMPACT_RESULT_SIZE);
+      const submitRequest = packClientSubmitResultRequest({
+        session: session.handle,
+        operationId: BigInt(request.submit.frameId),
+        frameId: request.submit.frameId,
+        submitPayload,
+        resultPayload,
+        maxEvents: Math.max(request.maxEvents ?? 16, 16),
+      });
+      assertFfiOk(library.symbols.nnrp_client_submit_result_compact(submitRequest, outResult), "submitResultCompact");
+
+      return {
+        frameId: request.submit.frameId,
+        sessionId: request.sessionOptions.sessionId,
+        payload: resultPayload,
+      };
+    },
+    awaitEvents: () => [],
+    close: () => library.close(),
+  };
+
+  function ensureDenoFfiSession(
+    dylib: Deno.DynamicLibrary<typeof DENO_NATIVE_SYMBOLS>,
+    cache: Map<string, FfiHandle>,
+    options: NnrpSessionOptions,
+  ): { readonly cacheKey: string; readonly handle: FfiHandle } {
+    const cacheKey = options.sessionId ?? `session-${nextSessionId}`;
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) {
+      return { cacheKey, handle: cached };
+    }
+
+    const handle = createDenoFfiSession(dylib, nextConnectionId, nextSessionId);
+    nextConnectionId += 1n;
+    nextSessionId += 1;
+    cache.set(cacheKey, handle);
+    return { cacheKey, handle };
+  }
+
+  return ffi;
+}
+
+export function createDenoNativeCompactSubmitter(
+  options: NnrpDenoNativeCompactSubmitterOptions = {},
+): NnrpDenoNativeCompactSubmitter {
+  const libraryPath = resolveNativeLibraryPath(options);
+  const library = Deno.dlopen(libraryPath, DENO_NATIVE_SYMBOLS);
+  const session = createDenoFfiSession(library, 1n, options.sessionId ?? 1);
+  const requestBuffer = bytes(NNRP_CLIENT_SUBMIT_RESULT_REQUEST_SIZE);
+  const requestView = new DataView(requestBuffer.buffer);
+  const batchRequestBuffer = bytes(NNRP_CLIENT_SUBMIT_RESULT_BATCH_REQUEST_SIZE);
+  const batchRequestView = new DataView(batchRequestBuffer.buffer);
+  const outResult = bytes(NNRP_COMPACT_RESULT_SIZE);
+  const outCompleted = bytes(8);
+  writeHandle(requestView, 0, session);
+  requestView.setBigUint64(72, 16n, true);
+  writeHandle(batchRequestView, 0, session);
+  batchRequestView.setUint32(36, 1, true);
+  batchRequestView.setBigUint64(72, 16n, true);
+
+  return {
+    mode: "deno-ffi",
+    runtimeCapabilities: () => decodeRuntimeCapabilities(library.symbols.nnrp_runtime_capabilities()),
+    submit: (frameId, payload, resultPayload = payload) => {
+      requestView.setBigUint64(24, BigInt(frameId), true);
+      requestView.setUint32(32, frameId, true);
+      writeBufferView(requestView, 40, payload);
+      writeBufferView(requestView, 56, resultPayload);
+      assertFfiOk(
+        library.symbols.nnrp_client_submit_result_compact(requestBuffer, outResult),
+        "submitResultCompact",
+      );
+    },
+    submitBatch: (frameIdStart, iterations, payload, resultPayload = payload) => {
+      batchRequestView.setBigUint64(24, BigInt(frameIdStart), true);
+      batchRequestView.setUint32(32, frameIdStart, true);
+      writeBufferView(batchRequestView, 40, payload);
+      writeBufferView(batchRequestView, 56, resultPayload);
+      batchRequestView.setBigUint64(80, BigInt(iterations), true);
+      assertFfiOk(
+        library.symbols.nnrp_client_submit_result_compact_batch(batchRequestBuffer, outResult, outCompleted),
+        "submitResultCompactBatch",
+      );
+      return Number(new DataView(outCompleted.buffer).getBigUint64(0, true));
+    },
+    close: () => library.close(),
+  };
+}
+
+function createDenoFfiSession(
+  dylib: Deno.DynamicLibrary<typeof DENO_NATIVE_SYMBOLS>,
+  connectionId: bigint,
+  sessionId: number,
+): FfiHandle {
+  const connectionOut = bytes(NNRP_HANDLE_SIZE);
+  assertFfiOk(
+    dylib.symbols.nnrp_client_connect(packClientConnectRequest(connectionId), connectionOut),
+    "clientConnect",
+  );
+  const sessionOut = bytes(NNRP_HANDLE_SIZE);
+  assertFfiOk(
+    dylib.symbols.nnrp_client_open_session(
+      packSessionOpenRequest({
+        connection: decodeHandle(connectionOut),
+        requestedSessionId: sessionId,
+      }),
+      sessionOut,
+    ),
+    "clientOpenSession",
+  );
+  return decodeHandle(sessionOut);
+}
+
+const EMPTY_PAYLOAD = new Uint8Array();
+const NNRP_HANDLE_SIZE = 24;
+const NNRP_FFI_STATUS_SIZE = 16;
+const NNRP_RUNTIME_CAPABILITIES_SIZE = 40;
+const NNRP_CLIENT_CONNECT_REQUEST_SIZE = 16;
+const NNRP_SESSION_OPEN_REQUEST_SIZE = 48;
+const NNRP_CLIENT_SUBMIT_RESULT_REQUEST_SIZE = 80;
+const NNRP_CLIENT_SUBMIT_RESULT_BATCH_REQUEST_SIZE = 88;
+const NNRP_COMPACT_RESULT_SIZE = 136;
+
+const NNRP_PROTOCOL_VERSION_STRUCT = { struct: ["u8", "u8"] } as const;
+const NNRP_FFI_STATUS_STRUCT = { struct: ["u32", "u32", "u32", "u32"] } as const;
+const NNRP_HANDLE_STRUCT = { struct: ["u32", "u64", "u32", "u32"] } as const;
+const NNRP_BUFFER_VIEW_STRUCT = { struct: ["pointer", "usize"] } as const;
+const NNRP_RUNTIME_CAPABILITIES_STRUCT = {
+  struct: [
+    "u16",
+    "u16",
+    "u16",
+    "u16",
+    NNRP_PROTOCOL_VERSION_STRUCT,
+    "u16",
+    "u16",
+    "u16",
+    "u16",
+    "u16",
+    "u16",
+    "u32",
+    "u64",
+  ],
+} as const;
+const NNRP_CLIENT_CONNECT_REQUEST_STRUCT = { struct: ["u64", "u32", "u32"] } as const;
+const NNRP_SESSION_OPEN_REQUEST_STRUCT = {
+  struct: [NNRP_HANDLE_STRUCT, "u32", "u32", "u16", "u32", "u32"],
+} as const;
+const NNRP_CLIENT_SUBMIT_RESULT_REQUEST_STRUCT = {
+  struct: [NNRP_HANDLE_STRUCT, "u64", "u32", NNRP_BUFFER_VIEW_STRUCT, NNRP_BUFFER_VIEW_STRUCT, "usize"],
+} as const;
+const NNRP_CLIENT_SUBMIT_RESULT_BATCH_REQUEST_STRUCT = {
+  struct: [NNRP_HANDLE_STRUCT, "u64", "u32", "u32", NNRP_BUFFER_VIEW_STRUCT, NNRP_BUFFER_VIEW_STRUCT, "usize", "usize"],
+} as const;
+const DENO_NATIVE_SYMBOLS = {
+  nnrp_runtime_capabilities: { parameters: [], result: NNRP_RUNTIME_CAPABILITIES_STRUCT },
+  nnrp_client_connect: { parameters: [NNRP_CLIENT_CONNECT_REQUEST_STRUCT, "buffer"], result: NNRP_FFI_STATUS_STRUCT },
+  nnrp_client_open_session: {
+    parameters: [NNRP_SESSION_OPEN_REQUEST_STRUCT, "buffer"],
+    result: NNRP_FFI_STATUS_STRUCT,
+  },
+  nnrp_client_submit_result_compact: {
+    parameters: [NNRP_CLIENT_SUBMIT_RESULT_REQUEST_STRUCT, "buffer"],
+    result: NNRP_FFI_STATUS_STRUCT,
+  },
+  nnrp_client_submit_result_compact_batch: {
+    parameters: [NNRP_CLIENT_SUBMIT_RESULT_BATCH_REQUEST_STRUCT, "buffer", "buffer"],
+    result: NNRP_FFI_STATUS_STRUCT,
+  },
+} as const;
+
+interface FfiHandle {
+  readonly kind: number;
+  readonly id: bigint;
+  readonly generation: number;
+  readonly flags: number;
+}
+
+function decodeRuntimeCapabilities(source: Uint8Array): NnrpNativeRuntimeCapabilities {
+  if (source.byteLength < NNRP_RUNTIME_CAPABILITIES_SIZE) {
+    throw new Error(`runtime capabilities result is too small: ${source.byteLength}`);
+  }
+
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  return {
+    abiMajor: view.getUint16(0, true),
+    abiMinor: view.getUint16(2, true),
+    abiPatch: view.getUint16(4, true),
+    protocolMajor: view.getUint8(8),
+    protocolWireFormat: view.getUint8(9),
+    sdkMajor: view.getUint16(10, true),
+    sdkMinor: view.getUint16(12, true),
+    sdkPatch: view.getUint16(14, true),
+    sdkChannel: view.getUint16(16, true),
+    sdkRevision: view.getUint16(18, true),
+    transportSlots: view.getUint32(24, true),
+    featureFlags: view.getBigUint64(32, true),
+  };
+}
+
+function packClientConnectRequest(connectionId: bigint): Uint8Array<ArrayBuffer> {
+  const output = bytes(NNRP_CLIENT_CONNECT_REQUEST_SIZE);
+  const view = new DataView(output.buffer);
+  view.setBigUint64(0, connectionId, true);
+  view.setUint32(8, 1, true);
+  view.setUint32(12, 2, true);
+  return output;
+}
+
+function packSessionOpenRequest(
+  request: { readonly connection: FfiHandle; readonly requestedSessionId: number },
+): Uint8Array<ArrayBuffer> {
+  const output = bytes(NNRP_SESSION_OPEN_REQUEST_SIZE);
+  const view = new DataView(output.buffer);
+  writeHandle(view, 0, request.connection);
+  view.setUint32(24, request.requestedSessionId, true);
+  view.setUint32(28, 1, true);
+  view.setUint16(32, 0, true);
+  view.setUint32(36, 0, true);
+  view.setUint32(40, 0, true);
+  return output;
+}
+
+function packClientSubmitResultRequest(
+  request: {
+    readonly session: FfiHandle;
+    readonly operationId: bigint;
+    readonly frameId: number;
+    readonly submitPayload: Uint8Array;
+    readonly resultPayload: Uint8Array;
+    readonly maxEvents: number;
+  },
+): Uint8Array<ArrayBuffer> {
+  const output = bytes(NNRP_CLIENT_SUBMIT_RESULT_REQUEST_SIZE);
+  const view = new DataView(output.buffer);
+  writeHandle(view, 0, request.session);
+  view.setBigUint64(24, request.operationId, true);
+  view.setUint32(32, request.frameId, true);
+  writeBufferView(view, 40, request.submitPayload);
+  writeBufferView(view, 56, request.resultPayload);
+  view.setBigUint64(72, BigInt(request.maxEvents), true);
+  return output;
+}
+
+function decodeHandle(source: Uint8Array): FfiHandle {
+  if (source.byteLength < NNRP_HANDLE_SIZE) {
+    throw new Error(`handle result is too small: ${source.byteLength}`);
+  }
+
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  return {
+    kind: view.getUint32(0, true),
+    id: view.getBigUint64(8, true),
+    generation: view.getUint32(16, true),
+    flags: view.getUint32(20, true),
+  };
+}
+
+function writeHandle(view: DataView, offset: number, handle: FfiHandle): void {
+  view.setUint32(offset, handle.kind, true);
+  view.setBigUint64(offset + 8, handle.id, true);
+  view.setUint32(offset + 16, handle.generation, true);
+  view.setUint32(offset + 20, handle.flags, true);
+}
+
+function writeBufferView(view: DataView, offset: number, payload: Uint8Array): void {
+  const pointer = payload.byteLength === 0
+    ? 0n
+    : Deno.UnsafePointer.value(Deno.UnsafePointer.of(payload as Uint8Array<ArrayBuffer>));
+  view.setBigUint64(offset, pointer, true);
+  view.setBigUint64(offset + 8, BigInt(payload.byteLength), true);
+}
+
+function bytes(size: number): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(size);
+}
+
+function assertFfiOk(statusBytes: Uint8Array, operation: string): void {
+  if (statusBytes.byteLength < NNRP_FFI_STATUS_SIZE) {
+    throw new Error(`${operation} returned a short FFI status: ${statusBytes.byteLength}`);
+  }
+
+  const view = new DataView(statusBytes.buffer, statusBytes.byteOffset, statusBytes.byteLength);
+  const statusCode = view.getUint32(0, true);
+  if (statusCode !== 0) {
+    const errorFamily = view.getUint32(4, true);
+    const protocolErrorCode = view.getUint32(8, true);
+    const detailCode = view.getUint32(12, true);
+    throw nativeArtifactError(
+      "NNRP_DENO_FFI_STATUS_ERROR",
+      `${operation} failed with status=${statusCode}, family=${errorFamily}, protocol=${protocolErrorCode}, detail=${detailCode}.`,
+    );
+  }
 }
 
 function createNativeRuntimeManifest(capabilities?: NnrpNativeRuntimeCapabilities): NnrpCapabilityManifest {

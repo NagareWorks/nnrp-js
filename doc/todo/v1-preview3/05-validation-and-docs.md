@@ -34,6 +34,8 @@
 - [x] Add browser WASM benchmark smoke command for release dry runs.
 - [x] Add conformance benchmark command that consumes benchmark execution plans and emits benchmark-results schema JSON.
 - [x] Report latency and throughput separately in conformance benchmark results.
+- [x] Skip native throughput conformance scenarios unless a real Rust-backed FFI benchmark module is provided.
+- [x] Block release until real Rust-backed JS throughput is measured and clears the Python native fast-path baseline.
 - [x] Report native artifact version or WASM artifact version.
 - [x] Report selected transport and rejected provider diagnostics.
 - [x] Add smoke thresholds only after first stable local baseline.

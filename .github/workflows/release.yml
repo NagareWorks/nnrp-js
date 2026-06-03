@@ -29,6 +29,10 @@ on:
         description: npm dist-tag to publish.
         required: true
         default: preview
+      rust_artifact_version:
+        description: nnrp-rs release version that provides the Linux native benchmark artifact.
+        required: true
+        default: 1.0.0-preview.3.7
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -112,6 +116,36 @@ jobs:
           fi
       - name: Verify release gates
         run: deno task todo:check && deno task benchmark:smoke && deno task release-dry-run
+      - name: Download native benchmark artifact
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.7' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/native-benchmark
+          asset="nnrp-ffi-native-linux-x86_64-${RUST_ARTIFACT_VERSION}.zip"
+          gh release download "v${RUST_ARTIFACT_VERSION}" \
+            --repo NagareWorks/nnrp-rs \
+            --pattern "$asset" \
+            --dir artifacts/native-benchmark
+          unzip -q "artifacts/native-benchmark/$asset" -d artifacts/native-benchmark/linux-x86_64
+          native_library="$(find artifacts/native-benchmark/linux-x86_64 -type f -name 'libnnrp_ffi.so' | head -n 1)"
+          if [ -z "$native_library" ]; then
+            echo "Downloaded Rust artifact did not contain libnnrp_ffi.so."
+            exit 1
+          fi
+          echo "NNRP_NATIVE_LIBRARY=$native_library" >> "$GITHUB_ENV"
+      - name: Verify real native benchmark gate
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno task benchmark:conformance \
+            --plan scripts/release-benchmark-plan.json \
+            --output artifacts/release-benchmark-results.json
+          deno task benchmark:release-gate --results artifacts/release-benchmark-results.json
       - name: Pack GitHub release assets
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release)
         shell: bash

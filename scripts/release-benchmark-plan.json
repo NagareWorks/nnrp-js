@@ -1,0 +1,20 @@
+{
+  "protocol_version": "nnrp/1",
+  "implementation_name": "nnrp-js",
+  "artifacts": {
+    "results_path": "artifacts/release-benchmark-results.json",
+    "evidence_dir": "artifacts/release-benchmark"
+  },
+  "scenarios": [
+    {
+      "id": "l4.submit_result.inline_tensor.throughput",
+      "category": "throughput",
+      "workload": {
+        "operation": "submit_result_loop",
+        "payload": "inline_tensor_1024",
+        "duration_seconds": 10,
+        "warmup_iterations": 1000
+      }
+    }
+  ]
+}

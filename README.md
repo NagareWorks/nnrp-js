@@ -63,7 +63,10 @@ and WASM primitives.
 
 `benchmark:backend` and `benchmark:browser` keep SDK-local smoke reports for release dry runs. `benchmark:conformance`
 is the cross-SDK benchmark entrypoint: it consumes a conformance benchmark execution plan and emits a results document
-that validates against the conformance benchmark-results schema.
+that validates against the conformance benchmark-results schema. Native throughput scenarios require
+`NNRP_NATIVE_LIBRARY` or `NNRP_JS_BENCHMARK_NATIVE_LIBRARY` to point at a real `nnrp_ffi` dynamic library, or
+`NNRP_JS_BENCHMARK_FFI_MODULE` to point at a real Rust-backed FFI binding module. They are skipped instead of measured
+when no real binding is provided, and release publishing is gated on the Rust-backed throughput scenario.
 
 `nnrp-js` uses Deno for repository tooling and keeps Node.js compatibility for package consumers. Bun is not a supported
 runtime, build tool, compatibility target, or CI axis for this SDK.
