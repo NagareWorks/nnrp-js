@@ -1,37 +1,11 @@
-# JS/TS Preview3 Connection, Session, and Flow-Control Map
+# 02. Connection, Session, and Flow Control
 
-## Scope
+Preview3 exposes client and server session operations through role packages while keeping shared protocol behavior in
+core.
 
-1. Track host-facing connection/session/control-plane work across native and browser runtimes.
-2. Keep shared JS/TS object semantics aligned even when native and WASM backends use different artifacts.
-3. Avoid hiding lifecycle and event delivery details inside package loaders.
-
-## Shard Ownership
-
-- [x] Use `02a-connection-session-lifecycle.md` for runtime open/connect/listen, session open/patch/close, and handle
-      ownership.
-- [x] Use `02b-scheduling-events-and-diagnostics.md` for submit/cancel/result, flow updates, result hints, priority,
-      diagnostics, and event pumps.
-- [x] Use `02c-recovery-and-transport-binding.md` for transport provider selection, migration, recovery, and browser
-      transport adapter slots.
-- [x] Keep semantic API items in `02*` and implementation package wiring in `04*`.
-- [x] Update `05-validation-and-docs.md` when a lifecycle or event shape affects conformance and benchmark output.
-
-## Cross-Runtime Consistency Gates
-
-- [x] Native and browser client sessions expose the same submit/cancel/result/event method names unless a runtime cannot
-      support a capability.
-- [x] Native and browser errors map to the same diagnostic families.
-- [x] Operation ids use `bigint` where they can exceed JavaScript safe integer range.
-- [x] Binary payload parameters accept `Uint8Array` or `ArrayBufferView`.
-- [x] Retained binary payloads are copied unless an API explicitly states ownership transfer.
-- [x] Cancellation and close semantics are explicit for all async methods.
-- [x] Runtime event objects can be pattern-matched without string parsing.
-
-## Dependency Order
-
-- [x] Finish `01` public naming and build-mode contract before exposing lifecycle APIs.
-- [x] Finish `04a` shared core types before finalizing session and event object types.
-- [x] Finish `04b` native handle wrappers before enabling backend adapter conformance.
-- [x] Finish `04c` WASM loading before enabling browser adapter conformance.
-- [x] Finish `04d` package gates before publishing any runtime package.
+- [x] Provide native client connect, session open, submit, cancel, patch, and event polling surfaces.
+- [x] Provide native server listen, accept, receive, and session event surfaces.
+- [x] Provide browser client connect and session surfaces for WebSocket-capable runtimes.
+- [x] Route shared request normalization through `@nnrp/core`.
+- [x] Preserve flow-control credit validation at the role package boundary.
+- [x] Surface protocol, transport, timeout, recovery, and capability errors consistently across role packages.

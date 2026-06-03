@@ -115,6 +115,9 @@ jobs:
             git push origin "$tag"
           fi
       - name: Verify release gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.7' }}
         run: deno task todo:check && deno task benchmark:smoke && deno task release-dry-run
       - name: Download native benchmark artifact
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
@@ -159,7 +162,7 @@ jobs:
             --allow-env=ComSpec \
             --allow-run=npm,cmd \
             scripts/publish-packages.ts --skip-publish
-          for package_dir in artifacts/npm-publish/nnrp-core artifacts/npm-publish/nnrp-native-client artifacts/npm-publish/nnrp-native-server artifacts/npm-publish/nnrp-browser-client artifacts/npm-publish/nnrp-transport-tcp artifacts/npm-publish/nnrp-transport-quic artifacts/npm-publish/nnrp-transport-websocket; do
+          for package_dir in artifacts/npm-publish/*; do
             npm pack "./$package_dir" --pack-destination artifacts/release-assets
           done
       - name: Publish GitHub release

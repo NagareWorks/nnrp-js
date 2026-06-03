@@ -172,6 +172,10 @@ jobs:
         run: deno task coverage
       - name: Build
         run: deno task build
+      - name: Prepare Rust artifact packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: deno task artifacts:prepare
       - name: Package entrypoint smoke
         run: deno task package-check
       - name: SDK command smoke

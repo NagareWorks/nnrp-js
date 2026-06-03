@@ -2,13 +2,7 @@ const packages: readonly PackagePackPolicy[] = [
   {
     name: "@nnrp/core",
     directory: "packages/core",
-    expectedFiles: [
-      "README.md",
-      "dist/index.d.ts",
-      "dist/index.d.ts.map",
-      "dist/index.js",
-      "package.json",
-    ],
+    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^native\//, /^wasm\//],
   },
   {
@@ -21,7 +15,7 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.js",
       "package.json",
     ],
-    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^native\//, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/native-server",
@@ -33,7 +27,7 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.js",
       "package.json",
     ],
-    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^native\//, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/browser-client",
@@ -44,19 +38,42 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.d.ts.map",
       "dist/index.js",
       "package.json",
+      "wasm/manifest.json",
+      "wasm/nnrp_wasm.d.ts",
+      "wasm/nnrp_wasm.wasm",
     ],
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
   {
     name: "@nnrp/transport-tcp",
     directory: "packages/transport-tcp",
-    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
+    expectedFiles: [
+      "README.md",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "native/windows-x86_64/manifest.json",
+      "package.json",
+      "wasm/manifest.json",
+      "wasm/nnrp_wasm.d.ts",
+      "wasm/nnrp_wasm.wasm",
+    ],
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-quic",
     directory: "packages/transport-quic",
-    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
+    expectedFiles: [
+      "README.md",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "native/windows-x86_64/manifest.json",
+      "package.json",
+      "wasm/manifest.json",
+      "wasm/nnrp_wasm.d.ts",
+      "wasm/nnrp_wasm.wasm",
+    ],
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
   },
   {
@@ -70,6 +87,7 @@ const packages: readonly PackagePackPolicy[] = [
 const failures: string[] = [];
 const packageVersions = new Map<string, string>();
 const nativeArtifactManifestPattern = /^native\/[^/]+\/manifest\.json$/;
+const wasmArtifactManifestPattern = /^wasm\/manifest\.json$/;
 
 for (const policy of packages) {
   const packageJson = await readPackageJson(policy);
@@ -88,6 +106,7 @@ for (const policy of packages) {
 
   const packedFiles = pack.files.map((file) => normalizePackPath(file.path)).sort();
   checkNativeArtifactMetadata(policy, packageJson, packedFiles);
+  checkWasmArtifactMetadata(policy, packageJson, packedFiles);
   for (const expected of policy.expectedFiles) {
     if (!packedFiles.includes(expected)) {
       failures.push(`${policy.name}: npm pack output missing ${expected}`);
@@ -129,13 +148,39 @@ function checkNativeArtifactMetadata(
     return;
   }
 
-  if (policy.name !== "@nnrp/native-client" && policy.name !== "@nnrp/native-server") {
-    failures.push(`${policy.name}: native artifact packaging can only be enabled on native role packages`);
+  if (policy.name !== "@nnrp/transport-tcp" && policy.name !== "@nnrp/transport-quic") {
+    failures.push(
+      `${policy.name}: native artifact packaging can only be enabled on native TCP/QUIC transport packages`,
+    );
     return;
   }
 
   if (!packedFiles.some((file) => nativeArtifactManifestPattern.test(file))) {
     failures.push(`${policy.name}: native artifact packaging requires native/<tag>/manifest.json in npm pack output`);
+  }
+}
+
+function checkWasmArtifactMetadata(
+  policy: PackagePackPolicy,
+  packageJson: Record<string, unknown>,
+  packedFiles: readonly string[],
+): void {
+  if (!isWasmArtifactPackagingEnabled(packageJson)) {
+    return;
+  }
+
+  if (
+    policy.name !== "@nnrp/browser-client" && policy.name !== "@nnrp/transport-tcp" &&
+    policy.name !== "@nnrp/transport-quic"
+  ) {
+    failures.push(
+      `${policy.name}: wasm artifact packaging can only be enabled on browser client or TCP/QUIC transport packages`,
+    );
+    return;
+  }
+
+  if (!packedFiles.some((file) => wasmArtifactManifestPattern.test(file))) {
+    failures.push(`${policy.name}: wasm artifact packaging requires wasm/manifest.json in npm pack output`);
   }
 }
 
@@ -180,6 +225,20 @@ function isNativeArtifactPackagingEnabled(packageJson: Record<string, unknown>):
   return (nativeArtifacts as Record<string, unknown>).enabled === true;
 }
 
+function isWasmArtifactPackagingEnabled(packageJson: Record<string, unknown>): boolean {
+  const nnrp = packageJson.nnrp;
+  if (!nnrp || typeof nnrp !== "object" || Array.isArray(nnrp)) {
+    return false;
+  }
+
+  const wasmArtifacts = (nnrp as Record<string, unknown>).wasmArtifacts;
+  if (!wasmArtifacts || typeof wasmArtifacts !== "object" || Array.isArray(wasmArtifacts)) {
+    return false;
+  }
+
+  return (wasmArtifacts as Record<string, unknown>).enabled === true;
+}
+
 async function emulatePackDryRun(policy: PackagePackPolicy): Promise<NpmPackResult> {
   const packageJson = await readPackageJson(policy);
   const name = readStringField(policy.name, packageJson, "name");
@@ -190,9 +249,36 @@ async function emulatePackDryRun(policy: PackagePackPolicy): Promise<NpmPackResu
     version,
     files: [
       { path: "package.json" },
-      ...files.map((path) => ({ path })),
+      ...await expandDeclaredFiles(policy.directory, files),
     ],
   };
+}
+
+async function expandDeclaredFiles(directory: string, files: readonly string[]): Promise<readonly NpmPackFile[]> {
+  const output: NpmPackFile[] = [];
+  for (const file of files) {
+    if (file.endsWith("/**")) {
+      const root = file.slice(0, -3);
+      for await (const path of walkFiles(`${directory}/${root}`)) {
+        output.push({ path: normalizePackPath(path.slice(directory.length + 1)) });
+      }
+      continue;
+    }
+
+    output.push({ path: file });
+  }
+  return output;
+}
+
+async function* walkFiles(directory: string): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(directory)) {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory) {
+      yield* walkFiles(path);
+    } else if (entry.isFile) {
+      yield path;
+    }
+  }
 }
 
 async function readPackageJson(policy: PackagePackPolicy): Promise<Record<string, unknown>> {

@@ -2,9 +2,10 @@
 
 # @nnrp/transport-quic
 
-QUIC transport adapter descriptors for NNRP native clients and servers.
+QUIC transport adapter for NNRP native clients and servers.
 
-Install this package when a Node.js or Deno native runtime should consider QUIC during transport probing.
+Install this package when a Node.js or Deno native runtime should consider QUIC during transport probing. The package
+carries the supported native and WASM transport artifacts; role packages do not bundle QUIC artifacts on its behalf.
 
 ```ts
 import { createQuicTransportProvider } from "@nnrp/transport-quic";

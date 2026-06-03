@@ -12,6 +12,7 @@ const options = parsePublishOptions(Deno.args);
 const version = await readWorkspaceVersion();
 const rootNpmrc = await resolveRootNpmrc();
 
+validatePublishOptions(options);
 await resetOutputDir(options.outputDir);
 
 for (const policy of packages) {
@@ -29,7 +30,24 @@ for (const policy of packages) {
     `${JSON.stringify(publishablePackageJson(packageJson), null, 2)}\n`,
   );
   if (!options.skipPublish) {
-    await npmPublish(policy.name, stageDir, options, rootNpmrc);
+    if (await npmPackageVersionExists(policy.name, packageVersion)) {
+      console.log(`${policy.name}@${packageVersion} already exists; skipping publish.`);
+      if (!options.dryRun) {
+        await npmDistTagAdd(policy.name, stageDir, options.tag, rootNpmrc);
+        await npmDistTagAddMany(policy.name, stageDir, options.additionalTags, rootNpmrc);
+      }
+    } else {
+      await npmPublish(policy.name, stageDir, options, rootNpmrc);
+    }
+  }
+}
+
+function validatePublishOptions(options: PublishOptions): void {
+  if (options.provenance && options.additionalTags.length > 0) {
+    throw new Error(
+      "Additional npm dist-tags cannot be assigned during Trusted Publishing. " +
+        "Run release with the single canonical npm tag instead.",
+    );
   }
 }
 
@@ -40,6 +58,7 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
   let provenance = false;
   let skipPublish = false;
   let otp: string | undefined;
+  const additionalTags: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -47,6 +66,12 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
 
     if (arg === "--tag" && next) {
       tag = next;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--also-tag" && next) {
+      additionalTags.push(next);
       index += 1;
       continue;
     }
@@ -81,12 +106,15 @@ function parsePublishOptions(args: readonly string[]): PublishOptions {
     throw new Error(`Unsupported publish option: ${arg}`);
   }
 
-  if (!/^[a-z0-9._-]+$/i.test(tag)) {
-    throw new Error(`Invalid npm dist-tag: ${tag}`);
+  for (const distTag of [tag, ...additionalTags]) {
+    if (!/^[a-z0-9._-]+$/i.test(distTag)) {
+      throw new Error(`Invalid npm dist-tag: ${distTag}`);
+    }
   }
 
   return {
     tag,
+    additionalTags: [...new Set(additionalTags.filter((distTag) => distTag !== tag))],
     outputDir,
     dryRun,
     provenance,
@@ -174,6 +202,62 @@ async function npmPublish(
   if (!output.success) {
     throw new Error(`${packageName}: npm publish failed with code ${output.code}`);
   }
+
+  if (options.dryRun) {
+    return;
+  }
+
+  await npmDistTagAddMany(packageName, stageDir, options.additionalTags, rootNpmrc);
+}
+
+async function npmDistTagAddMany(
+  packageName: string,
+  stageDir: string,
+  distTags: readonly string[],
+  rootNpmrc: string | undefined,
+): Promise<void> {
+  for (const distTag of distTags) {
+    await npmDistTagAdd(packageName, stageDir, distTag, rootNpmrc);
+  }
+}
+
+async function npmPackageVersionExists(packageName: string, packageVersion: string): Promise<boolean> {
+  const output = await new Deno.Command(npmCommand(), {
+    args: npmArgs(["view", `${packageName}@${packageVersion}`, "version", "--json"]),
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  if (!output.success) {
+    return false;
+  }
+  const value = new TextDecoder().decode(output.stdout).trim();
+  return value === JSON.stringify(packageVersion) || value === packageVersion;
+}
+
+async function npmDistTagAdd(
+  packageName: string,
+  stageDir: string,
+  distTag: string,
+  rootNpmrc: string | undefined,
+): Promise<void> {
+  const packageVersion = await readStringFromPackageFile(`${stageDir}/package.json`, "version", packageName);
+  const args = [
+    "dist-tag",
+    "add",
+    `${packageName}@${packageVersion}`,
+    distTag,
+    ...(rootNpmrc === undefined ? [] : ["--userconfig", rootNpmrc]),
+  ];
+  const output = await new Deno.Command(npmCommand(), {
+    args: npmArgs(args),
+    cwd: stageDir,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+
+  if (!output.success) {
+    throw new Error(`${packageName}: npm dist-tag add ${distTag} failed with code ${output.code}`);
+  }
 }
 
 async function resetOutputDir(path: string): Promise<void> {
@@ -224,6 +308,10 @@ function readString(packageJson: Record<string, unknown>, field: string, package
   return value;
 }
 
+async function readStringFromPackageFile(path: string, field: string, packageName: string): Promise<string> {
+  return readString(JSON.parse(await Deno.readTextFile(path)) as Record<string, unknown>, field, packageName);
+}
+
 async function resolveRootNpmrc(): Promise<string | undefined> {
   const npmrcPath = `${Deno.cwd()}/.npmrc`;
   try {
@@ -260,6 +348,7 @@ interface PackagePolicy {
 
 interface PublishOptions {
   readonly tag: string;
+  readonly additionalTags: readonly string[];
   readonly outputDir: string;
   readonly dryRun: boolean;
   readonly provenance: boolean;
