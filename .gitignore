@@ -10,6 +10,7 @@ artifacts/
 .env
 .env.*
 !.env.example
+.npmrc
 
 # OS/editor noise
 .DS_Store

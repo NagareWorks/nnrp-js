@@ -6,6 +6,7 @@ const packages: readonly PackagePolicy[] = [
 
 const options = parsePublishOptions(Deno.args);
 const version = await readWorkspaceVersion();
+const rootNpmrc = await resolveRootNpmrc();
 
 await resetOutputDir(options.outputDir);
 
@@ -23,7 +24,7 @@ for (const policy of packages) {
     `${stageDir}/package.json`,
     `${JSON.stringify(publishablePackageJson(packageJson), null, 2)}\n`,
   );
-  await npmPublish(policy.name, stageDir, options);
+  await npmPublish(policy.name, stageDir, options, rootNpmrc);
 }
 
 function parsePublishOptions(args: readonly string[]): PublishOptions {
@@ -133,13 +134,19 @@ async function stagePackageFiles(
   }
 }
 
-async function npmPublish(packageName: string, stageDir: string, options: PublishOptions): Promise<void> {
+async function npmPublish(
+  packageName: string,
+  stageDir: string,
+  options: PublishOptions,
+  rootNpmrc: string | undefined,
+): Promise<void> {
   const args = [
     "publish",
     "--access",
     "public",
     "--tag",
     options.tag,
+    ...(rootNpmrc === undefined ? [] : ["--userconfig", rootNpmrc]),
     ...(options.provenance ? ["--provenance"] : []),
     ...(options.otp === undefined ? [] : [`--otp=${options.otp}`]),
     ...(options.dryRun ? ["--dry-run"] : []),
@@ -202,6 +209,19 @@ function readString(packageJson: Record<string, unknown>, field: string, package
     throw new Error(`${packageName}: package.json ${field} must be a non-empty string`);
   }
   return value;
+}
+
+async function resolveRootNpmrc(): Promise<string | undefined> {
+  const npmrcPath = `${Deno.cwd()}/.npmrc`;
+  try {
+    const stat = await Deno.stat(npmrcPath);
+    return stat.isFile ? npmrcPath : undefined;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 function packageStageName(name: string): string {
