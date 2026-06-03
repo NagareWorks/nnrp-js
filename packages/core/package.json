@@ -1,10 +1,19 @@
 {
   "name": "@nnrp/core",
-  "version": "0.1.0-preview.0",
+  "version": "1.0.0-preview.3",
   "description": "Shared TypeScript primitives for NNRP.",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NagareWorks/nnrp-js.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/NagareWorks/nnrp-js/issues"
+  },
+  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/core#readme",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

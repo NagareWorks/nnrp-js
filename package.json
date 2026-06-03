@@ -1,9 +1,17 @@
 {
   "name": "nnrp-js",
-  "version": "0.1.0-preview.0",
+  "version": "1.0.0-preview.3",
   "private": true,
   "description": "TypeScript and JavaScript SDK workspace for NNRP.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NagareWorks/nnrp-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NagareWorks/nnrp-js/issues"
+  },
+  "homepage": "https://github.com/NagareWorks/nnrp-js#readme",
   "workspaces": [
     "packages/*"
   ],
