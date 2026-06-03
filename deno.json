@@ -1,12 +1,16 @@
 {
   "imports": {
     "@nnrp/core": "./packages/core/src/index.ts",
-    "@nnrp/native": "./packages/native/src/index.ts",
-    "@nnrp/wasm": "./packages/wasm/src/index.ts"
+    "@nnrp/browser-client": "./packages/browser-client/src/index.ts",
+    "@nnrp/native-client": "./packages/native-client/src/index.ts",
+    "@nnrp/native-server": "./packages/native-server/src/index.ts",
+    "@nnrp/transport-quic": "./packages/transport-quic/src/index.ts",
+    "@nnrp/transport-tcp": "./packages/transport-tcp/src/index.ts",
+    "@nnrp/transport-websocket": "./packages/transport-websocket/src/index.ts"
   },
   "tasks": {
-    "clean": "deno run --allow-write=packages/core/dist,packages/native/dist,packages/wasm/dist scripts/clean-build-output.ts",
-    "build": "deno task clean && deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/native packages/wasm",
+    "clean": "deno run --allow-write=packages/core/dist,packages/native-client/dist,packages/native-server/dist,packages/browser-client/dist,packages/transport-tcp/dist,packages/transport-quic/dist,packages/transport-websocket/dist scripts/clean-build-output.ts",
+    "build": "deno task clean && deno run -A npm:typescript@5.9.3/tsc -b packages/core packages/transport-tcp packages/transport-quic packages/transport-websocket packages/native-client packages/native-server packages/browser-client",
     "benchmark:backend": "deno run --allow-env scripts/run-benchmark.ts --mode backend-native",
     "benchmark:browser": "deno run --allow-env scripts/run-benchmark.ts --mode browser-wasm",
     "benchmark:smoke": "deno run --allow-env scripts/check-benchmark-smoke.ts",

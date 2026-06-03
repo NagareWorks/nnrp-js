@@ -1,8 +1,11 @@
-import { NnrpNativeBindingUnavailableError, openNativeClient } from "@nnrp/native";
+import { NnrpNativeBindingUnavailableError, openNativeClient } from "@nnrp/native-client";
+import { createQuicTransportProvider } from "@nnrp/transport-quic";
+import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const client = await openNativeClient({
   endpoint: "127.0.0.1:4433",
   nativeLibrary: { artifactDir: "./native" },
+  transports: [createTcpTransportProvider(), createQuicTransportProvider()],
   transportPolicy: "score",
   sessionDefaults: { inputProfile: "tensor", metadata: { app: "nnrp-native-client-example" } },
 });

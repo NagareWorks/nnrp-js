@@ -1,0 +1,51 @@
+{
+  "name": "@nnrp/browser-client",
+  "version": "1.0.0-preview.3.1",
+  "description": "Browser and edge client SDK for NNRP.",
+  "keywords": [
+    "nnrp",
+    "ai",
+    "runtime",
+    "browser",
+    "client",
+    "wasm",
+    "typescript"
+  ],
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NagareWorks/nnrp-js.git",
+    "directory": "packages/browser-client"
+  },
+  "bugs": {
+    "url": "https://github.com/NagareWorks/nnrp-js/issues"
+  },
+  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/browser-client#readme",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./experimental/*": null,
+    "./internal/*": null
+  },
+  "files": [
+    "README.md",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map"
+  ],
+  "dependencies": {
+    "@nnrp/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@nnrp/transport-websocket": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@nnrp/transport-websocket": {
+      "optional": true
+    }
+  }
+}

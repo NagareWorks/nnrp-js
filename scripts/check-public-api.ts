@@ -5,14 +5,34 @@ const snapshots: readonly PublicApiSnapshot[] = [
     snapshotPath: "scripts/public-api/core.d.ts",
   },
   {
-    packageName: "@nnrp/native",
-    actualPath: "packages/native/dist/index.d.ts",
-    snapshotPath: "scripts/public-api/native.d.ts",
+    packageName: "@nnrp/native-client",
+    actualPath: "packages/native-client/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/native-client.d.ts",
   },
   {
-    packageName: "@nnrp/wasm",
-    actualPath: "packages/wasm/dist/index.d.ts",
-    snapshotPath: "scripts/public-api/wasm.d.ts",
+    packageName: "@nnrp/native-server",
+    actualPath: "packages/native-server/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/native-server.d.ts",
+  },
+  {
+    packageName: "@nnrp/browser-client",
+    actualPath: "packages/browser-client/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/browser-client.d.ts",
+  },
+  {
+    packageName: "@nnrp/transport-tcp",
+    actualPath: "packages/transport-tcp/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/transport-tcp.d.ts",
+  },
+  {
+    packageName: "@nnrp/transport-quic",
+    actualPath: "packages/transport-quic/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/transport-quic.d.ts",
+  },
+  {
+    packageName: "@nnrp/transport-websocket",
+    actualPath: "packages/transport-websocket/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/transport-websocket.d.ts",
   },
 ];
 

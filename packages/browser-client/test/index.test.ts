@@ -21,7 +21,7 @@ import {
   validateWasmArtifactManifest,
 } from "../src/index.ts";
 
-Deno.test("@nnrp/wasm creates a default wasm binding descriptor", () => {
+Deno.test("@nnrp/browser-client creates a default wasm binding descriptor", () => {
   const binding = createWasmRuntimeBinding();
 
   assertEquals(binding.moduleUrl, "./nnrp_wasm.wasm");
@@ -36,20 +36,20 @@ Deno.test("@nnrp/wasm creates a default wasm binding descriptor", () => {
   assertEquals(binding.manifest.buildMode, "browser-wasm");
 });
 
-Deno.test("@nnrp/wasm normalizes URL module locations", () => {
+Deno.test("@nnrp/browser-client normalizes URL module locations", () => {
   const binding = createWasmRuntimeBinding({ moduleUrl: new URL("https://example.test/nnrp.wasm") });
 
   assertEquals(binding.moduleUrl, "https://example.test/nnrp.wasm");
 });
 
-Deno.test("@nnrp/wasm preserves injected modules on the descriptor", () => {
+Deno.test("@nnrp/browser-client preserves injected modules on the descriptor", () => {
   const module = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
   const binding = createWasmRuntimeBinding({ module });
 
   assertEquals(binding.module, module);
 });
 
-Deno.test("@nnrp/wasm resolves rs primitive artifact manifests", () => {
+Deno.test("@nnrp/browser-client resolves rs primitive artifact manifests", () => {
   const artifact = resolveWasmArtifact({
     manifest: wasmManifest(),
     baseUrl: "https://cdn.example.test/nnrp",
@@ -65,7 +65,7 @@ Deno.test("@nnrp/wasm resolves rs primitive artifact manifests", () => {
   ]);
 });
 
-Deno.test("@nnrp/wasm validates primitive artifact manifests", () => {
+Deno.test("@nnrp/browser-client validates primitive artifact manifests", () => {
   validateWasmArtifactManifest(wasmManifest());
 
   assertThrows(
@@ -75,7 +75,7 @@ Deno.test("@nnrp/wasm validates primitive artifact manifests", () => {
   );
 });
 
-Deno.test("@nnrp/wasm rejects missing artifact asset paths", () => {
+Deno.test("@nnrp/browser-client rejects missing artifact asset paths", () => {
   assertThrows(
     () => validateWasmArtifactManifest({ ...wasmManifest(), wasm: "" }),
     NnrpCapabilityError,
@@ -93,7 +93,7 @@ Deno.test("@nnrp/wasm rejects missing artifact asset paths", () => {
   );
 });
 
-Deno.test("@nnrp/wasm uses artifact URLs unless a caller injects a module URL", () => {
+Deno.test("@nnrp/browser-client uses artifact URLs unless a caller injects a module URL", () => {
   const artifactBinding = createWasmRuntimeBinding({
     artifact: {
       manifest: wasmManifest(),
@@ -113,7 +113,7 @@ Deno.test("@nnrp/wasm uses artifact URLs unless a caller injects a module URL", 
   assertEquals(explicitBinding.moduleUrl, "/custom/nnrp.wasm");
 });
 
-Deno.test("@nnrp/wasm resolves absolute and default artifact URLs", () => {
+Deno.test("@nnrp/browser-client resolves absolute and default artifact URLs", () => {
   const absolute = resolveWasmArtifact({
     manifest: { ...wasmManifest(), wasm: "https://cdn.example.test/nnrp_wasm.wasm" },
     baseUrl: "/assets/ignored",
@@ -126,14 +126,14 @@ Deno.test("@nnrp/wasm resolves absolute and default artifact URLs", () => {
   assertEquals(defaultBase.moduleUrl, "nnrp_wasm.wasm");
 });
 
-Deno.test("@nnrp/wasm preserves injected browser transport providers", () => {
+Deno.test("@nnrp/browser-client preserves injected browser transport providers", () => {
   const provider = createBrowserTransportProvider("websocket", { available: true, score: 42 });
   const binding = createWasmRuntimeBinding({ transportProviders: [provider] });
 
   assertEquals(binding.transportProviders, [provider]);
 });
 
-Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
+Deno.test("@nnrp/browser-client opens a browser runtime and client session", async () => {
   const runtime = await openBrowserRuntime({ moduleUrl: "/assets/nnrp.wasm", transportPolicy: "score" });
   const client = runtime.connect({
     endpoint: "wss://example.test/nnrp",
@@ -152,7 +152,7 @@ Deno.test("@nnrp/wasm opens a browser runtime and client session", async () => {
   assertEquals(session.options.metadata, { app: "browser", request: "one" });
 });
 
-Deno.test("@nnrp/wasm validates runtime readiness before connect", () => {
+Deno.test("@nnrp/browser-client validates runtime readiness before connect", () => {
   const wrongMode = new NnrpBrowserRuntime({
     ...createWasmRuntimeBinding(),
     manifest: createCapabilityManifest({
@@ -194,7 +194,7 @@ Deno.test("@nnrp/wasm validates runtime readiness before connect", () => {
   assertEquals(missingExportError.diagnostic.code, "NNRP_WASM_RUNTIME_EXPORTS_UNVALIDATED");
 });
 
-Deno.test("@nnrp/wasm selects browser transport slots from local and peer manifests", async () => {
+Deno.test("@nnrp/browser-client selects browser transport slots from local and peer manifests", async () => {
   const runtime = await openBrowserRuntime({ transportPolicy: "score" });
   const summary = runtime.selectTransport({
     peerManifest: createCapabilityManifest({
@@ -208,7 +208,7 @@ Deno.test("@nnrp/wasm selects browser transport slots from local and peer manife
   assertEquals(summary.rejected, []);
 });
 
-Deno.test("@nnrp/wasm applies browser transport provider availability", async () => {
+Deno.test("@nnrp/browser-client applies browser transport provider availability", async () => {
   const runtime = await openBrowserRuntime({
     transportProviders: [
       createBrowserTransportProvider("websocket", {
@@ -237,7 +237,32 @@ Deno.test("@nnrp/wasm applies browser transport provider availability", async ()
   assertEquals(summary.rejected[0]?.diagnostic?.code, "NNRP_BROWSER_WEBSOCKET_DISABLED");
 });
 
-Deno.test("@nnrp/wasm exposes protocol version primitives with manifest fallback", async () => {
+Deno.test("@nnrp/browser-client treats missing transport packages as unavailable", async () => {
+  const runtime = await openBrowserRuntime({ transportProviders: [] });
+  const summary = runtime.selectTransport({
+    peerManifest: createCapabilityManifest({
+      buildMode: "browser-wasm",
+      transports: ["websocket"],
+      capabilities: ["client.session"],
+    }),
+  });
+
+  assertEquals(summary.selected, null);
+  assertEquals(summary.rejected[0]?.kind, "websocket");
+  assertEquals(summary.rejected[0]?.reason, "local-unavailable");
+});
+
+Deno.test("@nnrp/browser-client rejects connect without installed or explicit transports", async () => {
+  const runtime = await openBrowserRuntime({ transportProviders: [] });
+  const error = assertThrows(
+    () => runtime.connect({ endpoint: "wss://example.test/nnrp" }),
+    NnrpCapabilityError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_BROWSER_TRANSPORT_PROVIDER_MISSING");
+});
+
+Deno.test("@nnrp/browser-client exposes protocol version primitives with manifest fallback", async () => {
   const fallbackRuntime = await openBrowserRuntime();
   const primitiveRuntime = await openBrowserRuntime({
     primitives: {
@@ -261,7 +286,7 @@ Deno.test("@nnrp/wasm exposes protocol version primitives with manifest fallback
   });
 });
 
-Deno.test("@nnrp/wasm routes transport scoring through primitive candidates when available", async () => {
+Deno.test("@nnrp/browser-client routes transport scoring through primitive candidates when available", async () => {
   let seenPolicy: string | undefined;
   let seenCandidateKinds: string[] = [];
   const runtime = await openBrowserRuntime({
@@ -289,7 +314,7 @@ Deno.test("@nnrp/wasm routes transport scoring through primitive candidates when
   assertEquals(summary.selected, "websocket");
 });
 
-Deno.test("@nnrp/wasm transport primitive path falls back to local browser scoring", async () => {
+Deno.test("@nnrp/browser-client transport primitive path falls back to local browser scoring", async () => {
   const runtime = await openBrowserRuntime();
   const summary = await runtime.selectTransportWithPrimitives({
     peerManifest: createCapabilityManifest({
@@ -302,7 +327,7 @@ Deno.test("@nnrp/wasm transport primitive path falls back to local browser scori
   assertEquals(summary.selected, "websocket");
 });
 
-Deno.test("@nnrp/wasm rejects empty endpoints", async () => {
+Deno.test("@nnrp/browser-client rejects empty endpoints", async () => {
   const runtime = await openBrowserRuntime();
 
   assertThrows(
@@ -311,7 +336,7 @@ Deno.test("@nnrp/wasm rejects empty endpoints", async () => {
   );
 });
 
-Deno.test("@nnrp/wasm rejects use after close", async () => {
+Deno.test("@nnrp/browser-client rejects use after close", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   await runtime.close();
@@ -322,7 +347,7 @@ Deno.test("@nnrp/wasm rejects use after close", async () => {
   );
 });
 
-Deno.test("@nnrp/wasm rejects client and session operations after close", async () => {
+Deno.test("@nnrp/browser-client rejects client and session operations after close", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   await client.close();
@@ -340,7 +365,7 @@ Deno.test("@nnrp/wasm rejects client and session operations after close", async 
   );
 });
 
-Deno.test("@nnrp/wasm session methods preserve not-instantiated diagnostics", async () => {
+Deno.test("@nnrp/browser-client session methods preserve not-instantiated diagnostics", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   const session = client.openSession();
@@ -360,7 +385,7 @@ Deno.test("@nnrp/wasm session methods preserve not-instantiated diagnostics", as
   assertEquals(noWaitError.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 });
 
-Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected primitives", async () => {
+Deno.test("@nnrp/browser-client routes submit, cancel, and event polling through injected primitives", async () => {
   const seen: string[] = [];
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -430,7 +455,7 @@ Deno.test("@nnrp/wasm routes submit, cancel, and event polling through injected 
   }
 });
 
-Deno.test("@nnrp/wasm maps empty timed event polling to timeout diagnostics", async () => {
+Deno.test("@nnrp/browser-client maps empty timed event polling to timeout diagnostics", async () => {
   let seenTimeout: number | undefined;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -453,7 +478,7 @@ Deno.test("@nnrp/wasm maps empty timed event polling to timeout diagnostics", as
   assertEquals(error.diagnostic.retryable, true);
 });
 
-Deno.test("@nnrp/wasm times out pending event polling without backend completion", async () => {
+Deno.test("@nnrp/browser-client times out pending event polling without backend completion", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
       awaitEvents: () => new Promise<readonly NnrpRuntimeEvent[]>(() => {}),
@@ -470,7 +495,7 @@ Deno.test("@nnrp/wasm times out pending event polling without backend completion
   assertEquals(error.diagnostic.source, "wasm");
 });
 
-Deno.test("@nnrp/wasm routes events by session id across shared runtimes", async () => {
+Deno.test("@nnrp/browser-client routes events by session id across shared runtimes", async () => {
   let pollCount = 0;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -498,7 +523,7 @@ Deno.test("@nnrp/wasm routes events by session id across shared runtimes", async
   assertEquals(pollCount, 1);
 });
 
-Deno.test("@nnrp/wasm maps result polling drops to typed errors", async () => {
+Deno.test("@nnrp/browser-client maps result polling drops to typed errors", async () => {
   let pollCount = 0;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -522,7 +547,7 @@ Deno.test("@nnrp/wasm maps result polling drops to typed errors", async () => {
   assertEquals(error.diagnostic.code, "NNRP_WASM_DROP");
 });
 
-Deno.test("@nnrp/wasm returns next result after non-result events", async () => {
+Deno.test("@nnrp/browser-client returns next result after non-result events", async () => {
   let pollCount = 0;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -539,7 +564,7 @@ Deno.test("@nnrp/wasm returns next result after non-result events", async () => 
   assertEquals(await session.nextResult(), { frameId: 56 });
 });
 
-Deno.test("@nnrp/wasm reports unsupported session migration with stable diagnostics", async () => {
+Deno.test("@nnrp/browser-client reports unsupported session migration with stable diagnostics", async () => {
   const runtime = await openBrowserRuntime();
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
@@ -552,7 +577,7 @@ Deno.test("@nnrp/wasm reports unsupported session migration with stable diagnost
   assertEquals(error.diagnostic.source, "wasm");
 });
 
-Deno.test("@nnrp/wasm routes session patch through WASM primitives", async () => {
+Deno.test("@nnrp/browser-client routes session patch through WASM primitives", async () => {
   const seen: string[] = [];
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -585,7 +610,7 @@ Deno.test("@nnrp/wasm routes session patch through WASM primitives", async () =>
   assertEquals(session.options.metadata, { route: "patch" });
 });
 
-Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for session patch", async () => {
+Deno.test("@nnrp/browser-client preserves not-instantiated diagnostics for session patch", async () => {
   const runtime = await openBrowserRuntime();
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
@@ -597,7 +622,7 @@ Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for session patch",
   assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 });
 
-Deno.test("@nnrp/wasm rejects duplicate in-flight frames and releases on completion", async () => {
+Deno.test("@nnrp/browser-client rejects duplicate in-flight frames and releases on completion", async () => {
   let resolveSubmit: ((result: { readonly frameId: number }) => void) | undefined;
   let holdNextSubmit = true;
   const runtime = await openBrowserRuntime({
@@ -634,7 +659,7 @@ Deno.test("@nnrp/wasm rejects duplicate in-flight frames and releases on complet
   assertEquals(await session.submit({ frameId: 5 }), { frameId: 5 });
 });
 
-Deno.test("@nnrp/wasm tracks no-wait frames until cancel or terminal events", async () => {
+Deno.test("@nnrp/browser-client tracks no-wait frames until cancel or terminal events", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
       submitNoWait: ({ submit }) => BigInt(submit.frameId),
@@ -668,7 +693,7 @@ Deno.test("@nnrp/wasm tracks no-wait frames until cancel or terminal events", as
   assertEquals(session.inFlightFrames(), []);
 });
 
-Deno.test("@nnrp/wasm awaits submit capacity and rejects no-wait when credits are exhausted", async () => {
+Deno.test("@nnrp/browser-client awaits submit capacity and rejects no-wait when credits are exhausted", async () => {
   const submitted: number[] = [];
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -705,7 +730,7 @@ Deno.test("@nnrp/wasm awaits submit capacity and rejects no-wait when credits ar
   assertEquals(submitted, [41]);
 });
 
-Deno.test("@nnrp/wasm rejects duplicate cancel and cancel after terminal events", async () => {
+Deno.test("@nnrp/browser-client rejects duplicate cancel and cancel after terminal events", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
       submitNoWait: ({ submit }) => BigInt(submit.frameId),
@@ -733,7 +758,7 @@ Deno.test("@nnrp/wasm rejects duplicate cancel and cancel after terminal events"
   assertEquals(terminalCancel.diagnostic.code, "NNRP_OPERATION_TERMINAL");
 });
 
-Deno.test("@nnrp/wasm rejects duplicate terminal events and clears frames on close", async () => {
+Deno.test("@nnrp/browser-client rejects duplicate terminal events and clears frames on close", async () => {
   let resolveSubmit: ((result: { readonly frameId: number }) => void) | undefined;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -771,7 +796,7 @@ Deno.test("@nnrp/wasm rejects duplicate terminal events and clears frames on clo
   assertEquals(await pending, { frameId: 30 });
 });
 
-Deno.test("@nnrp/wasm closes injected primitives", async () => {
+Deno.test("@nnrp/browser-client closes injected primitives", async () => {
   let closed = false;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -787,7 +812,7 @@ Deno.test("@nnrp/wasm closes injected primitives", async () => {
   assertEquals(runtime.closed, true);
 });
 
-Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for direct missing operations", async () => {
+Deno.test("@nnrp/browser-client preserves not-instantiated diagnostics for direct missing operations", async () => {
   const runtime = await openBrowserRuntime();
 
   await assertRejects(
@@ -808,7 +833,7 @@ Deno.test("@nnrp/wasm preserves not-instantiated diagnostics for direct missing 
   );
 });
 
-Deno.test("@nnrp/wasm treats empty event batches as unavailable next events", async () => {
+Deno.test("@nnrp/browser-client treats empty event batches as unavailable next events", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
       awaitEvents: () => [],
@@ -823,7 +848,7 @@ Deno.test("@nnrp/wasm treats empty event batches as unavailable next events", as
   );
 });
 
-Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () => {
+Deno.test("@nnrp/browser-client validates submit requests before WASM dispatch", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   const session = client.openSession();
@@ -836,7 +861,7 @@ Deno.test("@nnrp/wasm validates submit requests before WASM dispatch", async () 
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_FRAME_ID_INVALID");
 });
 
-Deno.test("@nnrp/wasm validates session metadata before opening sessions", async () => {
+Deno.test("@nnrp/browser-client validates session metadata before opening sessions", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
 
@@ -847,7 +872,7 @@ Deno.test("@nnrp/wasm validates session metadata before opening sessions", async
   );
 });
 
-Deno.test("@nnrp/wasm validates cancel and event polling before WASM dispatch", async () => {
+Deno.test("@nnrp/browser-client validates cancel and event polling before WASM dispatch", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   const session = client.openSession();
@@ -865,7 +890,7 @@ Deno.test("@nnrp/wasm validates cancel and event polling before WASM dispatch", 
   assertEquals(eventError.diagnostic.code, "NNRP_EVENT_TIMEOUT_INVALID");
 });
 
-Deno.test("@nnrp/wasm cancels event polling with abort signals", async () => {
+Deno.test("@nnrp/browser-client cancels event polling with abort signals", async () => {
   let resolvePoll: ((events: readonly NnrpRuntimeEvent[]) => void) | undefined;
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -901,7 +926,7 @@ Deno.test("@nnrp/wasm cancels event polling with abort signals", async () => {
   resolvePoll?.([]);
 });
 
-Deno.test("@nnrp/wasm exposes async event iterator convenience", async () => {
+Deno.test("@nnrp/browser-client exposes async event iterator convenience", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   const session = client.openSession();

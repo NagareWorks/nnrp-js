@@ -6,14 +6,38 @@ const packages: readonly PackagePolicy[] = [
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^native\//, /^wasm\//],
   },
   {
-    name: "@nnrp/native",
-    directory: "packages/native",
+    name: "@nnrp/native-client",
+    directory: "packages/native-client",
     requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
   },
   {
-    name: "@nnrp/wasm",
-    directory: "packages/wasm",
+    name: "@nnrp/native-server",
+    directory: "packages/native-server",
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/browser-client",
+    directory: "packages/browser-client",
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
+  },
+  {
+    name: "@nnrp/transport-tcp",
+    directory: "packages/transport-tcp",
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/transport-quic",
+    directory: "packages/transport-quic",
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/transport-websocket",
+    directory: "packages/transport-websocket",
     requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
@@ -55,8 +79,8 @@ function checkNativeArtifactMetadata(
     return;
   }
 
-  if (policy.name !== "@nnrp/native") {
-    failures.push(`${policy.name}: native artifact packaging can only be enabled on @nnrp/native`);
+  if (policy.name !== "@nnrp/native-client" && policy.name !== "@nnrp/native-server") {
+    failures.push(`${policy.name}: native artifact packaging can only be enabled on native role packages`);
     return;
   }
 
@@ -84,7 +108,14 @@ function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string,
     failures.push(`${policy.name}: package.json must stay private until release gates are enabled`);
   }
 
+  checkKeywords(policy, packageJson.keywords);
   checkExportMap(policy, packageJson.exports);
+}
+
+function checkKeywords(policy: PackagePolicy, keywords: unknown): void {
+  if (!Array.isArray(keywords) || keywords.length === 0 || keywords.some((entry) => typeof entry !== "string")) {
+    failures.push(`${policy.name}: package.json keywords must be a non-empty string array`);
+  }
 }
 
 function checkExportMap(policy: PackagePolicy, exports: unknown): void {

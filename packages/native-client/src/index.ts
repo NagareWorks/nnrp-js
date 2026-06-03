@@ -225,6 +225,7 @@ export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
 export interface NnrpNativeClientOptions {
   readonly endpoint: string | URL;
   readonly nativeLibrary?: NnrpNativeLibraryOptions;
+  readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpSessionOptions;
   readonly env?: Record<string, string | undefined>;
@@ -233,8 +234,9 @@ export interface NnrpNativeClientOptions {
   readonly ffi?: NnrpNativeFfiBinding;
 }
 
-export interface NnrpBackendRuntimeOptions {
+interface NnrpBackendRuntimeOptions {
   readonly nativeLibrary?: NnrpNativeLibraryOptions;
+  readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly env?: Record<string, string | undefined>;
   readonly platform?: NodePlatform;
@@ -244,17 +246,25 @@ export interface NnrpBackendRuntimeOptions {
 
 export interface NnrpConnectOptions {
   readonly endpoint: string | URL;
+  readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpSessionOptions;
 }
 
-export interface NnrpListenOptions {
+interface NnrpListenOptions {
   readonly endpoint: string | URL;
+  readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
+}
+
+export interface NnrpNativeTransportProvider {
+  readonly kind: Extract<NnrpTransportKind, "tcp" | "quic">;
+  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
 }
 
 export interface NnrpTransportSelectionOptions {
   readonly peerManifest: NnrpCapabilityManifest;
+  readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 
@@ -298,9 +308,10 @@ export async function openNativeClient(options: NnrpNativeClientOptions): Promis
   }
 }
 
-export async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Promise<NnrpBackendRuntime> {
+async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Promise<NnrpBackendRuntime> {
   const binding = createNativeRuntimeBinding(options);
   const runtimeCapabilities = await resolveRuntimeCapabilities(binding);
+  const transportProviders = options.transports ?? await discoverNativeTransportProviders();
   return new NnrpBackendRuntime(
     {
       ...binding,
@@ -310,17 +321,24 @@ export async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}
       }),
     },
     options.transportPolicy ?? "score",
+    transportProviders,
   );
 }
 
-export class NnrpBackendRuntime {
+class NnrpBackendRuntime {
   readonly #binding: NnrpNativeRuntimeBinding;
   readonly #transportPolicy: NnrpTransportPolicy;
+  readonly #transportProviders: readonly NnrpNativeTransportProvider[];
   #closed = false;
 
-  public constructor(binding: NnrpNativeRuntimeBinding, transportPolicy: NnrpTransportPolicy = "score") {
+  public constructor(
+    binding: NnrpNativeRuntimeBinding,
+    transportPolicy: NnrpTransportPolicy = "score",
+    transportProviders: readonly NnrpNativeTransportProvider[] = [],
+  ) {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
+    this.#transportProviders = [...transportProviders];
   }
 
   public get manifest(): NnrpCapabilityManifest {
@@ -420,10 +438,15 @@ export class NnrpBackendRuntime {
     this.#ensureOpen();
     this.#ensureConnectReady("connect");
     validateEndpoint(options.endpoint);
+    validateTransportProvidersForPolicy(
+      options.transports ?? this.#transportProviders,
+      options.transportPolicy ?? this.#transportPolicy,
+    );
 
     return new NnrpClient({
       endpoint: normalizeEndpoint(options.endpoint),
       runtime: this,
+      transports: options.transports ?? this.#transportProviders,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
       ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
     });
@@ -433,10 +456,15 @@ export class NnrpBackendRuntime {
     this.#ensureOpen();
     this.#ensureConnectReady("listen");
     validateEndpoint(options.endpoint);
+    validateTransportProvidersForPolicy(
+      options.transports ?? this.#transportProviders,
+      options.transportPolicy ?? this.#transportPolicy,
+    );
 
     return new NnrpServer({
       endpoint: normalizeEndpoint(options.endpoint),
       runtime: this,
+      transports: options.transports ?? this.#transportProviders,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
     });
   }
@@ -457,11 +485,17 @@ export class NnrpBackendRuntime {
   ): Promise<NnrpTransportSelectionSummary> {
     this.#ensureOpen();
     const candidates = this.#createTransportCandidates(options);
-    const scoreTransportCandidates = this.#binding.ffi?.scoreTransportCandidates;
-    const scoredCandidates = scoreTransportCandidates === undefined ? candidates : await scoreTransportCandidates({
+    const probedCandidates = await applyNativeTransportProbes(
       candidates,
-      policy: this.#transportPolicy,
-    });
+      options.transports ?? this.#transportProviders,
+    );
+    const scoreTransportCandidates = this.#binding.ffi?.scoreTransportCandidates;
+    const scoredCandidates = scoreTransportCandidates === undefined
+      ? probedCandidates
+      : await scoreTransportCandidates({
+        candidates: probedCandidates,
+        policy: this.#transportPolicy,
+      });
 
     return createTransportSelectionSummary(
       selectTransport(
@@ -529,9 +563,100 @@ export class NnrpBackendRuntime {
   }
 }
 
+async function applyNativeTransportProbes(
+  candidates: readonly NnrpTransportCandidate[],
+  providers: readonly NnrpNativeTransportProvider[],
+): Promise<readonly NnrpTransportCandidate[]> {
+  const probes = new Map<NnrpTransportKind, NnrpTransportCandidate>();
+  for (const provider of providers) {
+    probes.set(provider.kind, await provider.probe());
+  }
+
+  return candidates.map((candidate) => {
+    const probe = probes.get(candidate.kind);
+    if (probe === undefined) {
+      return {
+        ...candidate,
+        localAvailable: false,
+        rejectionReason: candidate.rejectionReason ?? "local-unavailable",
+      };
+    }
+
+    return {
+      ...candidate,
+      localAvailable: probe.localAvailable,
+      score: probe.score,
+      ...(probe.diagnostic === undefined ? {} : { diagnostic: probe.diagnostic }),
+      ...(probe.rejectionReason === undefined ? {} : { rejectionReason: probe.rejectionReason }),
+    };
+  });
+}
+
+async function discoverNativeTransportProviders(): Promise<readonly NnrpNativeTransportProvider[]> {
+  const providers: NnrpNativeTransportProvider[] = [];
+  const tcp = await importOptionalTransportModule("@nnrp/transport-tcp");
+  const quic = await importOptionalTransportModule("@nnrp/transport-quic");
+
+  if (isTransportFactory(tcp?.createTcpTransportProvider)) {
+    providers.push(tcp.createTcpTransportProvider());
+  }
+  if (isTransportFactory(quic?.createQuicTransportProvider)) {
+    providers.push(quic.createQuicTransportProvider());
+  }
+
+  return providers;
+}
+
+async function importOptionalTransportModule(specifier: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    return await import(specifier) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function isTransportFactory(value: unknown): value is () => NnrpNativeTransportProvider {
+  return typeof value === "function";
+}
+
+function validateTransportProvidersForPolicy(
+  providers: readonly NnrpNativeTransportProvider[],
+  policy: NnrpTransportPolicy,
+): void {
+  if (providers.length === 0) {
+    throw new NnrpCapabilityError({
+      code: "NNRP_NATIVE_TRANSPORT_PROVIDER_MISSING",
+      message: "At least one native transport provider package or explicit provider is required.",
+      source: "transport",
+      retryable: false,
+    });
+  }
+
+  const kinds = new Set(providers.map((provider) => provider.kind));
+  if (policy === "tcp-only" && !kinds.has("tcp")) {
+    throw new NnrpTransportError({
+      code: "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED",
+      message: "tcp-only transport policy requires an installed or explicit TCP provider.",
+      source: "transport",
+      retryable: false,
+      transport: "tcp",
+    });
+  }
+  if (policy === "quic-only" && !kinds.has("quic")) {
+    throw new NnrpTransportError({
+      code: "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED",
+      message: "quic-only transport policy requires an installed or explicit QUIC provider.",
+      source: "transport",
+      retryable: false,
+      transport: "quic",
+    });
+  }
+}
+
 export interface NnrpClientState {
   readonly endpoint: string;
   readonly runtime: NnrpBackendRuntime;
+  readonly transports: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpSessionOptions;
 }
@@ -944,13 +1069,14 @@ export class NnrpClientSession {
   }
 }
 
-export interface NnrpServerState {
+interface NnrpServerState {
   readonly endpoint: string;
   readonly runtime: NnrpBackendRuntime;
+  readonly transports: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy: NnrpTransportPolicy;
 }
 
-export class NnrpServer {
+class NnrpServer {
   readonly #state: NnrpServerState;
   #closed = false;
 
@@ -1000,12 +1126,12 @@ export class NnrpServer {
   }
 }
 
-export interface NnrpServerSessionState {
+interface NnrpServerSessionState {
   readonly runtime: NnrpBackendRuntime;
   readonly options: NnrpSessionOptions;
 }
 
-export class NnrpServerSession {
+class NnrpServerSession {
   readonly #state: NnrpServerSessionState | undefined;
   #closed = false;
 

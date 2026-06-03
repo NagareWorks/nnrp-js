@@ -2,9 +2,11 @@
 
 ## Scope
 
-1. Implement `@nnrp/native` on top of `nnrp-rs` native artifacts.
+1. Implement native client and native server role packages on top of `nnrp-rs` native artifacts.
 2. Support Node.js/Deno client-first usage, backend services, and adapter processes.
 3. Keep native loading explicit, diagnosable, lazy, and artifact-manifest driven.
+4. Keep transport installation independent from role packages: `@nnrp/native-client` and `@nnrp/native-server` consume
+   installed or explicitly supplied TCP/QUIC adapters instead of bundling those adapters.
 
 ## Native Artifact Resolution
 
@@ -38,8 +40,10 @@
 
 ## Client-First API
 
-- [x] Add `openNativeClient(options)`.
+- [x] Add `openNativeClient(options)` in `@nnrp/native-client`.
 - [x] Add `NnrpNativeClientOptions`.
+- [x] Add `transports` option accepting installed or explicit transport provider descriptors.
+- [x] Add no-provider diagnostic when neither TCP nor QUIC adapter is installed or supplied.
 - [x] Open runtime, connect endpoint, and return `NnrpClient`.
 - [x] Apply `sessionDefaults` to sessions.
 - [x] Add `NnrpClient.openSession(options)`.
@@ -48,9 +52,11 @@
 
 ## Backend Runtime API
 
-- [x] Add `openBackendRuntime(options)`.
+- [x] Add `openBackendRuntime(options)` in `@nnrp/native-server`.
 - [x] Add `NnrpBackendRuntime.connect(options)`.
 - [x] Add `NnrpBackendRuntime.listen(options)`.
+- [x] Add runtime/listen transport options accepting installed or explicit transport provider descriptors.
+- [x] Add listen diagnostics when requested policy cannot be satisfied by installed adapters.
 - [x] Add `NnrpBackendRuntime.close()`.
 - [x] Add `NnrpServer.accept()`.
 - [x] Add `NnrpServer.close()`.
@@ -69,11 +75,25 @@
 - [x] Preserve backpressure and flow-control diagnostics.
 - [x] Add tests for submit/result, no-wait/event, cancel, and close paths.
 
+## Native Transport Adapter Packages
+
+- [x] Add `@nnrp/transport-tcp` package with TCP provider descriptor exports.
+- [x] Add `@nnrp/transport-quic` package with QUIC provider descriptor exports.
+- [x] Keep transport packages free of client/server lifecycle exports.
+- [x] Keep transport packages free of native loader implementation details beyond provider metadata.
+- [x] Add installed package discovery path for TCP provider package.
+- [x] Add installed package discovery path for QUIC provider package.
+- [x] Add probe tests where only TCP is installed.
+- [x] Add probe tests where only QUIC is installed.
+- [x] Add probe tests where TCP and QUIC are both installed and policy selects one.
+
 ## Native Package Gates
 
-- [x] Packed native package contains native loader and runtime wrappers.
-- [x] Packed native package contains client and server APIs.
-- [x] Packed native package does not contain browser transport implementation files.
-- [x] Packed native package does not import DOM globals.
-- [x] CI runs Node import smoke for `@nnrp/native`.
+- [x] Packed native client package contains native loader and client runtime wrappers.
+- [x] Packed native client package does not contain server entrypoint exports.
+- [x] Packed native server package contains native loader and server runtime wrappers.
+- [x] Packed native server package does not contain client entrypoint exports.
+- [x] Packed native packages do not contain browser transport implementation files.
+- [x] Packed native packages do not import DOM globals.
+- [x] CI runs Node import smoke for `@nnrp/native-client` and `@nnrp/native-server`.
 - [x] CI runs Deno tooling smoke without adding Deno-specific runtime API dependencies.

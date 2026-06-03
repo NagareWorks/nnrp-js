@@ -14,7 +14,7 @@
 - [x] Deno test task exists.
 - [x] Add package declaration diff check.
 - [x] Add package export snapshot check.
-- [x] Add runtime-policy checks for core/native/wasm import boundaries.
+- [x] Add runtime-policy checks for core, role-package, and transport-package import boundaries.
 - [x] Add content-policy checks for docs and examples.
 - [x] Add coverage gate once implementation tests cover real logic.
 
@@ -40,9 +40,12 @@
 
 ## Examples
 
-- [x] Add Node native client example for CLI/agent usage.
-- [x] Add Node native server/adapter example.
-- [x] Add browser WASM client example.
+- [x] Add Node native client example for CLI/agent usage using `@nnrp/native-client` and transport packages.
+- [x] Add Node native server/adapter example using `@nnrp/native-server` and transport packages.
+- [x] Add browser client example using `@nnrp/browser-client` and `@nnrp/transport-websocket`.
+- [x] Add example showing one installed transport package.
+- [x] Add example showing multiple installed transport packages and probe-based selection.
+- [x] Add example showing explicit provider injection when auto-discovery is not desired.
 - [x] Add opencode-style native client sketch once API names are implemented.
 - [x] Ensure examples import package entrypoints, not source files.
 - [x] Keep examples small enough for users to copy without reading internals.
@@ -51,16 +54,19 @@
 
 - [x] Keep `nnrp-doc` English JS/TS SDK pages synchronized.
 - [x] Keep `nnrp-doc` Chinese JS/TS SDK pages synchronized.
-- [x] Update local README when package layout changes.
-- [x] Add docs links from package READMEs after package names are frozen.
+- [x] Update local README for corrected role and transport package layout.
+- [x] Add non-empty package keywords for every published package.
+- [x] Add README header image to root and all npm package READMEs.
+- [x] Add contributors section to root README.
+- [x] Add docs links from package READMEs after package names are corrected.
 - [x] Add API change checklist to PR template if one is introduced.
 
 ## Release Gates
 
-- [x] Add release workflow only after npm package names are frozen.
+- [x] Add release workflow only after corrected npm package names are frozen.
 - [x] Add npm publish dry run.
-- [x] Add package artifact verification before enabling registry publish.
+- [x] Add package artifact verification for corrected package set before enabling registry publish.
 - [x] Document environment secrets required for npm publish.
-- [x] Add trusted-publishing release workflow that publishes packages after release gates pass.
+- [x] Add trusted-publishing release workflow that publishes corrected packages after release gates pass.
 - [x] Manually tag release from the release workflow only after docs, conformance smoke, package pack checks, and import
       smoke pass.

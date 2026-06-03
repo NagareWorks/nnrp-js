@@ -1,7 +1,15 @@
 {
   "name": "@nnrp/core",
-  "version": "1.0.0-preview.3",
+  "version": "1.0.0-preview.3.1",
   "description": "Shared TypeScript primitives for NNRP.",
+  "keywords": [
+    "nnrp",
+    "ai",
+    "runtime",
+    "protocol",
+    "transport",
+    "typescript"
+  ],
   "type": "module",
   "private": true,
   "license": "Apache-2.0",

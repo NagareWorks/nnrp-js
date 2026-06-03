@@ -1,7 +1,11 @@
 const outputDirectories = [
   "packages/core/dist",
-  "packages/native/dist",
-  "packages/wasm/dist",
+  "packages/native-client/dist",
+  "packages/native-server/dist",
+  "packages/browser-client/dist",
+  "packages/transport-tcp/dist",
+  "packages/transport-quic/dist",
+  "packages/transport-websocket/dist",
 ] as const;
 
 for (const directory of outputDirectories) {

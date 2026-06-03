@@ -1,7 +1,9 @@
-import { NnrpWasmBindingUnavailableError, openBrowserRuntime } from "@nnrp/wasm";
+import { NnrpWasmBindingUnavailableError, openBrowserRuntime } from "@nnrp/browser-client";
+import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
 const runtime = await openBrowserRuntime({
   moduleUrl: "/assets/nnrp_wasm_bg.wasm",
+  transportProviders: [createWebSocketTransportProvider()],
   transportPolicy: "score",
 });
 

@@ -1,7 +1,11 @@
 const packages: readonly PackagePolicy[] = [
   { name: "@nnrp/core", directory: "packages/core" },
-  { name: "@nnrp/native", directory: "packages/native" },
-  { name: "@nnrp/wasm", directory: "packages/wasm" },
+  { name: "@nnrp/native-client", directory: "packages/native-client" },
+  { name: "@nnrp/native-server", directory: "packages/native-server" },
+  { name: "@nnrp/browser-client", directory: "packages/browser-client" },
+  { name: "@nnrp/transport-tcp", directory: "packages/transport-tcp" },
+  { name: "@nnrp/transport-quic", directory: "packages/transport-quic" },
+  { name: "@nnrp/transport-websocket", directory: "packages/transport-websocket" },
 ];
 
 const options = parsePublishOptions(Deno.args);

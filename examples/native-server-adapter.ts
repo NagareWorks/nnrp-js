@@ -1,7 +1,9 @@
-import { NnrpNativeBindingUnavailableError, openBackendRuntime } from "@nnrp/native";
+import { NnrpNativeBindingUnavailableError, openBackendRuntime } from "@nnrp/native-server";
+import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const runtime = await openBackendRuntime({
   nativeLibrary: { artifactDir: "./native" },
+  transports: [createTcpTransportProvider()],
   transportPolicy: "score",
 });
 

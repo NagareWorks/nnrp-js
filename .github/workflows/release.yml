@@ -125,7 +125,7 @@ jobs:
             --allow-env=ComSpec \
             --allow-run=npm,cmd \
             scripts/publish-packages.ts --skip-publish
-          for package_dir in artifacts/npm-publish/nnrp-core artifacts/npm-publish/nnrp-native artifacts/npm-publish/nnrp-wasm; do
+          for package_dir in artifacts/npm-publish/nnrp-core artifacts/npm-publish/nnrp-native-client artifacts/npm-publish/nnrp-native-server artifacts/npm-publish/nnrp-browser-client artifacts/npm-publish/nnrp-transport-tcp artifacts/npm-publish/nnrp-transport-quic artifacts/npm-publish/nnrp-transport-websocket; do
             npm pack "./$package_dir" --pack-destination artifacts/release-assets
           done
       - name: Publish GitHub release

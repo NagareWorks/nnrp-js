@@ -180,8 +180,12 @@ export class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
   }
 }
 
-export function openBrowserRuntime(options: NnrpWasmRuntimeOptions = {}): Promise<NnrpBrowserRuntime> {
-  return Promise.resolve(new NnrpBrowserRuntime(createWasmRuntimeBinding(options), options.transportPolicy ?? "score"));
+export async function openBrowserRuntime(options: NnrpWasmRuntimeOptions = {}): Promise<NnrpBrowserRuntime> {
+  const transportProviders = options.transportProviders ?? await discoverBrowserTransportProviders();
+  return new NnrpBrowserRuntime(
+    createWasmRuntimeBinding({ ...options, transportProviders }),
+    options.transportPolicy ?? "score",
+  );
 }
 
 export class NnrpBrowserRuntime {
@@ -210,6 +214,7 @@ export class NnrpBrowserRuntime {
     this.#ensureOpen();
     this.#ensureConnectReady();
     validateEndpoint(options.endpoint);
+    validateBrowserTransportProviders(this.#binding.transportProviders);
 
     return new NnrpBrowserClient({
       endpoint: normalizeEndpoint(options.endpoint),
@@ -915,7 +920,11 @@ function withBrowserProvider(
   provider: NnrpBrowserTransportProvider | undefined,
 ): NnrpTransportCandidate {
   if (provider === undefined) {
-    return candidate;
+    return {
+      ...candidate,
+      localAvailable: false,
+      rejectionReason: candidate.rejectionReason ?? "local-unavailable",
+    };
   }
 
   return {
@@ -924,6 +933,47 @@ function withBrowserProvider(
     score: provider.score ?? candidate.score,
     ...(provider.diagnostic === undefined ? {} : { diagnostic: provider.diagnostic }),
   };
+}
+
+function validateBrowserTransportProviders(providers: readonly NnrpBrowserTransportProvider[]): void {
+  if (providers.length === 0) {
+    throw new NnrpCapabilityError({
+      code: "NNRP_BROWSER_TRANSPORT_PROVIDER_MISSING",
+      message: "At least one browser transport provider package or explicit provider is required.",
+      source: "transport",
+      retryable: false,
+      transport: "websocket",
+    });
+  }
+}
+
+async function discoverBrowserTransportProviders(): Promise<readonly NnrpBrowserTransportProvider[]> {
+  const websocket = await importOptionalTransportModule("@nnrp/transport-websocket");
+  if (!isTransportFactory(websocket?.createWebSocketTransportProvider)) {
+    return [];
+  }
+
+  const provider = websocket.createWebSocketTransportProvider();
+  const candidate = await provider.probe();
+  return [createBrowserTransportProvider("websocket", {
+    available: candidate.localAvailable,
+    score: candidate.score,
+    ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
+  })];
+}
+
+async function importOptionalTransportModule(specifier: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    return await import(specifier) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function isTransportFactory(value: unknown): value is () => {
+  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
+} {
+  return typeof value === "function";
 }
 
 function normalizeEndpoint(endpoint: string | URL): string {

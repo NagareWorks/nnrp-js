@@ -1,4 +1,5 @@
-import { NnrpNativeBindingUnavailableError, openNativeClient } from "@nnrp/native";
+import { NnrpNativeBindingUnavailableError, openNativeClient } from "@nnrp/native-client";
+import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 interface AgentTurn {
   readonly id: number;
@@ -9,6 +10,7 @@ async function submitAgentTurn(turn: AgentTurn): Promise<void> {
   const client = await openNativeClient({
     endpoint: "127.0.0.1:4433",
     nativeLibrary: { artifactDir: "./native" },
+    transports: [createTcpTransportProvider()],
     transportPolicy: "score",
     sessionDefaults: { inputProfile: "tool_delta", metadata: { app: "opencode-agent" } },
   });

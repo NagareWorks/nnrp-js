@@ -27,9 +27,10 @@
 7. `04-implementation-surface.md`: ownership and dependency map for `04a/04b/04c/04d` implementation shards.
 8. `04a-core-package-contract.md`: `@nnrp/core` constants, types, manifest helpers, validation helpers, and declaration
    stability.
-9. `04b-native-runtime-adoption.md`: `@nnrp/native` artifact loading, Node/Deno native client, server runtime, and FFI
-   handle wrappers.
-10. `04c-wasm-runtime-adoption.md`: `@nnrp/wasm` WASM loading, browser client runtime, and browser transport adapters.
+9. `04b-native-runtime-adoption.md`: `@nnrp/native-client`, `@nnrp/native-server`, `@nnrp/transport-tcp`,
+   `@nnrp/transport-quic`, artifact loading, native role facades, and FFI handle wrappers.
+10. `04c-wasm-runtime-adoption.md`: `@nnrp/browser-client`, `@nnrp/transport-websocket`, browser runtime loading, client
+    facade, and browser transport adapter.
 11. `04d-package-and-runtime-boundaries.md`: export maps, package contents, runtime-policy gates, bundling checks, and
     npm artifact structure.
 12. `05-validation-and-docs.md`: conformance, benchmarks, docs synchronization, release workflow, and publication gates.
@@ -42,7 +43,8 @@
 3. If a change needs new Rust native or WASM symbols, update `nnrp-rs` first and consume the released artifact here.
 4. Do not add Bun-specific support, compatibility probes, lockfiles, examples, CI axes, or package exports.
 5. Normal work targets `main` until a separate release freeze branch is created.
-6. Keep backend-native, browser-WASM, and core package changes separated unless a boundary rule itself changes.
+6. Keep core, native client, native server, browser client, and individual transport adapter package changes separated
+   unless a boundary rule itself changes.
 
 ## 4. Protocol Coverage Check
 
@@ -56,6 +58,6 @@
    `02c`, `04b`, and `04c`.
 5. Cache lease/version/dependency rules, schema descriptors, typed payload descriptors, and profile registry behavior
    are tracked in `03` and `04a`.
-6. Package boundaries, runtime import rules, native/WASM artifact contents, and npm publish layout are tracked in `04d`
-   and `05`.
+6. Package boundaries, runtime import rules, native/browser artifact contents, and npm publish layout are tracked in
+   `04d` and `05`.
 7. Conformance adapters and benchmark runners must claim/report capabilities by active build mode, tracked in `05`.

@@ -1,19 +1,27 @@
 {
-  "name": "@nnrp/wasm",
-  "version": "1.0.0-preview.3",
-  "description": "WASM loading primitives for NNRP browser and edge integrations.",
+  "name": "@nnrp/transport-quic",
+  "version": "1.0.0-preview.3.1",
+  "description": "QUIC transport adapter descriptors for NNRP native runtimes.",
+  "keywords": [
+    "nnrp",
+    "ai",
+    "runtime",
+    "transport",
+    "quic",
+    "typescript"
+  ],
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/NagareWorks/nnrp-js.git",
-    "directory": "packages/wasm"
+    "directory": "packages/transport-quic"
   },
   "bugs": {
     "url": "https://github.com/NagareWorks/nnrp-js/issues"
   },
-  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/wasm#readme",
+  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/transport-quic#readme",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

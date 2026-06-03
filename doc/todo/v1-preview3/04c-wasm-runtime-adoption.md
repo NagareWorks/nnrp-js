@@ -1,10 +1,12 @@
-# JS/TS Preview3 WASM Runtime Adoption
+# JS/TS Preview3 Browser Client Runtime Adoption
 
 ## Scope
 
-1. Implement `@nnrp/wasm` on top of `nnrp-rs` WASM primitives.
+1. Implement `@nnrp/browser-client` on top of `nnrp-rs` WASM primitives.
 2. Support browser/edge client usage without server APIs, native loaders, or Node built-ins.
 3. Keep WASM loading explicit, cacheable, and bundler-friendly.
+4. Keep browser transport installation independent from the client package: `@nnrp/browser-client` consumes installed or
+   explicitly supplied WebSocket adapters instead of bundling the adapter.
 
 ## WASM Artifact Resolution
 
@@ -43,18 +45,23 @@
 ## Browser Transport Adapters
 
 - [x] Define `NnrpBrowserTransportProvider`.
-- [x] Add WebSocket provider slot.
+- [x] Expose WebSocket provider construction through `@nnrp/transport-websocket`.
 - [x] Defer WebTransport provider slot to preview4 or a later browser mapping pass.
 - [x] Keep transport providers optional.
+- [x] Add installed package discovery path for WebSocket provider package.
+- [x] Add probe tests where WebSocket is installed.
+- [x] Add probe tests where no WebSocket package is installed and an explicit provider is supplied.
+- [x] Add diagnostics when no browser transport package is installed or supplied.
 - [x] Keep network-free WASM primitive tests possible.
 - [x] Use the same candidate/rejection type shapes as native mode.
 - [x] Add bundling tests with no adapter installed.
 
 ## Browser Package Gates
 
-- [x] Packed browser package contains WASM loader and browser client APIs.
-- [x] Packed browser package does not contain native FFI loader code.
-- [x] Packed browser package does not contain server APIs.
-- [x] Packed browser package does not import `node:*` modules.
-- [x] Packed browser package contains WASM assets or documents external asset injection.
+- [x] Packed browser client package contains WASM loader and browser client APIs.
+- [x] Packed browser client package does not contain native FFI loader code.
+- [x] Packed browser client package does not contain server APIs.
+- [x] Packed browser client package does not import `node:*` modules.
+- [x] Packed browser client package contains WASM assets or documents external asset injection.
+- [x] Packed WebSocket transport package contains no native loader or server APIs.
 - [x] CI runs browser bundling smoke.

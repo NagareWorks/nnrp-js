@@ -4,7 +4,8 @@
 
 1. Build `@nnrp/core` as the runtime-neutral contract package for all JS/TS runtimes.
 2. Provide shared types and small helpers without importing native, WASM, Node, or DOM dependencies.
-3. Keep declarations stable enough for `@nnrp/native`, `@nnrp/wasm`, docs, and conformance adapters.
+3. Keep declarations stable enough for native client/server packages, browser client packages, transport adapter
+   packages, docs, and conformance adapters.
 
 ## Constants and Versioning
 
@@ -42,7 +43,7 @@
 - [x] Add `NnrpDiagnostic`.
 - [x] Add operation id type guidance using `bigint`.
 - [x] Add binary payload type aliases for `Uint8Array` and `ArrayBufferView`.
-- [x] Add docs-linked type exports for client/server/native/wasm packages.
+- [x] Add docs-linked type exports for client, server, native, browser, and transport packages.
 
 ## Error Types
 

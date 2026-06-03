@@ -21,23 +21,28 @@ orchestration experiments.
 
 ## Packages
 
-| Package        | Purpose                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------- |
-| `@nnrp/core`   | Shared TypeScript types, protocol constants, capability and transport selection helpers.     |
-| `@nnrp/native` | Node.js native library discovery and loader primitives for `nnrp-rs` FFI artifacts.          |
-| `@nnrp/wasm`   | Browser and edge WASM loading primitives for protocol/runtime helpers produced by `nnrp-rs`. |
+| Package                     | Purpose                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `@nnrp/core`                | Shared TypeScript types, protocol constants, capability and transport selection helpers. |
+| `@nnrp/native-client`       | Node.js and Deno native client/session entrypoint.                                       |
+| `@nnrp/native-server`       | Node.js and Deno native server/listen/session entrypoint.                                |
+| `@nnrp/browser-client`      | Browser and edge client/session entrypoint backed by browser runtime primitives.         |
+| `@nnrp/transport-tcp`       | TCP transport adapter descriptor for native clients and servers.                         |
+| `@nnrp/transport-quic`      | QUIC transport adapter descriptor for native clients and servers.                        |
+| `@nnrp/transport-websocket` | WebSocket transport adapter descriptor for browser clients.                              |
 
 ## Build Modes
 
-| Build mode       | Package        | Runtime target                         | Transport slots               |
-| ---------------- | -------------- | -------------------------------------- | ----------------------------- |
-| `core`           | `@nnrp/core`   | Runtime-neutral TypeScript contract    | None                          |
-| `backend-native` | `@nnrp/native` | Node-compatible services, CLIs, agents | TCP and QUIC native providers |
-| `browser-wasm`   | `@nnrp/wasm`   | Browser and edge WASM clients          | WebSocket provider slot       |
+| Build mode       | Role packages                                | Runtime target                         | Transport adapter packages                    |
+| ---------------- | -------------------------------------------- | -------------------------------------- | --------------------------------------------- |
+| `core`           | `@nnrp/core`                                 | Runtime-neutral TypeScript contract    | None                                          |
+| `backend-native` | `@nnrp/native-client`, `@nnrp/native-server` | Node-compatible services, CLIs, agents | `@nnrp/transport-tcp`, `@nnrp/transport-quic` |
+| `browser-wasm`   | `@nnrp/browser-client`                       | Browser and edge clients               | `@nnrp/transport-websocket`                   |
 
-The backend-native packages target Node.js 20.11 or newer compatible runtimes. Browser-WASM packages target modern
-ES2022 browser and edge environments with `WebAssembly.Module`; WebSocket providers remain optional slots until the
-browser transport mapping is frozen.
+The backend-native packages target Node.js 20.11 or newer compatible runtimes. Browser packages target modern ES2022
+browser and edge environments with `WebAssembly.Module`. Transport packages are independent install units: install one
+transport to force that candidate shape, or install several and let runtime probing plus policy select the active
+transport.
 
 ## Quick Start
 
@@ -75,15 +80,24 @@ Examples use package entrypoint names through the repository import map. They ar
 This repository is being bootstrapped for Preview3-era SDK integration. Public package publishing is gated by the
 release workflow until package checks, conformance smoke, benchmark smoke, and import smoke pass.
 
-Preview package versions are synchronized across `@nnrp/core`, `@nnrp/native`, and `@nnrp/wasm`. Source package
-manifests stay `private: true` for workspace safety; the release workflow stages publishable manifests before running
-`npm publish`.
+Preview package versions are synchronized across the role, transport, and core packages. Source package manifests stay
+`private: true` for workspace safety; the release workflow stages publishable manifests before running `npm publish`.
 
-The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure trusted publishers for all three npm
-packages with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN`
-secret is required for the default path.
+The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure trusted publishers for all npm packages
+with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN` secret is
+required for the default path.
 
-Native artifacts are not bundled in the JavaScript package yet. `@nnrp/native` accepts explicit library paths, artifact
-directories, or injected FFI bindings so services can choose local packaging policy without forcing one npm asset
-layout. WASM assets are likewise injected by URL, manifest, or precompiled `WebAssembly.Module` until the browser asset
-policy is frozen.
+Native artifacts are not bundled in the JavaScript package yet. Native role packages accept explicit library paths,
+artifact directories, or injected FFI bindings so services can choose local packaging policy without forcing one npm
+asset layout. Browser runtime assets are likewise injected by URL, manifest, or precompiled `WebAssembly.Module`.
+
+## Contributors
+
+<a href="https://github.com/NagareWorks/nnrp-js/graphs/contributors" title="Open the contributors graph for individual GitHub profiles and IDs.">
+  <img src="https://contrib.rocks/image?repo=NagareWorks/nnrp-js" alt="Contributors" />
+</a>
+
+The avatar wall above is updated automatically from the repository contributor list.
+
+GitHub README rendering does not support per-avatar dynamic tooltips for an auto-generated contributor wall, so use the
+linked contributors graph if you want individual profile pages and account IDs.

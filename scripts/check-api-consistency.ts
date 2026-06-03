@@ -7,8 +7,8 @@ import {
   normalizeCancelRequest,
   normalizeSubmitRequest,
 } from "@nnrp/core";
-import { NnrpClientSession } from "@nnrp/native";
-import { NnrpBrowserClientSession } from "@nnrp/wasm";
+import { NnrpBrowserClientSession } from "@nnrp/browser-client";
+import { NnrpClientSession } from "@nnrp/native-client";
 
 const failures: string[] = [];
 
@@ -42,10 +42,10 @@ function checkSessionMethodParity(): void {
 
   for (const method of sharedMethods) {
     if (typeof NnrpClientSession.prototype[method as keyof NnrpClientSession] !== "function") {
-      failures.push(`@nnrp/native NnrpClientSession is missing ${method}()`);
+      failures.push(`@nnrp/native-client NnrpClientSession is missing ${method}()`);
     }
     if (typeof NnrpBrowserClientSession.prototype[method as keyof NnrpBrowserClientSession] !== "function") {
-      failures.push(`@nnrp/wasm NnrpBrowserClientSession is missing ${method}()`);
+      failures.push(`@nnrp/browser-client NnrpBrowserClientSession is missing ${method}()`);
     }
   }
 }

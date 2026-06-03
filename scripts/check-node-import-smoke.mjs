@@ -16,21 +16,28 @@ const entrypoints = [
     forbiddenExports: ["openNativeClient", "openBrowserRuntime"],
   },
   {
-    name: "@nnrp/native",
-    workspacePath: "../packages/native",
+    name: "@nnrp/native-client",
+    workspacePath: "../packages/native-client",
     exports: [
       "openNativeClient",
-      "openBackendRuntime",
       "NnrpClient",
       "NnrpClientSession",
+    ],
+    forbiddenExports: ["openBackendRuntime", "NnrpServer", "NnrpServerSession", "openBrowserRuntime"],
+  },
+  {
+    name: "@nnrp/native-server",
+    workspacePath: "../packages/native-server",
+    exports: [
+      "openBackendRuntime",
       "NnrpServer",
       "NnrpServerSession",
     ],
-    forbiddenExports: ["openBrowserRuntime", "NnrpBrowserRuntime"],
+    forbiddenExports: ["openNativeClient", "NnrpClient", "NnrpClientSession", "openBrowserRuntime"],
   },
   {
-    name: "@nnrp/wasm",
-    workspacePath: "../packages/wasm",
+    name: "@nnrp/browser-client",
+    workspacePath: "../packages/browser-client",
     exports: [
       "openBrowserRuntime",
       "NnrpBrowserRuntime",
@@ -38,6 +45,24 @@ const entrypoints = [
       "NnrpBrowserClientSession",
     ],
     forbiddenExports: ["openNativeClient", "NnrpServer", "NnrpServerSession"],
+  },
+  {
+    name: "@nnrp/transport-tcp",
+    workspacePath: "../packages/transport-tcp",
+    exports: ["createTcpTransportProvider"],
+    forbiddenExports: ["openNativeClient", "openBackendRuntime", "openBrowserRuntime"],
+  },
+  {
+    name: "@nnrp/transport-quic",
+    workspacePath: "../packages/transport-quic",
+    exports: ["createQuicTransportProvider"],
+    forbiddenExports: ["openNativeClient", "openBackendRuntime", "openBrowserRuntime"],
+  },
+  {
+    name: "@nnrp/transport-websocket",
+    workspacePath: "../packages/transport-websocket",
+    exports: ["createWebSocketTransportProvider"],
+    forbiddenExports: ["openNativeClient", "openBackendRuntime", "openBrowserRuntime"],
   },
 ];
 

@@ -108,16 +108,9 @@ export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
 export interface NnrpNativeClientOptions {
     readonly endpoint: string | URL;
     readonly nativeLibrary?: NnrpNativeLibraryOptions;
+    readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
-    readonly env?: Record<string, string | undefined>;
-    readonly platform?: NodePlatform;
-    readonly arch?: NodeArchitecture;
-    readonly ffi?: NnrpNativeFfiBinding;
-}
-export interface NnrpBackendRuntimeOptions {
-    readonly nativeLibrary?: NnrpNativeLibraryOptions;
-    readonly transportPolicy?: NnrpTransportPolicy;
     readonly env?: Record<string, string | undefined>;
     readonly platform?: NodePlatform;
     readonly arch?: NodeArchitecture;
@@ -125,15 +118,22 @@ export interface NnrpBackendRuntimeOptions {
 }
 export interface NnrpConnectOptions {
     readonly endpoint: string | URL;
+    readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
 }
-export interface NnrpListenOptions {
+interface NnrpListenOptions {
     readonly endpoint: string | URL;
+    readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
+}
+export interface NnrpNativeTransportProvider {
+    readonly kind: Extract<NnrpTransportKind, "tcp" | "quic">;
+    probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
 }
 export interface NnrpTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
+    readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
 }
 export interface NnrpNativeBindingOptions {
@@ -156,10 +156,9 @@ export declare class NnrpNativeBindingUnavailableError extends NnrpCapabilityErr
     constructor(diagnostic: NnrpDiagnostic);
 }
 export declare function openNativeClient(options: NnrpNativeClientOptions): Promise<NnrpClient>;
-export declare function openBackendRuntime(options?: NnrpBackendRuntimeOptions): Promise<NnrpBackendRuntime>;
-export declare class NnrpBackendRuntime {
+declare class NnrpBackendRuntime {
     #private;
-    constructor(binding: NnrpNativeRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
+    constructor(binding: NnrpNativeRuntimeBinding, transportPolicy?: NnrpTransportPolicy, transportProviders?: readonly NnrpNativeTransportProvider[]);
     get manifest(): NnrpCapabilityManifest;
     get libraryPath(): string;
     get runtimeCapabilities(): NnrpNativeRuntimeCapabilities | undefined;
@@ -182,6 +181,7 @@ export declare class NnrpBackendRuntime {
 export interface NnrpClientState {
     readonly endpoint: string;
     readonly runtime: NnrpBackendRuntime;
+    readonly transports: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
 }
@@ -218,12 +218,13 @@ export declare class NnrpClientSession {
     close(): Promise<void>;
     get closed(): boolean;
 }
-export interface NnrpServerState {
+interface NnrpServerState {
     readonly endpoint: string;
     readonly runtime: NnrpBackendRuntime;
+    readonly transports: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy: NnrpTransportPolicy;
 }
-export declare class NnrpServer {
+declare class NnrpServer {
     #private;
     constructor(state: NnrpServerState);
     get endpoint(): string;
@@ -232,11 +233,11 @@ export declare class NnrpServer {
     close(): Promise<void>;
     get closed(): boolean;
 }
-export interface NnrpServerSessionState {
+interface NnrpServerSessionState {
     readonly runtime: NnrpBackendRuntime;
     readonly options: NnrpSessionOptions;
 }
-export declare class NnrpServerSession {
+declare class NnrpServerSession {
     #private;
     constructor(state?: NnrpServerSessionState);
     get options(): NnrpSessionOptions;

@@ -8,7 +8,7 @@
 
 ## Native Client Lifecycle
 
-- [x] Add public `openNativeClient(options)` in `@nnrp/native`.
+- [x] Add public `openNativeClient(options)` in `@nnrp/native-client`.
 - [x] Load native artifacts only inside `openNativeClient` or explicit runtime open functions.
 - [x] Connect to endpoint after manifest and required-symbol validation.
 - [x] Return `NnrpClient` with no raw handle exposure.
@@ -19,7 +19,7 @@
 
 ## Native Backend Runtime Lifecycle
 
-- [x] Add public `openBackendRuntime(options)` in `@nnrp/native`.
+- [x] Add public `openBackendRuntime(options)` in `@nnrp/native-server`.
 - [x] Add `NnrpBackendRuntime.connect(options)` for client mode when explicit runtime lifecycle is needed.
 - [x] Add `NnrpBackendRuntime.listen(options)` for server mode.
 - [x] Add `NnrpServer.accept()` for incoming sessions.
@@ -30,7 +30,7 @@
 
 ## Browser Runtime Lifecycle
 
-- [x] Add public `openBrowserRuntime(options)` or documented equivalent in `@nnrp/wasm`.
+- [x] Add public `openBrowserRuntime(options)` or documented equivalent in `@nnrp/browser-client`.
 - [x] Validate WASM manifest before instantiation.
 - [x] Instantiate WASM lazily, not during module import.
 - [x] Add `NnrpBrowserRuntime.connect(options)`.

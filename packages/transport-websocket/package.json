@@ -1,0 +1,43 @@
+{
+  "name": "@nnrp/transport-websocket",
+  "version": "1.0.0-preview.3.1",
+  "description": "WebSocket transport adapter descriptors for NNRP browser clients.",
+  "keywords": [
+    "nnrp",
+    "ai",
+    "runtime",
+    "transport",
+    "websocket",
+    "browser",
+    "typescript"
+  ],
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NagareWorks/nnrp-js.git",
+    "directory": "packages/transport-websocket"
+  },
+  "bugs": {
+    "url": "https://github.com/NagareWorks/nnrp-js/issues"
+  },
+  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/transport-websocket#readme",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./experimental/*": null,
+    "./internal/*": null
+  },
+  "files": [
+    "README.md",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map"
+  ],
+  "dependencies": {
+    "@nnrp/core": "workspace:*"
+  }
+}

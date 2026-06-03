@@ -1,4 +1,4 @@
-const wasmEntrypoint = "packages/wasm/dist/index.js";
+const wasmEntrypoint = "packages/browser-client/dist/index.js";
 const source = await Deno.readTextFile(wasmEntrypoint);
 
 const forbiddenPatterns = [
@@ -13,7 +13,7 @@ const failures = forbiddenPatterns
   .filter(({ pattern }) => pattern.test(source))
   .map(({ label }) => `${wasmEntrypoint}: ${label}`);
 
-const moduleExports = await import(new URL("../packages/wasm/dist/index.js", import.meta.url).href);
+const moduleExports = await import(new URL("../packages/browser-client/dist/index.js", import.meta.url).href);
 
 for (const exportName of ["openBrowserRuntime", "NnrpBrowserRuntime", "NnrpBrowserClient"]) {
   if (!(exportName in moduleExports)) {

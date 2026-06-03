@@ -37,32 +37,84 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
       { label: "WebAssembly API", pattern: /\bWebAssembly\b/ },
       { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/native["']/ },
+      { label: "native client package import", pattern: /\bfrom\s+["']@nnrp\/native-client["']/ },
+      { label: "native server package import", pattern: /\bfrom\s+["']@nnrp\/native-server["']/ },
+      { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
+      { label: "transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-[^"']+["']/ },
       { label: "wasm package import", pattern: /\bfrom\s+["']@nnrp\/wasm["']/ },
     ],
   },
   {
-    packageName: "@nnrp/native",
-    prefix: "packages/native/src/",
+    packageName: "@nnrp/native-client",
+    prefix: "packages/native-client/src/",
     bannedPatterns: [
       { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
-      { label: "wasm package import", pattern: /\bfrom\s+["']@nnrp\/wasm["']/ },
+      { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
+      { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
       {
         label: "implicit native finalizer",
         pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
       },
+    ],
+  },
+  {
+    packageName: "@nnrp/native-server",
+    prefix: "packages/native-server/src/",
+    bannedPatterns: [
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
+      { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
       {
-        label: "browser-only source import",
-        pattern: /\bfrom\s+["'][^"']*(?:browser|websocket|webtransport)[^"']*["']/i,
+        label: "implicit native finalizer",
+        pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
       },
     ],
   },
   {
-    packageName: "@nnrp/wasm",
-    prefix: "packages/wasm/src/",
+    packageName: "@nnrp/browser-client",
+    prefix: "packages/browser-client/src/",
     bannedPatterns: [
       { label: "Node built-in import", pattern: /\bfrom\s+["']node:/ },
       { label: "dynamic Node built-in import", pattern: /\bimport\s*\(\s*["']node:/ },
-      { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/native["']/ },
+      { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/(?:native|native-client|native-server)["']/ },
+      { label: "native transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-(?:tcp|quic)["']/ },
+      { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
+    ],
+  },
+  {
+    packageName: "@nnrp/transport-tcp",
+    prefix: "packages/transport-tcp/src/",
+    bannedPatterns: [
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      {
+        label: "role package import",
+        pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
+      },
+    ],
+  },
+  {
+    packageName: "@nnrp/transport-quic",
+    prefix: "packages/transport-quic/src/",
+    bannedPatterns: [
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      {
+        label: "role package import",
+        pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
+      },
+    ],
+  },
+  {
+    packageName: "@nnrp/transport-websocket",
+    prefix: "packages/transport-websocket/src/",
+    bannedPatterns: [
+      { label: "Node built-in import", pattern: /\bfrom\s+["']node:/ },
+      { label: "dynamic Node built-in import", pattern: /\bimport\s*\(\s*["']node:/ },
+      { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/(?:native|native-client|native-server)["']/ },
+      { label: "native transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-(?:tcp|quic)["']/ },
+      {
+        label: "role package import",
+        pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
+      },
       { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
     ],
   },

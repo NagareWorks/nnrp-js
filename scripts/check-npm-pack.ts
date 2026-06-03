@@ -12,8 +12,8 @@ const packages: readonly PackagePackPolicy[] = [
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^native\//, /^wasm\//],
   },
   {
-    name: "@nnrp/native",
-    directory: "packages/native",
+    name: "@nnrp/native-client",
+    directory: "packages/native-client",
     expectedFiles: [
       "README.md",
       "dist/index.d.ts",
@@ -24,8 +24,8 @@ const packages: readonly PackagePackPolicy[] = [
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
   },
   {
-    name: "@nnrp/wasm",
-    directory: "packages/wasm",
+    name: "@nnrp/native-server",
+    directory: "packages/native-server",
     expectedFiles: [
       "README.md",
       "dist/index.d.ts",
@@ -33,6 +33,36 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.js",
       "package.json",
     ],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/browser-client",
+    directory: "packages/browser-client",
+    expectedFiles: [
+      "README.md",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "package.json",
+    ],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
+  },
+  {
+    name: "@nnrp/transport-tcp",
+    directory: "packages/transport-tcp",
+    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/transport-quic",
+    directory: "packages/transport-quic",
+    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/transport-websocket",
+    directory: "packages/transport-websocket",
+    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
 ];
@@ -99,8 +129,8 @@ function checkNativeArtifactMetadata(
     return;
   }
 
-  if (policy.name !== "@nnrp/native") {
-    failures.push(`${policy.name}: native artifact packaging can only be enabled on @nnrp/native`);
+  if (policy.name !== "@nnrp/native-client" && policy.name !== "@nnrp/native-server") {
+    failures.push(`${policy.name}: native artifact packaging can only be enabled on native role packages`);
     return;
   }
 

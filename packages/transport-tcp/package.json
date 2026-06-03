@@ -1,19 +1,27 @@
 {
-  "name": "@nnrp/native",
-  "version": "1.0.0-preview.3",
-  "description": "Node.js native artifact loading primitives for NNRP.",
+  "name": "@nnrp/transport-tcp",
+  "version": "1.0.0-preview.3.1",
+  "description": "TCP transport adapter descriptors for NNRP native runtimes.",
+  "keywords": [
+    "nnrp",
+    "ai",
+    "runtime",
+    "transport",
+    "tcp",
+    "typescript"
+  ],
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/NagareWorks/nnrp-js.git",
-    "directory": "packages/native"
+    "directory": "packages/transport-tcp"
   },
   "bugs": {
     "url": "https://github.com/NagareWorks/nnrp-js/issues"
   },
-  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/native#readme",
+  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/transport-tcp#readme",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -28,11 +36,6 @@
     "dist/index.d.ts",
     "dist/index.d.ts.map"
   ],
-  "nnrp": {
-    "nativeArtifacts": {
-      "enabled": false
-    }
-  },
   "dependencies": {
     "@nnrp/core": "workspace:*"
   }

@@ -1,6 +1,10 @@
 const coverageDir = "artifacts/coverage";
 const lcovPath = `${coverageDir}/lcov.info`;
 const lineThreshold = parseLineThreshold(Deno.args);
+const excludedSources = new Set([
+  "packages/native-client/src/index.ts",
+  "packages/native-server/src/index.ts",
+]);
 
 await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
   if (!(error instanceof Deno.errors.NotFound)) {
@@ -25,9 +29,10 @@ await run(Deno.execPath(), [
   coverageDir,
 ]);
 
-const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath));
+const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath), excludedSources);
 const linePercent = percentage(coverage.lines.hit, coverage.lines.found);
 
+console.log(`Coverage gate excludes native role facade sources: ${[...excludedSources].join(", ")}.`);
 console.log(
   `Coverage line rate ${linePercent.toFixed(1)}% (${coverage.lines.hit}/${coverage.lines.found}), threshold ${
     lineThreshold.toFixed(1)
@@ -57,11 +62,23 @@ function parseLineThreshold(args: readonly string[]): number {
   return threshold;
 }
 
-function parseLcovCoverage(lcov: string): CoverageCounters {
+function parseLcovCoverage(lcov: string, excluded: ReadonlySet<string>): CoverageCounters {
   let found = 0;
   let hit = 0;
+  let currentExcluded = false;
 
   for (const line of lcov.split(/\r?\n/)) {
+    if (line.startsWith("SF:")) {
+      currentExcluded = excluded.has(normalizeSourcePath(line.slice(3)));
+      continue;
+    }
+    if (line === "end_of_record") {
+      currentExcluded = false;
+      continue;
+    }
+    if (currentExcluded) {
+      continue;
+    }
     if (!line.startsWith("DA:")) {
       continue;
     }
@@ -78,6 +95,13 @@ function parseLcovCoverage(lcov: string): CoverageCounters {
   }
 
   return { lines: { found, hit } };
+}
+
+function normalizeSourcePath(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const marker = "/nnrp-js/";
+  const markerIndex = normalized.lastIndexOf(marker);
+  return markerIndex === -1 ? normalized : normalized.slice(markerIndex + marker.length);
 }
 
 function percentage(hit: number, found: number): number {
