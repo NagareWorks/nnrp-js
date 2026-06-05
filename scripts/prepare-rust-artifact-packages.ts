@@ -1,7 +1,9 @@
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.3.7";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.3.8";
 const browserWasmPackageDir = "packages/browser-client";
-const nativeTransportPackageDirs = ["packages/transport-tcp", "packages/transport-quic"] as const;
-const wasmTransportPackageDirs = ["packages/transport-tcp", "packages/transport-quic"] as const;
+const transportPackages: readonly TransportPackagePolicy[] = [
+  { transport: "tcp", packageDir: "packages/transport-tcp" },
+  { transport: "quic", packageDir: "packages/transport-quic" },
+] as const;
 
 const nativeArtifacts: readonly NativeArtifactPolicy[] = [
   { artifactTag: "windows-x86_64", library: "nnrp_ffi.dll" },
@@ -20,40 +22,62 @@ const cacheDir = Deno.env.get("NNRP_JS_RUST_ARTIFACT_CACHE") ?? "artifacts/rust-
 
 await Deno.mkdir(cacheDir, { recursive: true });
 
-for (const artifact of nativeArtifacts) {
-  await prepareNativeArtifactPackage(artifact, version);
+for (const transportPackage of transportPackages) {
+  for (const artifact of nativeArtifacts) {
+    await prepareNativeTransportArtifactPackage(transportPackage, artifact, version);
+  }
 }
 
-await prepareWasmArtifactPackages(version);
+await prepareBrowserWasmPrimitives(version);
+for (const transportPackage of transportPackages) {
+  await prepareWasmTransportArtifactPackage(transportPackage, version);
+}
 
-async function prepareNativeArtifactPackage(policy: NativeArtifactPolicy, artifactVersion: string): Promise<void> {
-  const assetName = `nnrp-ffi-native-${policy.artifactTag}-${artifactVersion}.zip`;
-  const extractDir = `${cacheDir}/${policy.artifactTag}`;
+async function prepareNativeTransportArtifactPackage(
+  transportPackage: TransportPackagePolicy,
+  policy: NativeArtifactPolicy,
+  artifactVersion: string,
+): Promise<void> {
+  const assetName =
+    `nnrp-ffi-transport-${transportPackage.transport}-native-${policy.artifactTag}-${artifactVersion}.zip`;
+  const extractDir = `${cacheDir}/${transportPackage.transport}-${policy.artifactTag}`;
   await downloadReleaseAsset(assetName);
   await resetDir(extractDir);
   await extractZip(`${cacheDir}/${assetName}`, extractDir);
 
-  for (const packageDir of nativeTransportPackageDirs) {
-    const outputDir = `${packageDir}/native/${policy.artifactTag}`;
-    await resetDir(outputDir);
-    await copyFile(`${extractDir}/manifest.json`, `${outputDir}/manifest.json`);
-    await copyFile(`${extractDir}/${policy.library}`, `${outputDir}/${policy.library}`);
-  }
+  const outputDir = `${transportPackage.packageDir}/native/${policy.artifactTag}`;
+  await resetDir(outputDir);
+  await copyFile(`${extractDir}/manifest.json`, `${outputDir}/manifest.json`);
+  await copyFile(`${extractDir}/${policy.library}`, `${outputDir}/${policy.library}`);
 }
 
-async function prepareWasmArtifactPackages(artifactVersion: string): Promise<void> {
+async function prepareBrowserWasmPrimitives(artifactVersion: string): Promise<void> {
   const assetName = `nnrp-wasm-primitives-${artifactVersion}.zip`;
-  const extractDir = `${cacheDir}/transport-wasm`;
+  const extractDir = `${cacheDir}/browser-wasm-primitives`;
   await downloadReleaseAsset(assetName);
   await resetDir(extractDir);
   await extractZip(`${cacheDir}/${assetName}`, extractDir);
 
-  for (const packageDir of [browserWasmPackageDir, ...wasmTransportPackageDirs]) {
-    await resetDir(`${packageDir}/wasm`);
-    await copyFile(`${extractDir}/manifest.json`, `${packageDir}/wasm/manifest.json`);
-    await copyFile(`${extractDir}/nnrp_wasm.wasm`, `${packageDir}/wasm/nnrp_wasm.wasm`);
-    await copyFile(`${extractDir}/nnrp_wasm.d.ts`, `${packageDir}/wasm/nnrp_wasm.d.ts`);
-  }
+  await resetDir(`${browserWasmPackageDir}/wasm`);
+  await copyFile(`${extractDir}/manifest.json`, `${browserWasmPackageDir}/wasm/manifest.json`);
+  await copyFile(`${extractDir}/nnrp_wasm.wasm`, `${browserWasmPackageDir}/wasm/nnrp_wasm.wasm`);
+  await copyFile(`${extractDir}/nnrp_wasm.d.ts`, `${browserWasmPackageDir}/wasm/nnrp_wasm.d.ts`);
+}
+
+async function prepareWasmTransportArtifactPackage(
+  transportPackage: TransportPackagePolicy,
+  artifactVersion: string,
+): Promise<void> {
+  const assetName = `nnrp-wasm-transport-${transportPackage.transport}-${artifactVersion}.zip`;
+  const extractDir = `${cacheDir}/${transportPackage.transport}-wasm`;
+  await downloadReleaseAsset(assetName);
+  await resetDir(extractDir);
+  await extractZip(`${cacheDir}/${assetName}`, extractDir);
+
+  await resetDir(`${transportPackage.packageDir}/wasm`);
+  await copyFile(`${extractDir}/manifest.json`, `${transportPackage.packageDir}/wasm/manifest.json`);
+  await copyFile(`${extractDir}/nnrp_wasm.wasm`, `${transportPackage.packageDir}/wasm/nnrp_wasm.wasm`);
+  await copyFile(`${extractDir}/nnrp_wasm.d.ts`, `${transportPackage.packageDir}/wasm/nnrp_wasm.d.ts`);
 }
 
 async function downloadReleaseAsset(assetName: string): Promise<void> {
@@ -144,4 +168,9 @@ function escapePowerShell(path: string): string {
 interface NativeArtifactPolicy {
   readonly artifactTag: string;
   readonly library: string;
+}
+
+interface TransportPackagePolicy {
+  readonly transport: "tcp" | "quic";
+  readonly packageDir: string;
 }

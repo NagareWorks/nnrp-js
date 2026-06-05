@@ -32,7 +32,7 @@ on:
       rust_artifact_version:
         description: nnrp-rs release version that provides the Linux native benchmark artifact.
         required: true
-        default: 1.0.0-preview.3.7
+        default: 1.0.0-preview.3.8
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -117,13 +117,13 @@ jobs:
       - name: Verify release gates
         env:
           GH_TOKEN: ${{ github.token }}
-          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.7' }}
+          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.8' }}
         run: deno task todo:check && deno task benchmark:smoke && deno task release-dry-run
       - name: Download native benchmark artifact
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         env:
           GH_TOKEN: ${{ github.token }}
-          RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.7' }}
+          RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.8' }}
         shell: bash
         run: |
           set -euo pipefail

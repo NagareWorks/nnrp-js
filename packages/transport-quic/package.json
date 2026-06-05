@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/transport-quic",
-  "version": "1.0.0-preview.3.3",
+  "version": "1.0.0-preview.3.4",
   "description": "QUIC transport adapter with native and WASM artifacts for NNRP runtimes.",
   "keywords": [
     "nnrp",

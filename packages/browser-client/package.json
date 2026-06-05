@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/browser-client",
-  "version": "1.0.0-preview.3.3",
+  "version": "1.0.0-preview.3.4",
   "description": "Browser and edge client SDK for NNRP.",
   "keywords": [
     "nnrp",
