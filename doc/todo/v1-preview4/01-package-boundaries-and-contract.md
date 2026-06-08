@@ -30,9 +30,11 @@
 - [ ] Add transport capability and cost metadata.
 - [ ] Add provider probe result types.
 
-## Compatibility Policy
+## Version Line Policy
 
-- [ ] Keep preview3 package versions installable.
-- [ ] Move preview4 development to the next preview version line when implementation starts.
-- [ ] Keep preview4 APIs explicit instead of overloading preview3 helper names with different semantics.
-- [ ] Add migration notes for preview3 users.
+- [ ] Publish preview4 on its own preview version line.
+- [ ] Keep preview4 APIs explicit instead of overloading existing helper names with different semantics.
+- [ ] Rename Rust artifact manifest `legacy_header` metadata to `ffi_header` or `c_header` once preview4 artifacts are
+      produced.
+- [ ] Keep current documentation focused on the active `NNRP/1` package shape and do not publish old-preview transition
+      pages.
