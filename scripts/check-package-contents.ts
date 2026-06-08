@@ -42,14 +42,14 @@ const packages: readonly PackagePolicy[] = [
   {
     name: "@nnrp/transport-tcp",
     directory: "packages/transport-tcp",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**", "wasm/**"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-quic",
     directory: "packages/transport-quic",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**", "wasm/**"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-websocket",
@@ -118,13 +118,8 @@ function checkWasmArtifactMetadata(
     return;
   }
 
-  if (
-    policy.name !== "@nnrp/browser-client" && policy.name !== "@nnrp/transport-tcp" &&
-    policy.name !== "@nnrp/transport-quic"
-  ) {
-    failures.push(
-      `${policy.name}: wasm artifact packaging can only be enabled on browser client or TCP/QUIC transport packages`,
-    );
+  if (policy.name !== "@nnrp/browser-client") {
+    failures.push(`${policy.name}: wasm artifact packaging can only be enabled on browser client packages`);
     return;
   }
 

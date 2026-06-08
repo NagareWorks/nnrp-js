@@ -1,7 +1,7 @@
 {
   "name": "@nnrp/transport-tcp",
-  "version": "1.0.0-preview.3.4",
-  "description": "TCP transport adapter with native and WASM artifacts for NNRP runtimes.",
+  "version": "1.0.0-preview.3.5",
+  "description": "TCP transport adapter with native artifacts for NNRP runtimes.",
   "keywords": [
     "nnrp",
     "ai",
@@ -35,8 +35,7 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
-    "native/**",
-    "wasm/**"
+    "native/**"
   ],
   "dependencies": {
     "@nnrp/core": "workspace:*"
@@ -44,9 +43,6 @@
   "nnrp": {
     "transport": "tcp",
     "nativeArtifacts": {
-      "enabled": true
-    },
-    "wasmArtifacts": {
       "enabled": true
     }
   }

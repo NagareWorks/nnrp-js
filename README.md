@@ -27,8 +27,8 @@ orchestration experiments.
 | `@nnrp/native-client`       | Node.js and Deno native client/session entrypoint.                                       |
 | `@nnrp/native-server`       | Node.js and Deno native server/listen/session entrypoint.                                |
 | `@nnrp/browser-client`      | Browser and edge client/session entrypoint backed by browser runtime primitives.         |
-| `@nnrp/transport-tcp`       | TCP transport adapter with packaged native and WASM transport artifacts.                 |
-| `@nnrp/transport-quic`      | QUIC transport adapter with packaged native and WASM transport artifacts.                |
+| `@nnrp/transport-tcp`       | TCP transport adapter with packaged native transport artifacts.                          |
+| `@nnrp/transport-quic`      | QUIC transport adapter with packaged native transport artifacts.                         |
 | `@nnrp/transport-websocket` | Browser-native WebSocket transport adapter for browser clients.                          |
 
 ## Build Modes
@@ -95,11 +95,11 @@ The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure tru
 with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN` secret is
 required for the default path.
 
-TCP and QUIC transport packages bundle the supported platform artifacts inside their own package payloads. Runtime
-resolution first looks inside the installed transport package and still accepts explicit library paths, artifact
+TCP and QUIC transport packages bundle the supported native platform artifacts inside their own package payloads.
+Runtime resolution first looks inside the installed transport package and still accepts explicit library paths, artifact
 directories, or injected FFI bindings for controlled deployments. The browser client bundles browser runtime primitives,
-while TCP and QUIC transport packages carry their transport WASM payloads. WebSocket stays browser-native because the
-Rust runtime does not expose a WebSocket transport implementation.
+and is the only package that carries browser WASM output. WebSocket stays browser-native because the Rust runtime does
+not expose a WebSocket transport implementation.
 
 ## Contributors
 

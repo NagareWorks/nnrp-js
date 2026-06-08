@@ -1,6 +1,6 @@
 {
   "name": "nnrp-js",
-  "version": "1.0.0-preview.3.4",
+  "version": "1.0.0-preview.3.5",
   "private": true,
   "description": "TypeScript and JavaScript SDK workspace for NNRP.",
   "license": "Apache-2.0",

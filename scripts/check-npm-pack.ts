@@ -54,11 +54,8 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.js",
       "native/windows-x86_64/manifest.json",
       "package.json",
-      "wasm/manifest.json",
-      "wasm/nnrp_wasm.d.ts",
-      "wasm/nnrp_wasm.wasm",
     ],
-    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-quic",
@@ -70,11 +67,8 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.js",
       "native/windows-x86_64/manifest.json",
       "package.json",
-      "wasm/manifest.json",
-      "wasm/nnrp_wasm.d.ts",
-      "wasm/nnrp_wasm.wasm",
     ],
-    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /browser/i, /websocket/i, /webtransport/i],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-websocket",
@@ -169,13 +163,8 @@ function checkWasmArtifactMetadata(
     return;
   }
 
-  if (
-    policy.name !== "@nnrp/browser-client" && policy.name !== "@nnrp/transport-tcp" &&
-    policy.name !== "@nnrp/transport-quic"
-  ) {
-    failures.push(
-      `${policy.name}: wasm artifact packaging can only be enabled on browser client or TCP/QUIC transport packages`,
-    );
+  if (policy.name !== "@nnrp/browser-client") {
+    failures.push(`${policy.name}: wasm artifact packaging can only be enabled on browser client packages`);
     return;
   }
 

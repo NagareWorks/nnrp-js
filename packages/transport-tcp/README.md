@@ -5,7 +5,8 @@
 TCP transport adapter for NNRP native clients and servers.
 
 Install this package when a Node.js or Deno native runtime should consider TCP during transport probing. The package
-carries the supported native and WASM transport artifacts; role packages do not bundle TCP artifacts on its behalf.
+carries the supported native transport artifacts; role packages do not bundle TCP artifacts on its behalf. Browser WASM
+output belongs to `@nnrp/browser-client`.
 
 ```ts
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";

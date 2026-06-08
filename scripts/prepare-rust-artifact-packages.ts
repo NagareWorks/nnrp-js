@@ -29,9 +29,6 @@ for (const transportPackage of transportPackages) {
 }
 
 await prepareBrowserWasmPrimitives(version);
-for (const transportPackage of transportPackages) {
-  await prepareWasmTransportArtifactPackage(transportPackage, version);
-}
 
 async function prepareNativeTransportArtifactPackage(
   transportPackage: TransportPackagePolicy,
@@ -62,22 +59,6 @@ async function prepareBrowserWasmPrimitives(artifactVersion: string): Promise<vo
   await copyFile(`${extractDir}/manifest.json`, `${browserWasmPackageDir}/wasm/manifest.json`);
   await copyFile(`${extractDir}/nnrp_wasm.wasm`, `${browserWasmPackageDir}/wasm/nnrp_wasm.wasm`);
   await copyFile(`${extractDir}/nnrp_wasm.d.ts`, `${browserWasmPackageDir}/wasm/nnrp_wasm.d.ts`);
-}
-
-async function prepareWasmTransportArtifactPackage(
-  transportPackage: TransportPackagePolicy,
-  artifactVersion: string,
-): Promise<void> {
-  const assetName = `nnrp-wasm-transport-${transportPackage.transport}-${artifactVersion}.zip`;
-  const extractDir = `${cacheDir}/${transportPackage.transport}-wasm`;
-  await downloadReleaseAsset(assetName);
-  await resetDir(extractDir);
-  await extractZip(`${cacheDir}/${assetName}`, extractDir);
-
-  await resetDir(`${transportPackage.packageDir}/wasm`);
-  await copyFile(`${extractDir}/manifest.json`, `${transportPackage.packageDir}/wasm/manifest.json`);
-  await copyFile(`${extractDir}/nnrp_wasm.wasm`, `${transportPackage.packageDir}/wasm/nnrp_wasm.wasm`);
-  await copyFile(`${extractDir}/nnrp_wasm.d.ts`, `${transportPackage.packageDir}/wasm/nnrp_wasm.d.ts`);
 }
 
 async function downloadReleaseAsset(assetName: string): Promise<void> {
