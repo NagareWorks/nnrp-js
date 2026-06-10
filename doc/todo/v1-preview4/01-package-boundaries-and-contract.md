@@ -30,6 +30,35 @@
 - [ ] Add transport capability and cost metadata.
 - [ ] Add provider probe result types.
 
+## Capability Token Catalog
+
+- [ ] Mirror the Rust preview4 control capability token names exactly.
+  - [ ] `control.cancel_abort`.
+  - [ ] `control.supersede`.
+  - [ ] `control.priority_update`.
+  - [ ] `control.deadline_expire`.
+  - [ ] `control.progress_partial`.
+  - [ ] `control.credit_backpressure`.
+  - [ ] `control.capability_costs`.
+  - [ ] `control.route_execution_hint`.
+  - [ ] `control.trace_context`.
+  - [ ] `control.result_drop_reason`.
+  - [ ] `control.degrade_profile`.
+  - [ ] `control.budget_update`.
+  - [ ] `control.recoverable_error`.
+  - [ ] `control.retry_after`.
+- [ ] Mirror the Rust preview4 runtime-object and cache capability token names exactly.
+  - [ ] `object.lifecycle`.
+  - [ ] `object.delta`.
+  - [ ] `object.cost`.
+  - [ ] `object.ownership`.
+  - [ ] `cache.reference`.
+- [ ] Mirror the Rust preview4 transport names exactly.
+  - [ ] `tcp`.
+  - [ ] `quic`.
+  - [ ] `ipc`.
+  - [ ] `websocket`.
+
 ## Version Line Policy
 
 - [ ] Publish preview4 on its own preview version line.
