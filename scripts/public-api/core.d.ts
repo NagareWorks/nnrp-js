@@ -68,6 +68,67 @@ export declare enum ErrorScope {
     Session = 1,
     Frame = 2
 }
+export declare enum RuntimeObjectKind {
+    Unspecified = 0,
+    Tensor = 1,
+    TokenBlock = 2,
+    ImageTile = 3,
+    FeatureMap = 4,
+    ToolResult = 5,
+    TraceSegment = 6,
+    OpaqueBytes = 7,
+    DocumentChunk = 8,
+    AudioChunk = 9,
+    VideoChunk = 10,
+    RoutePlan = 11,
+    CacheManifest = 12
+}
+export declare enum MemoryLocationHint {
+    Unspecified = 0,
+    HostMemory = 1,
+    DeviceMemory = 2,
+    SharedMemory = 3,
+    RemoteMemory = 4,
+    MmapFile = 5,
+    ObjectStore = 6
+}
+export declare enum OwnershipHint {
+    Unspecified = 0,
+    ProducerOwned = 1,
+    ConsumerOwned = 2,
+    SessionOwned = 3,
+    Borrowed = 4,
+    TransferOnRef = 5,
+    ReleaseOnDrop = 6
+}
+export declare enum ObjectReleaseReason {
+    Completed = 0,
+    Cancelled = 1,
+    Expired = 2,
+    Replaced = 3,
+    Invalidated = 4,
+    OwnerClosed = 5,
+    LeaseExpired = 6,
+    ConformanceInjection = 7
+}
+export declare enum CacheReuseScope {
+    Operation = 0,
+    Session = 1,
+    Connection = 2,
+    Global = 3,
+    Tenant = 4,
+    Profile = 5
+}
+export declare enum CacheMissReason {
+    Unknown = 0,
+    NotFound = 1,
+    Expired = 2,
+    Invalidated = 3,
+    SchemaMismatch = 4,
+    ProducerUnavailable = 5,
+    LeaseRequired = 6,
+    PermissionDenied = 7
+}
 export interface ControlRequestMetadata {
     readonly operationId: bigint;
     readonly controlSequence: bigint;

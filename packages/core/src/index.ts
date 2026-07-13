@@ -72,6 +72,73 @@ export enum ErrorScope {
   Frame = 2,
 }
 
+export enum RuntimeObjectKind {
+  Unspecified = 0x0000,
+  Tensor = 0x0001,
+  TokenBlock = 0x0002,
+  ImageTile = 0x0003,
+  FeatureMap = 0x0004,
+  ToolResult = 0x0005,
+  TraceSegment = 0x0006,
+  OpaqueBytes = 0x0007,
+  DocumentChunk = 0x0008,
+  AudioChunk = 0x0009,
+  VideoChunk = 0x000a,
+  RoutePlan = 0x000b,
+  CacheManifest = 0x000c,
+}
+
+export enum MemoryLocationHint {
+  Unspecified = 0x0000,
+  HostMemory = 0x0001,
+  DeviceMemory = 0x0002,
+  SharedMemory = 0x0003,
+  RemoteMemory = 0x0004,
+  MmapFile = 0x0005,
+  ObjectStore = 0x0006,
+}
+
+export enum OwnershipHint {
+  Unspecified = 0x0000,
+  ProducerOwned = 0x0001,
+  ConsumerOwned = 0x0002,
+  SessionOwned = 0x0003,
+  Borrowed = 0x0004,
+  TransferOnRef = 0x0005,
+  ReleaseOnDrop = 0x0006,
+}
+
+export enum ObjectReleaseReason {
+  Completed = 0x0000,
+  Cancelled = 0x0001,
+  Expired = 0x0002,
+  Replaced = 0x0003,
+  Invalidated = 0x0004,
+  OwnerClosed = 0x0005,
+  LeaseExpired = 0x0006,
+  ConformanceInjection = 0x0007,
+}
+
+export enum CacheReuseScope {
+  Operation = 0x0000,
+  Session = 0x0001,
+  Connection = 0x0002,
+  Global = 0x0003,
+  Tenant = 0x0004,
+  Profile = 0x0005,
+}
+
+export enum CacheMissReason {
+  Unknown = 0x0000,
+  NotFound = 0x0001,
+  Expired = 0x0002,
+  Invalidated = 0x0003,
+  SchemaMismatch = 0x0004,
+  ProducerUnavailable = 0x0005,
+  LeaseRequired = 0x0006,
+  PermissionDenied = 0x0007,
+}
+
 export interface ControlRequestMetadata {
   readonly operationId: bigint;
   readonly controlSequence: bigint;

@@ -28,11 +28,11 @@
   - [ ] `CacheReferenceMetadata` and `CacheMissMetadata`.
   - [ ] `CacheInvalidateMetadata` with scope, namespace, key, and reason fields.
   - [ ] Local `CacheLease` validation with object, owner, grant, and TTL fields.
-- [ ] Add every frozen runtime enum and numeric mapping.
-  - [ ] Object kind and runtime role.
-  - [ ] Memory location and ownership hint.
-  - [ ] Object release reason.
-  - [ ] Cache reuse scope and cache miss reason.
+- [x] Add every frozen runtime enum and numeric mapping.
+  - [x] Object kind and runtime role.
+  - [x] Memory location and ownership hint.
+  - [x] Object release reason.
+  - [x] Cache reuse scope and cache miss reason.
 
 ## Runtime Event Union
 

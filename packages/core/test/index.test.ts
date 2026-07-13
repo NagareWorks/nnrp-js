@@ -1,5 +1,7 @@
 import { assertEquals, assertInstanceOf, assertNotStrictEquals, assertThrows } from "jsr:@std/assert@1";
 import {
+  CacheMissReason,
+  CacheReuseScope,
   createBackendNativeManifest,
   createBrowserWasmManifest,
   createCacheKey,
@@ -12,6 +14,7 @@ import {
   encodeRuntimeControlMetadata,
   ErrorScope,
   isStandardInputProfile,
+  MemoryLocationHint,
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
   NnrpMessageType,
@@ -29,9 +32,12 @@ import {
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
   normalizeSubmitRequest,
+  ObjectReleaseReason,
+  OwnershipHint,
   parseApplicationEndpoint,
   resolveProviderEndpoint,
   type RuntimeControlMetadata,
+  RuntimeObjectKind,
   RuntimeRole,
   selectTransport,
   throwIfResultDrop,
@@ -132,6 +138,80 @@ Deno.test("@nnrp/core exposes the exact NNRP/1 Preview4 message type registry", 
     namedEntries.map(([name, value]) => `${name}:${value}`),
     NNRP_MESSAGE_TYPES.map(([name, value]) => `${name}:${value}`),
   );
+});
+
+Deno.test("@nnrp/core exposes the exact Preview4 runtime object enum registries", () => {
+  assertNumericEnum(RuntimeObjectKind, [
+    ["Unspecified", 0x0000],
+    ["Tensor", 0x0001],
+    ["TokenBlock", 0x0002],
+    ["ImageTile", 0x0003],
+    ["FeatureMap", 0x0004],
+    ["ToolResult", 0x0005],
+    ["TraceSegment", 0x0006],
+    ["OpaqueBytes", 0x0007],
+    ["DocumentChunk", 0x0008],
+    ["AudioChunk", 0x0009],
+    ["VideoChunk", 0x000a],
+    ["RoutePlan", 0x000b],
+    ["CacheManifest", 0x000c],
+  ]);
+  assertNumericEnum(RuntimeRole, [
+    ["Unspecified", 0x00],
+    ["Client", 0x01],
+    ["Server", 0x02],
+    ["Runtime", 0x03],
+    ["Subagent", 0x04],
+    ["Tool", 0x05],
+    ["Scheduler", 0x06],
+    ["ConformanceRunner", 0x07],
+  ]);
+  assertNumericEnum(MemoryLocationHint, [
+    ["Unspecified", 0x0000],
+    ["HostMemory", 0x0001],
+    ["DeviceMemory", 0x0002],
+    ["SharedMemory", 0x0003],
+    ["RemoteMemory", 0x0004],
+    ["MmapFile", 0x0005],
+    ["ObjectStore", 0x0006],
+  ]);
+  assertNumericEnum(OwnershipHint, [
+    ["Unspecified", 0x0000],
+    ["ProducerOwned", 0x0001],
+    ["ConsumerOwned", 0x0002],
+    ["SessionOwned", 0x0003],
+    ["Borrowed", 0x0004],
+    ["TransferOnRef", 0x0005],
+    ["ReleaseOnDrop", 0x0006],
+  ]);
+  assertNumericEnum(ObjectReleaseReason, [
+    ["Completed", 0x0000],
+    ["Cancelled", 0x0001],
+    ["Expired", 0x0002],
+    ["Replaced", 0x0003],
+    ["Invalidated", 0x0004],
+    ["OwnerClosed", 0x0005],
+    ["LeaseExpired", 0x0006],
+    ["ConformanceInjection", 0x0007],
+  ]);
+  assertNumericEnum(CacheReuseScope, [
+    ["Operation", 0x0000],
+    ["Session", 0x0001],
+    ["Connection", 0x0002],
+    ["Global", 0x0003],
+    ["Tenant", 0x0004],
+    ["Profile", 0x0005],
+  ]);
+  assertNumericEnum(CacheMissReason, [
+    ["Unknown", 0x0000],
+    ["NotFound", 0x0001],
+    ["Expired", 0x0002],
+    ["Invalidated", 0x0003],
+    ["SchemaMismatch", 0x0004],
+    ["ProducerUnavailable", 0x0005],
+    ["LeaseRequired", 0x0006],
+    ["PermissionDenied", 0x0007],
+  ]);
 });
 
 const RUNTIME_CONTROL_CODEC_CASES: readonly {
@@ -540,6 +620,17 @@ Deno.test("@nnrp/core owns encoded and decoded runtime control tails", () => {
 function assertRuntimeControlError(action: () => unknown, code: string): void {
   const error = assertThrows(action, NnrpProtocolError);
   assertEquals(error.diagnostic.code, code);
+}
+
+function assertNumericEnum(
+  enumObject: Record<string, string | number>,
+  expected: readonly (readonly [string, number])[],
+): void {
+  const namedEntries = Object.entries(enumObject).filter(([name]) => Number.isNaN(Number(name)));
+  assertEquals(
+    namedEntries.map(([name, value]) => `${name}:${value}`),
+    expected.map(([name, value]) => `${name}:${value}`),
+  );
 }
 
 Deno.test("@nnrp/core creates a backend native manifest", () => {
