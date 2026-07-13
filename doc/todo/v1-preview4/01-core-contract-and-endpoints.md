@@ -2,12 +2,12 @@
 
 ## Protocol Contract
 
-- [ ] Replace the Preview3 protocol constants with Preview4 constants.
+- [x] Replace the Preview3 protocol constants with Preview4 constants.
   - [x] Keep the public NNRP/1 protocol version claim at `1.0.0`; `nnrp-1-preview4` remains a conformance target
         identifier.
-  - [ ] Add every frozen control, runtime-object, cache, recoverable-error, and retry message type.
-  - [ ] Preserve the existing NNRP/1 `CacheInvalidate` message as the cache invalidation frame.
-  - [ ] Remove message aliases that exist only for an older preview.
+  - [x] Add every frozen control, runtime-object, cache, recoverable-error, and retry message type.
+  - [x] Preserve the existing NNRP/1 `CacheInvalidate` message as the cache invalidation frame.
+  - [x] Remove message aliases that exist only for an older preview.
 - [x] Add every frozen capability token.
   - [x] Add control capability tokens exactly as emitted by Rust Preview4.
   - [x] Add runtime-object and cache capability tokens exactly as emitted by Rust Preview4.

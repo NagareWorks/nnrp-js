@@ -11,6 +11,7 @@ import {
   isStandardInputProfile,
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
+  NnrpMessageType,
   NnrpProtocolError,
   NnrpRecoveryError,
   NnrpResultDropError,
@@ -58,12 +59,75 @@ const PREVIEW4_OBJECT_CAPABILITIES = [
   "cache.reference",
 ] as const;
 
+const NNRP_MESSAGE_TYPES = [
+  ["ClientHello", 0x01],
+  ["ServerHelloAck", 0x02],
+  ["SessionPatch", 0x03],
+  ["SessionPatchAck", 0x04],
+  ["Close", 0x05],
+  ["Error", 0x06],
+  ["SessionOpen", 0x07],
+  ["SessionOpenAck", 0x08],
+  ["SessionClose", 0x09],
+  ["SessionCloseAck", 0x0a],
+  ["FrameSubmit", 0x10],
+  ["FrameCancel", 0x11],
+  ["ResultPush", 0x12],
+  ["ResultDrop", 0x13],
+  ["CachePut", 0x14],
+  ["CacheAck", 0x15],
+  ["CacheInvalidate", 0x16],
+  ["FlowUpdate", 0x17],
+  ["ResultHint", 0x18],
+  ["TransportProbe", 0x19],
+  ["TransportProbeAck", 0x1a],
+  ["SessionMigrate", 0x1b],
+  ["SessionMigrateAck", 0x1c],
+  ["Ping", 0x20],
+  ["Pong", 0x21],
+  ["Cancel", 0x30],
+  ["Abort", 0x31],
+  ["PriorityUpdate", 0x32],
+  ["Deadline", 0x33],
+  ["ExpireAt", 0x34],
+  ["Supersede", 0x35],
+  ["BudgetUpdate", 0x36],
+  ["Progress", 0x37],
+  ["PartialResult", 0x38],
+  ["Backpressure", 0x39],
+  ["CreditUpdate", 0x3a],
+  ["CapabilityNegotiation", 0x3b],
+  ["DegradeProfile", 0x3c],
+  ["RouteHint", 0x3d],
+  ["ExecutionHint", 0x3e],
+  ["TraceContext", 0x3f],
+  ["ResultDropReason", 0x40],
+  ["ObjectDeclare", 0x41],
+  ["ObjectRef", 0x42],
+  ["ObjectRelease", 0x43],
+  ["ObjectPatch", 0x44],
+  ["ObjectDelta", 0x45],
+  ["CacheReference", 0x46],
+  ["CacheMiss", 0x47],
+  ["ErrorRecoverable", 0x48],
+  ["RetryAfter", 0x49],
+] as const;
+
 // @ts-expect-error Preview3 transport identifiers are not part of the Preview4 contract.
 const removedTransportKind: NnrpTransportKind = "webtransport";
 // @ts-expect-error Preview3 selection policies are not part of the Preview4 contract.
 const removedTransportPolicy: NnrpTransportPolicy = "score";
 void removedTransportKind;
 void removedTransportPolicy;
+
+Deno.test("@nnrp/core exposes the exact NNRP/1 Preview4 message type registry", () => {
+  const namedEntries = Object.entries(NnrpMessageType).filter(([name]) => Number.isNaN(Number(name)));
+
+  assertEquals(
+    namedEntries.map(([name, value]) => `${name}:${value}`),
+    NNRP_MESSAGE_TYPES.map(([name, value]) => `${name}:${value}`),
+  );
+});
 
 Deno.test("@nnrp/core creates a backend native manifest", () => {
   const manifest = createBackendNativeManifest(["flow.update"]);
