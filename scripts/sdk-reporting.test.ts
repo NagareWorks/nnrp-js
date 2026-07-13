@@ -54,7 +54,7 @@ Deno.test("sdk reporting rejects benchmark smoke reports below structural thresh
         selected: null,
         candidates: [],
         rejected: [],
-        policy: "score",
+        policy: "auto",
       },
       results: [],
     })

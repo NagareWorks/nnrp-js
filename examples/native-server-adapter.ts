@@ -4,7 +4,7 @@ import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 const runtime = await openBackendRuntime({
   nativeLibrary: { artifactDir: "./native" },
   transports: [createTcpTransportProvider()],
-  transportPolicy: "score",
+  transportPolicy: "auto",
 });
 
 const server = runtime.listen({ endpoint: "0.0.0.0:4433" });

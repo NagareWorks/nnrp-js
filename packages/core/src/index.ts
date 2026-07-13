@@ -3,9 +3,18 @@ export const NNRP_PROTOCOL_VERSION = "1.0.0";
 
 export type NnrpBuildMode = "backend-native" | "browser-wasm";
 
-export type NnrpTransportKind = "tcp" | "quic" | "webtransport" | "websocket";
+export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
 
-export type NnrpTransportPolicy = "score" | "tcp-only" | "quic-only";
+export type NnrpTransportPolicy =
+  | "auto"
+  | "prefer-quic"
+  | "prefer-tcp"
+  | "prefer-ipc"
+  | "prefer-websocket"
+  | "force-quic"
+  | "force-tcp"
+  | "force-ipc"
+  | "force-websocket";
 
 export type NnrpOperationId = bigint;
 
@@ -20,8 +29,8 @@ export type NnrpCapability =
   | "wasm.loader"
   | "transport.tcp"
   | "transport.quic"
+  | "transport.ipc"
   | "transport.websocket"
-  | "transport.webtransport"
   | "flow.update"
   | "result.hint"
   | "cache"
@@ -454,12 +463,12 @@ export function createBrowserWasmManifest(
 
 export function selectTransport(
   candidates: readonly NnrpTransportCandidate[],
-  policy: NnrpTransportPolicy = "score",
+  policy: NnrpTransportPolicy = "auto",
 ): NnrpTransportSelection {
-  const annotatedCandidates = candidates.map((candidate) => annotateTransportCandidate(candidate, policy));
-  const eligible = annotatedCandidates
-    .filter((candidate) => candidate.rejectionReason === undefined)
-    .sort((left, right) => right.score - left.score);
+  const annotatedCandidates = candidates
+    .map((candidate) => annotateTransportCandidate(candidate, policy))
+    .sort((left, right) => compareTransportCandidates(left, right, policy));
+  const eligible = annotatedCandidates.filter((candidate) => candidate.rejectionReason === undefined);
 
   return {
     selected: eligible[0] ?? null,
@@ -757,12 +766,9 @@ function transportRejectionReason(
     return candidate.peerSupported ? "local-unavailable" : "peer-unsupported";
   }
 
-  if (policy === "tcp-only") {
-    return candidate.kind === "tcp" ? undefined : "policy-rejected";
-  }
-
-  if (policy === "quic-only") {
-    return candidate.kind === "quic" ? undefined : "policy-rejected";
+  const forcedKind = forcedTransportKind(policy);
+  if (forcedKind !== undefined && candidate.kind !== forcedKind) {
+    return "policy-rejected";
   }
 
   return undefined;
@@ -774,15 +780,73 @@ function uniqueTransports(kinds: readonly NnrpTransportKind[]): readonly NnrpTra
 
 function defaultTransportScore(kind: NnrpTransportKind): number {
   switch (kind) {
-    case "webtransport":
-      return 90;
+    case "ipc":
+      return 100;
     case "quic":
+      return 90;
+    case "tcp":
       return 80;
     case "websocket":
       return 70;
-    case "tcp":
-      return 60;
   }
+}
+
+function compareTransportCandidates(
+  left: NnrpTransportCandidate,
+  right: NnrpTransportCandidate,
+  policy: NnrpTransportPolicy,
+): number {
+  const leftScore = left.score + transportPreferenceBonus(left.kind, policy);
+  const rightScore = right.score + transportPreferenceBonus(right.kind, policy);
+  return rightScore - leftScore ||
+    transportPreferenceRank(left.kind, policy) - transportPreferenceRank(right.kind, policy) ||
+    left.kind.localeCompare(right.kind);
+}
+
+function transportPreferenceBonus(kind: NnrpTransportKind, policy: NnrpTransportPolicy): number {
+  const preferred = preferredTransportKind(policy);
+  return preferred === kind ? 1_000 : 0;
+}
+
+function transportPreferenceRank(kind: NnrpTransportKind, policy: NnrpTransportPolicy): number {
+  const preferred = preferredTransportKind(policy);
+  if (preferred !== undefined) {
+    return kind === preferred ? 0 : 1;
+  }
+
+  switch (kind) {
+    case "ipc":
+      return 0;
+    case "quic":
+      return 1;
+    case "tcp":
+      return 2;
+    case "websocket":
+      return 3;
+  }
+}
+
+function preferredTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | undefined {
+  switch (policy) {
+    case "prefer-quic":
+    case "force-quic":
+      return "quic";
+    case "prefer-tcp":
+    case "force-tcp":
+      return "tcp";
+    case "prefer-ipc":
+    case "force-ipc":
+      return "ipc";
+    case "prefer-websocket":
+    case "force-websocket":
+      return "websocket";
+    case "auto":
+      return undefined;
+  }
+}
+
+function forcedTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | undefined {
+  return policy.startsWith("force-") ? preferredTransportKind(policy) : undefined;
 }
 
 function createPayloadDescriptor(descriptor: NnrpPayloadDescriptor): NnrpPayloadDescriptor {
@@ -1029,21 +1093,10 @@ function validateCapabilityManifestOptions(options: NnrpCapabilityManifestOption
       });
     }
 
-    if (transports.includes("tcp") || transports.includes("quic")) {
+    if (transports.some((transport) => transport !== "websocket")) {
       throw new NnrpCapabilityError({
         code: "NNRP_CAPABILITY_BROWSER_TRANSPORT_FORBIDDEN",
-        message: "Browser WASM manifests cannot claim native TCP or QUIC transports.",
-        source: "core",
-        retryable: false,
-      });
-    }
-  }
-
-  if (options.buildMode === "backend-native") {
-    if (transports.includes("websocket") || transports.includes("webtransport")) {
-      throw new NnrpCapabilityError({
-        code: "NNRP_CAPABILITY_NATIVE_TRANSPORT_FORBIDDEN",
-        message: "Backend native manifests cannot claim browser transport slots without an explicit adapter.",
+        message: "Browser WASM manifests can claim only the websocket transport.",
         source: "core",
         retryable: false,
       });

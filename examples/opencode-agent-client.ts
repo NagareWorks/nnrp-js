@@ -11,7 +11,7 @@ async function submitAgentTurn(turn: AgentTurn): Promise<void> {
     endpoint: "127.0.0.1:4433",
     nativeLibrary: { artifactDir: "./native" },
     transports: [createTcpTransportProvider()],
-    transportPolicy: "score",
+    transportPolicy: "auto",
     sessionDefaults: { inputProfile: "tool_delta", metadata: { app: "opencode-agent" } },
   });
 

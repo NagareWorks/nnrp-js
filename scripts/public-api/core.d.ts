@@ -1,12 +1,12 @@
 export declare const NNRP_PROTOCOL_NAME = "NNRP";
 export declare const NNRP_PROTOCOL_VERSION = "1.0.0";
 export type NnrpBuildMode = "backend-native" | "browser-wasm";
-export type NnrpTransportKind = "tcp" | "quic" | "webtransport" | "websocket";
-export type NnrpTransportPolicy = "score" | "tcp-only" | "quic-only";
+export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
+export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefer-ipc" | "prefer-websocket" | "force-quic" | "force-tcp" | "force-ipc" | "force-websocket";
 export type NnrpOperationId = bigint;
 export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
 export type NnrpOperationRef = NnrpOperationId | number;
-export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.websocket" | "transport.webtransport" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery";
+export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
     readonly code: string;

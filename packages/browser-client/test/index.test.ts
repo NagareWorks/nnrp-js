@@ -143,7 +143,7 @@ Deno.test("@nnrp/browser-client preserves discovered WebSocket provider behavior
 });
 
 Deno.test("@nnrp/browser-client opens a browser runtime and client session", async () => {
-  const runtime = await openBrowserRuntime({ moduleUrl: "/assets/nnrp.wasm", transportPolicy: "score" });
+  const runtime = await openBrowserRuntime({ moduleUrl: "/assets/nnrp.wasm", transportPolicy: "auto" });
   const client = runtime.connect({
     endpoint: "wss://example.test/nnrp",
     sessionDefaults: { inputProfile: "token", metadata: { app: "browser" } },
@@ -154,7 +154,7 @@ Deno.test("@nnrp/browser-client opens a browser runtime and client session", asy
   assertEquals(runtime.manifest.buildMode, "browser-wasm");
   assertEquals(runtime.artifact, undefined);
   assertEquals(client.endpoint, "wss://example.test/nnrp");
-  assertEquals(client.transportPolicy, "score");
+  assertEquals(client.transportPolicy, "auto");
   assertEquals(client.runtime, runtime);
   assertEquals(session.sessionId, "browser-session-1");
   assertEquals(session.options.inputProfile, "token");
@@ -204,7 +204,7 @@ Deno.test("@nnrp/browser-client validates runtime readiness before connect", () 
 });
 
 Deno.test("@nnrp/browser-client selects browser transport slots from local and peer manifests", async () => {
-  const runtime = await openBrowserRuntime({ transportPolicy: "score" });
+  const runtime = await openBrowserRuntime({ transportPolicy: "auto" });
   const summary = runtime.selectTransport({
     peerManifest: createCapabilityManifest({
       buildMode: "browser-wasm",
@@ -318,7 +318,7 @@ Deno.test("@nnrp/browser-client routes transport scoring through primitive candi
     }),
   });
 
-  assertEquals(seenPolicy, "score");
+  assertEquals(seenPolicy, "auto");
   assertEquals(seenCandidateKinds, ["websocket"]);
   assertEquals(summary.selected, "websocket");
 });

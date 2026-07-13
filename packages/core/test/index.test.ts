@@ -16,6 +16,8 @@ import {
   NnrpResultDropError,
   NnrpTimeoutError,
   NnrpTransportError,
+  type NnrpTransportKind,
+  type NnrpTransportPolicy,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
   normalizeCancelRequest,
@@ -28,6 +30,13 @@ import {
   validateEventPollOptions,
   validateSessionMetadata,
 } from "../src/index.ts";
+
+// @ts-expect-error Preview3 transport identifiers are not part of the Preview4 contract.
+const removedTransportKind: NnrpTransportKind = "webtransport";
+// @ts-expect-error Preview3 selection policies are not part of the Preview4 contract.
+const removedTransportPolicy: NnrpTransportPolicy = "score";
+void removedTransportKind;
+void removedTransportPolicy;
 
 Deno.test("@nnrp/core creates a backend native manifest", () => {
   const manifest = createBackendNativeManifest(["flow.update"]);
@@ -73,17 +82,14 @@ Deno.test("@nnrp/core rejects browser manifests with native transports", () => {
   assertEquals(error.diagnostic.code, "NNRP_CAPABILITY_BROWSER_TRANSPORT_FORBIDDEN");
 });
 
-Deno.test("@nnrp/core rejects native manifests with browser transport slots", () => {
-  const error = assertThrows(
-    () =>
-      createCapabilityManifest({
-        buildMode: "backend-native",
-        transports: ["websocket"],
-      }),
-    NnrpCapabilityError,
-  );
+Deno.test("@nnrp/core accepts all native carrier providers", () => {
+  const manifest = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: ["tcp", "quic", "ipc", "websocket"],
+    capabilities: ["transport.tcp", "transport.quic", "transport.ipc", "transport.websocket"],
+  });
 
-  assertEquals(error.diagnostic.code, "NNRP_CAPABILITY_NATIVE_TRANSPORT_FORBIDDEN");
+  assertEquals(manifest.transports, ["tcp", "quic", "ipc", "websocket"]);
 });
 
 Deno.test("@nnrp/core selects the highest scored mutually supported transport", () => {
@@ -94,19 +100,71 @@ Deno.test("@nnrp/core selects the highest scored mutually supported transport", 
   ]);
 
   assertEquals(selection.selected?.kind, "tcp");
-  assertEquals(selection.policy, "score");
+  assertEquals(selection.policy, "auto");
 });
 
-Deno.test("@nnrp/core applies transport policy filters", () => {
+Deno.test("@nnrp/core uses the frozen auto tie order for all carriers", () => {
+  const selection = selectTransport([
+    { kind: "websocket", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "tcp", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "ipc", peerSupported: true, localAvailable: true, score: 100 },
+  ]);
+
+  assertEquals(selection.selected?.kind, "ipc");
+  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["ipc", "quic", "tcp", "websocket"]);
+});
+
+Deno.test("@nnrp/core applies every preferred transport policy", () => {
+  const candidates = [
+    { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "tcp", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "ipc", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "websocket", peerSupported: true, localAvailable: true, score: 100 },
+  ] as const;
+
+  assertEquals(selectTransport(candidates, "prefer-quic").selected?.kind, "quic");
+  assertEquals(selectTransport(candidates, "prefer-tcp").selected?.kind, "tcp");
+  assertEquals(selectTransport(candidates, "prefer-ipc").selected?.kind, "ipc");
+  assertEquals(selectTransport(candidates, "prefer-websocket").selected?.kind, "websocket");
+});
+
+Deno.test("@nnrp/core preferred policies fall back when the preferred carrier is unavailable", () => {
   const selection = selectTransport(
     [
-      { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
-      { kind: "tcp", peerSupported: true, localAvailable: true, score: 10 },
+      { kind: "ipc", peerSupported: false, localAvailable: true, score: 100 },
+      { kind: "tcp", peerSupported: true, localAvailable: true, score: 80 },
+      { kind: "websocket", peerSupported: true, localAvailable: true, score: 70 },
     ],
-    "tcp-only",
+    "prefer-ipc",
   );
 
   assertEquals(selection.selected?.kind, "tcp");
+  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["ipc", "tcp", "websocket"]);
+});
+
+Deno.test("@nnrp/core applies every forced transport policy", () => {
+  const candidates = [
+    { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "tcp", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "ipc", peerSupported: true, localAvailable: true, score: 100 },
+    { kind: "websocket", peerSupported: true, localAvailable: true, score: 100 },
+  ] as const;
+
+  assertEquals(selectTransport(candidates, "force-quic").selected?.kind, "quic");
+  assertEquals(selectTransport(candidates, "force-tcp").selected?.kind, "tcp");
+  assertEquals(selectTransport(candidates, "force-ipc").selected?.kind, "ipc");
+  assertEquals(selectTransport(candidates, "force-websocket").selected?.kind, "websocket");
+});
+
+Deno.test("@nnrp/core reports no selected transport when a forced provider is unavailable", () => {
+  const selection = selectTransport(
+    [{ kind: "tcp", peerSupported: true, localAvailable: true, score: 100 }],
+    "force-ipc",
+  );
+
+  assertEquals(selection.selected, null);
+  assertEquals(selection.candidates[0]?.rejectionReason, "policy-rejected");
 });
 
 Deno.test("@nnrp/core creates transport candidates from local and peer manifests", () => {
@@ -136,7 +194,7 @@ Deno.test("@nnrp/core reports policy-rejected transport candidates", () => {
       { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
       { kind: "tcp", peerSupported: true, localAvailable: true, score: 10 },
     ],
-    "tcp-only",
+    "force-tcp",
   );
   const summary = createTransportSelectionSummary(selection);
 

@@ -368,7 +368,7 @@ async function openBackendRuntime(options: NnrpBackendRuntimeOptions = {}): Prom
         runtimeCapabilities,
       }),
     },
-    options.transportPolicy ?? "score",
+    options.transportPolicy ?? "auto",
     transportProviders,
   );
 }
@@ -381,7 +381,7 @@ class NnrpBackendRuntime {
 
   public constructor(
     binding: NnrpNativeRuntimeBinding,
-    transportPolicy: NnrpTransportPolicy = "score",
+    transportPolicy: NnrpTransportPolicy = "auto",
     transportProviders: readonly NnrpNativeTransportProvider[] = [],
   ) {
     this.#binding = binding;
@@ -680,25 +680,20 @@ function validateTransportProvidersForPolicy(
     });
   }
 
-  const kinds = new Set(providers.map((provider) => provider.kind));
-  if (policy === "tcp-only" && !kinds.has("tcp")) {
+  const forcedKind = forcedTransportKind(policy);
+  if (forcedKind !== undefined && !providers.some((provider) => provider.kind === forcedKind)) {
     throw new NnrpTransportError({
       code: "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED",
-      message: "tcp-only transport policy requires an installed or explicit TCP provider.",
+      message: `${policy} transport policy requires an installed or explicit ${forcedKind} provider.`,
       source: "transport",
       retryable: false,
-      transport: "tcp",
+      transport: forcedKind,
     });
   }
-  if (policy === "quic-only" && !kinds.has("quic")) {
-    throw new NnrpTransportError({
-      code: "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED",
-      message: "quic-only transport policy requires an installed or explicit QUIC provider.",
-      source: "transport",
-      retryable: false,
-      transport: "quic",
-    });
-  }
+}
+
+function forcedTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | undefined {
+  return policy.startsWith("force-") ? policy.slice("force-".length) as NnrpTransportKind : undefined;
 }
 
 export interface NnrpClientState {

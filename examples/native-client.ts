@@ -6,7 +6,7 @@ const client = await openNativeClient({
   endpoint: "127.0.0.1:4433",
   nativeLibrary: { artifactDir: "./native" },
   transports: [createTcpTransportProvider(), createQuicTransportProvider()],
-  transportPolicy: "score",
+  transportPolicy: "auto",
   sessionDefaults: { inputProfile: "tensor", metadata: { app: "nnrp-native-client-example" } },
 });
 

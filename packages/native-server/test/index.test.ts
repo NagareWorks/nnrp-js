@@ -9,14 +9,14 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
     env: {},
     platform: "linux",
     arch: "x64",
-    transportPolicy: "tcp-only",
+    transportPolicy: "force-tcp",
     transports: [createTcpTransportProvider(), createQuicTransportProvider({ native: fakeQuicNativeBinding() })],
   });
-  const server = runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "quic-only" });
+  const server = runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "force-quic" });
 
   assertEquals(runtime.libraryPath, "native/linux-x86_64/libnnrp_ffi.so");
   assertEquals(server.endpoint, "0.0.0.0:4433");
-  assertEquals(server.transportPolicy, "quic-only");
+  assertEquals(server.transportPolicy, "force-quic");
 
   await runtime.close();
   assertEquals(server.closed, true);
@@ -60,7 +60,7 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
   });
 
   const error = assertThrows(
-    () => runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "quic-only" }),
+    () => runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "force-quic" }),
     NnrpTransportError,
   );
 

@@ -4,7 +4,7 @@ import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 const runtime = await openBrowserRuntime({
   moduleUrl: "/assets/nnrp_wasm_bg.wasm",
   transportProviders: [createWebSocketTransportProvider()],
-  transportPolicy: "score",
+  transportPolicy: "auto",
 });
 
 const client = runtime.connect({

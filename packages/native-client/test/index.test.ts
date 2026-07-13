@@ -104,7 +104,7 @@ Deno.test("@nnrp/native-client rejects policy mismatches at connect time", async
         platform: "linux",
         arch: "x64",
         transports: [createTcpTransportProvider()],
-        transportPolicy: "quic-only",
+        transportPolicy: "force-quic",
       }),
     NnrpTransportError,
   );

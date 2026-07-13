@@ -191,7 +191,7 @@ export async function openBrowserRuntime(options: NnrpWasmRuntimeOptions = {}): 
   const transportProviders = options.transportProviders ?? await discoverBrowserTransportProviders();
   return new NnrpBrowserRuntime(
     createWasmRuntimeBinding({ ...options, transportProviders }),
-    options.transportPolicy ?? "score",
+    options.transportPolicy ?? "auto",
   );
 }
 
@@ -200,7 +200,7 @@ export class NnrpBrowserRuntime {
   readonly #transportPolicy: NnrpTransportPolicy;
   #closed = false;
 
-  public constructor(binding: NnrpWasmRuntimeBinding, transportPolicy: NnrpTransportPolicy = "score") {
+  public constructor(binding: NnrpWasmRuntimeBinding, transportPolicy: NnrpTransportPolicy = "auto") {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
   }

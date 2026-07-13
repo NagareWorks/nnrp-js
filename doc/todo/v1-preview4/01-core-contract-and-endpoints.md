@@ -3,30 +3,31 @@
 ## Protocol Contract
 
 - [ ] Replace the Preview3 protocol constants with Preview4 constants.
-  - [ ] Set the protocol version claim to `nnrp-1-preview4`.
+  - [x] Keep the public NNRP/1 protocol version claim at `1.0.0`; `nnrp-1-preview4` remains a conformance target
+        identifier.
   - [ ] Add every frozen control, runtime-object, cache, recoverable-error, and retry message type.
   - [ ] Preserve the existing NNRP/1 `CacheInvalidate` message as the cache invalidation frame.
   - [ ] Remove message aliases that exist only for an older preview.
 - [ ] Add every frozen capability token.
   - [ ] Add control capability tokens exactly as emitted by Rust Preview4.
   - [ ] Add runtime-object and cache capability tokens exactly as emitted by Rust Preview4.
-  - [ ] Add `tcp`, `quic`, `ipc`, and `websocket` transport capability tokens.
+  - [x] Add `tcp`, `quic`, `ipc`, and `websocket` transport capability tokens.
   - [ ] Reject unknown built-in tokens while preserving extension-token validation rules.
 
 ## Transport Types and Selection
 
-- [ ] Replace the transport type union.
-  - [ ] Set `NnrpTransportKind` to `tcp | quic | ipc | websocket`.
-  - [ ] Remove `webtransport` from types, manifests, fixtures, and diagnostics.
-- [ ] Replace the transport policy union.
-  - [ ] Add `auto`.
-  - [ ] Add `prefer-quic`, `prefer-tcp`, `prefer-ipc`, and `prefer-websocket`.
-  - [ ] Add `force-quic`, `force-tcp`, `force-ipc`, and `force-websocket`.
-  - [ ] Remove `score`, `tcp-only`, and `quic-only` policy values.
+- [x] Replace the transport type union.
+  - [x] Set `NnrpTransportKind` to `tcp | quic | ipc | websocket`.
+  - [x] Remove `webtransport` from types, manifests, fixtures, and diagnostics.
+- [x] Replace the transport policy union.
+  - [x] Add `auto`.
+  - [x] Add `prefer-quic`, `prefer-tcp`, `prefer-ipc`, and `prefer-websocket`.
+  - [x] Add `force-quic`, `force-tcp`, `force-ipc`, and `force-websocket`.
+  - [x] Remove `score`, `tcp-only`, and `quic-only` policy values.
 - [ ] Implement deterministic selection.
-  - [ ] Select the only installed and compatible provider without probing unrelated packages.
-  - [ ] Probe all installed compatible providers for `auto` and `prefer-*`.
-  - [ ] Reject a missing or incompatible forced provider without fallback.
+  - [x] Select the only installed and compatible provider without probing unrelated packages.
+  - [x] Probe all installed compatible providers for `auto` and `prefer-*`.
+  - [x] Reject a missing or incompatible forced provider without fallback.
   - [ ] Return ordered candidate diagnostics with availability, score, cost, limit, and rejection reason.
 
 ## Endpoint Model
@@ -45,17 +46,17 @@
 ## Public Types and Tests
 
 - [ ] Publish exact Preview4 public types from `@nnrp/core`.
-  - [ ] Update capability manifests and provider contracts.
+  - [x] Update capability manifests and provider contracts.
   - [ ] Update selection options, candidate diagnostics, and endpoint resolution results.
-  - [ ] Update public API snapshots without old-preview aliases.
+  - [x] Update public API snapshots without old-preview aliases.
 - [ ] Add contract tests.
-  - [ ] Cover every transport kind and policy.
-  - [ ] Cover single-provider, multi-provider, preference, and force behavior.
+  - [x] Cover every transport kind and policy.
+  - [x] Cover single-provider, multi-provider, preference, and force behavior.
   - [ ] Cover application and provider endpoint validation.
   - [ ] Cover capability token serialization and rejection.
 
 ## Acceptance Evidence
 
-- [ ] Core unit tests cover every enum member and policy branch.
-- [ ] Type tests prove removed Preview3 values do not compile.
-- [ ] Public API snapshots match the frozen JavaScript core and transport pages in `nnrp-doc`.
+- [x] Core unit tests cover every enum member and policy branch.
+- [x] Type tests prove removed Preview3 values do not compile.
+- [x] Public API snapshots match the frozen JavaScript core and transport pages in `nnrp-doc`.
