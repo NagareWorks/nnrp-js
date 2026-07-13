@@ -899,54 +899,54 @@ export class NnrpClientSession {
   }
 
   public cancel(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Cancel, metadata, diagnostic);
+    return this.#sendControl(NnrpMessageType.Cancel, metadata, diagnostic);
   }
 
   public abort(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Abort, metadata, diagnostic);
+    return this.#sendControl(NnrpMessageType.Abort, metadata, diagnostic);
   }
 
   public updatePriority(metadata: SchedulingMetadata): Promise<void> {
-    return this.sendControl(NnrpMessageType.PriorityUpdate, metadata);
+    return this.#sendControl(NnrpMessageType.PriorityUpdate, metadata);
   }
 
   public updateDeadline(metadata: SchedulingMetadata): Promise<void> {
-    return this.sendControl(NnrpMessageType.Deadline, metadata);
+    return this.#sendControl(NnrpMessageType.Deadline, metadata);
   }
 
   public expireAt(metadata: SchedulingMetadata): Promise<void> {
-    return this.sendControl(NnrpMessageType.ExpireAt, metadata);
+    return this.#sendControl(NnrpMessageType.ExpireAt, metadata);
   }
 
   public supersede(metadata: SupersedeMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Supersede, metadata, diagnostic);
+    return this.#sendControl(NnrpMessageType.Supersede, metadata, diagnostic);
   }
 
   public updateBudget(metadata: BudgetMetadata): Promise<void> {
-    return this.sendControl(NnrpMessageType.BudgetUpdate, metadata);
+    return this.#sendControl(NnrpMessageType.BudgetUpdate, metadata);
   }
 
   public negotiateCapabilities(metadata: CapabilityMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.CapabilityNegotiation, metadata, body);
+    return this.#sendControl(NnrpMessageType.CapabilityNegotiation, metadata, body);
   }
 
   public degradeProfile(metadata: CapabilityMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.DegradeProfile, metadata, body);
+    return this.#sendControl(NnrpMessageType.DegradeProfile, metadata, body);
   }
 
   public sendRouteHint(metadata: RouteHintMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.RouteHint, metadata, body);
+    return this.#sendControl(NnrpMessageType.RouteHint, metadata, body);
   }
 
   public sendExecutionHint(metadata: RouteHintMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.ExecutionHint, metadata, body);
+    return this.#sendControl(NnrpMessageType.ExecutionHint, metadata, body);
   }
 
   public sendTraceContext(metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.TraceContext, metadata, body);
+    return this.#sendControl(NnrpMessageType.TraceContext, metadata, body);
   }
 
-  public sendControl(
+  #sendControl(
     messageType: NnrpMessageType,
     metadata: RuntimeControlMetadata,
     tail: Uint8Array = EMPTY_PAYLOAD,

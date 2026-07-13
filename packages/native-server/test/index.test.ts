@@ -5,14 +5,13 @@ import {
   ErrorScope,
   MemoryLocationHint,
   NnrpMessageType,
-  NnrpProtocolError,
   NnrpTransportError,
   ObjectReleaseReason,
   OwnershipHint,
   RuntimeObjectKind,
   RuntimeRole,
 } from "@nnrp/core";
-import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
+import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { openBackendRuntime } from "../src/index.ts";
 import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
@@ -249,19 +248,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   ]);
   assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 16 }, (_, index) => index + 1));
 
-  const error = await assertRejects(
-    () =>
-      session.sendControl(NnrpMessageType.Cancel, {
-        operationId: 1n,
-        controlSequence: 2n,
-        reasonCode: 3,
-        sourceRole: RuntimeRole.Client,
-        flags: 0,
-        diagnosticBytes: 0,
-      }),
-    NnrpProtocolError,
-  );
-  assertEquals(error.diagnostic.code, "NNRP_SERVER_RUNTIME_MESSAGE_DIRECTION_INVALID");
+  assertEquals("sendControl" in session, false);
 });
 
 function fakeQuicNativeBinding(): NnrpQuicNativeBinding {

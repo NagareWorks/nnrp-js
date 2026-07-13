@@ -756,7 +756,7 @@ Deno.test("@nnrp/browser-client awaits submit capacity and rejects no-wait when 
   assertEquals(submitted, [41]);
 });
 
-Deno.test("@nnrp/browser-client rejects server-only runtime controls", async () => {
+Deno.test("@nnrp/browser-client keeps the coarse runtime frame primitive internal", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
       sendRuntimeFrame: () => {},
@@ -764,20 +764,7 @@ Deno.test("@nnrp/browser-client rejects server-only runtime controls", async () 
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
-  const error = await assertRejects(
-    () =>
-      session.sendControl(NnrpMessageType.Progress, {
-        operationId: 12n,
-        progressSequence: 1n,
-        stageCode: 1,
-        percentX100: 5000,
-        objectId: 0n,
-        bodyBytes: 0,
-      }),
-    NnrpProtocolError,
-  );
-
-  assertEquals(error.diagnostic.code, "NNRP_CLIENT_RUNTIME_MESSAGE_DIRECTION_INVALID");
+  assertEquals("sendControl" in session, false);
 });
 
 Deno.test("@nnrp/browser-client rejects duplicate terminal events and clears frames on close", async () => {
