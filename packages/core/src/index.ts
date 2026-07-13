@@ -35,7 +35,61 @@ export type NnrpCapability =
   | "result.hint"
   | "cache"
   | "schema"
-  | "recovery";
+  | "recovery"
+  | "control.cancel_abort"
+  | "control.supersede"
+  | "control.priority_update"
+  | "control.deadline_expire"
+  | "control.progress_partial"
+  | "control.credit_backpressure"
+  | "control.capability_costs"
+  | "control.route_execution_hint"
+  | "control.trace_context"
+  | "control.result_drop_reason"
+  | "control.degrade_profile"
+  | "control.budget_update"
+  | "control.recoverable_error"
+  | "control.retry_after"
+  | "object.lifecycle"
+  | "object.delta"
+  | "object.cost"
+  | "object.ownership"
+  | "cache.reference";
+
+const NNRP_CAPABILITY_TOKENS = new Set<NnrpCapability>([
+  "client.session",
+  "server.session",
+  "native.loader",
+  "wasm.loader",
+  "transport.tcp",
+  "transport.quic",
+  "transport.ipc",
+  "transport.websocket",
+  "flow.update",
+  "result.hint",
+  "cache",
+  "schema",
+  "recovery",
+  "control.cancel_abort",
+  "control.supersede",
+  "control.priority_update",
+  "control.deadline_expire",
+  "control.progress_partial",
+  "control.credit_backpressure",
+  "control.capability_costs",
+  "control.route_execution_hint",
+  "control.trace_context",
+  "control.result_drop_reason",
+  "control.degrade_profile",
+  "control.budget_update",
+  "control.recoverable_error",
+  "control.retry_after",
+  "object.lifecycle",
+  "object.delta",
+  "object.cost",
+  "object.ownership",
+  "cache.reference",
+]);
 
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 
@@ -1242,6 +1296,18 @@ function normalizeBinaryPayload(payload: NnrpBinaryPayload, copyPayload: boolean
 function validateCapabilityManifestOptions(options: NnrpCapabilityManifestOptions): void {
   const transports = options.transports ?? [];
   const capabilities = options.capabilities ?? [];
+
+  const unknownCapability = (capabilities as readonly string[]).find(
+    (capability) => !NNRP_CAPABILITY_TOKENS.has(capability as NnrpCapability),
+  );
+  if (unknownCapability !== undefined) {
+    throw new NnrpCapabilityError({
+      code: "NNRP_CAPABILITY_UNKNOWN",
+      message: `Capability manifest contains an unknown NNRP/1 capability token: ${unknownCapability}.`,
+      source: "core",
+      retryable: false,
+    });
+  }
 
   if (options.buildMode === "browser-wasm") {
     if (capabilities.includes("server.session") || capabilities.includes("native.loader")) {

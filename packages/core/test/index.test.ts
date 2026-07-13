@@ -33,6 +33,31 @@ import {
   validateSessionMetadata,
 } from "../src/index.ts";
 
+const PREVIEW4_CONTROL_CAPABILITIES = [
+  "control.cancel_abort",
+  "control.supersede",
+  "control.priority_update",
+  "control.deadline_expire",
+  "control.progress_partial",
+  "control.credit_backpressure",
+  "control.capability_costs",
+  "control.route_execution_hint",
+  "control.trace_context",
+  "control.result_drop_reason",
+  "control.degrade_profile",
+  "control.budget_update",
+  "control.recoverable_error",
+  "control.retry_after",
+] as const;
+
+const PREVIEW4_OBJECT_CAPABILITIES = [
+  "object.lifecycle",
+  "object.delta",
+  "object.cost",
+  "object.ownership",
+  "cache.reference",
+] as const;
+
 // @ts-expect-error Preview3 transport identifiers are not part of the Preview4 contract.
 const removedTransportKind: NnrpTransportKind = "webtransport";
 // @ts-expect-error Preview3 selection policies are not part of the Preview4 contract.
@@ -92,6 +117,32 @@ Deno.test("@nnrp/core accepts all native carrier providers", () => {
   });
 
   assertEquals(manifest.transports, ["tcp", "quic", "ipc", "websocket"]);
+});
+
+Deno.test("@nnrp/core serializes every frozen Preview4 capability token", () => {
+  const capabilities = [...PREVIEW4_CONTROL_CAPABILITIES, ...PREVIEW4_OBJECT_CAPABILITIES];
+  const manifest = createCapabilityManifest({
+    buildMode: "backend-native",
+    capabilities,
+  });
+
+  assertEquals(manifest.capabilities, capabilities);
+});
+
+Deno.test("@nnrp/core rejects capability tokens outside the frozen catalog", () => {
+  const error = assertThrows(
+    () =>
+      createCapabilityManifest(
+        {
+          buildMode: "backend-native",
+          capabilities: ["control.private_extension"],
+        } as unknown as Parameters<typeof createCapabilityManifest>[0],
+      ),
+    NnrpCapabilityError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_CAPABILITY_UNKNOWN");
+  assertEquals(error.diagnostic.message.includes("control.private_extension"), true);
 });
 
 Deno.test("@nnrp/core selects the highest scored mutually supported transport", () => {

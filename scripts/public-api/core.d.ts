@@ -6,7 +6,7 @@ export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefe
 export type NnrpOperationId = bigint;
 export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
 export type NnrpOperationRef = NnrpOperationId | number;
-export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery";
+export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "control.retry_after" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
     readonly code: string;

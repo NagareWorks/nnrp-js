@@ -8,11 +8,11 @@
   - [ ] Add every frozen control, runtime-object, cache, recoverable-error, and retry message type.
   - [ ] Preserve the existing NNRP/1 `CacheInvalidate` message as the cache invalidation frame.
   - [ ] Remove message aliases that exist only for an older preview.
-- [ ] Add every frozen capability token.
-  - [ ] Add control capability tokens exactly as emitted by Rust Preview4.
-  - [ ] Add runtime-object and cache capability tokens exactly as emitted by Rust Preview4.
+- [x] Add every frozen capability token.
+  - [x] Add control capability tokens exactly as emitted by Rust Preview4.
+  - [x] Add runtime-object and cache capability tokens exactly as emitted by Rust Preview4.
   - [x] Add `tcp`, `quic`, `ipc`, and `websocket` transport capability tokens.
-  - [ ] Reject unknown built-in tokens while preserving extension-token validation rules.
+  - [x] Reject tokens outside the frozen NNRP/1 capability catalog.
 
 ## Transport Types and Selection
 
@@ -53,7 +53,7 @@
   - [x] Cover every transport kind and policy.
   - [x] Cover single-provider, multi-provider, preference, and force behavior.
   - [x] Cover application and provider endpoint validation.
-  - [ ] Cover capability token serialization and rejection.
+  - [x] Cover capability token serialization and rejection.
 
 ## Acceptance Evidence
 
