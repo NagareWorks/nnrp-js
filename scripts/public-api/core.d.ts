@@ -129,6 +129,75 @@ export declare enum CacheMissReason {
     LeaseRequired = 6,
     PermissionDenied = 7
 }
+export interface ObjectDescriptorMetadata {
+    readonly objectId: bigint;
+    readonly objectKind: RuntimeObjectKind;
+    readonly producerRole: RuntimeRole;
+    readonly consumerRole: RuntimeRole;
+    readonly sessionId: number;
+    readonly byteSize: bigint;
+    readonly computeCostUnits: number;
+    readonly memoryLocationHint: MemoryLocationHint;
+    readonly ownershipHint: OwnershipHint;
+    readonly lifetimeHintMs: number;
+    readonly metadataBytes: number;
+}
+export interface ObjectReferenceMetadata {
+    readonly objectId: bigint;
+    readonly operationId: bigint;
+    readonly objectVersion: bigint;
+    readonly offset: bigint;
+    readonly length: bigint;
+    readonly flags: number;
+    readonly metadataBytes: number;
+}
+export interface ObjectReleaseMetadata {
+    readonly objectId: bigint;
+    readonly operationId: bigint;
+    readonly releaseReason: ObjectReleaseReason;
+    readonly sourceRole: RuntimeRole;
+    readonly flags: number;
+    readonly diagnosticBytes: number;
+}
+export interface ObjectDeltaMetadata {
+    readonly objectId: bigint;
+    readonly deltaSequence: bigint;
+    readonly regionOffset: bigint;
+    readonly regionBytes: number;
+    readonly deltaBytes: number;
+    readonly flags: number;
+    readonly metadataBytes: number;
+}
+export interface CacheReferenceMetadata {
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
+    readonly profileId: number;
+    readonly reuseScope: CacheReuseScope;
+    readonly leaseId: bigint;
+    readonly producerTraceId: bigint;
+    readonly expirationHintMs: number;
+    readonly metadataBytes: number;
+    readonly flags: number;
+}
+export interface CacheMissMetadata {
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
+    readonly missReason: CacheMissReason;
+    readonly profileId: number;
+    readonly diagnosticBytes: number;
+}
+export type RuntimeObjectMetadata = ObjectDescriptorMetadata | ObjectReferenceMetadata | ObjectReleaseMetadata | ObjectDeltaMetadata | CacheReferenceMetadata | CacheMissMetadata;
+export interface DecodedRuntimeObjectMetadata {
+    readonly metadata: RuntimeObjectMetadata;
+    readonly tail: Uint8Array;
+}
+export interface CacheInvalidateMetadata {
+    readonly invalidateScope: number;
+    readonly cacheNamespace: number;
+    readonly cacheKeyHi: number;
+    readonly cacheKeyLo: number;
+    readonly reasonCode: number;
+}
 export interface ControlRequestMetadata {
     readonly operationId: bigint;
     readonly controlSequence: bigint;
@@ -549,6 +618,10 @@ export declare class NnrpProtocolError extends NnrpError {
 }
 export declare function encodeRuntimeControlMetadata(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Uint8Array;
 export declare function decodeRuntimeControlMetadata(messageType: NnrpMessageType, payload: Uint8Array): DecodedRuntimeControlMetadata;
+export declare function encodeRuntimeObjectMetadata(messageType: NnrpMessageType, metadata: RuntimeObjectMetadata, tail?: Uint8Array): Uint8Array;
+export declare function decodeRuntimeObjectMetadata(messageType: NnrpMessageType, payload: Uint8Array): DecodedRuntimeObjectMetadata;
+export declare function encodeCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): Uint8Array;
+export declare function decodeCacheInvalidateMetadata(payload: Uint8Array): CacheInvalidateMetadata;
 export declare class NnrpResultDropError extends NnrpProtocolError {
     readonly frameId: number;
     readonly sessionId?: string;

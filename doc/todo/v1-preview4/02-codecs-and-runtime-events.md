@@ -21,12 +21,12 @@
 ## Object and Cache Codecs
 
 - [ ] Implement encode/decode/validation for every frozen object/cache metadata type.
-  - [ ] `ObjectDescriptorMetadata`.
-  - [ ] `ObjectReferenceMetadata`.
-  - [ ] `ObjectReleaseMetadata`.
-  - [ ] `ObjectDeltaMetadata` for `ObjectPatch` and `ObjectDelta`.
-  - [ ] `CacheReferenceMetadata` and `CacheMissMetadata`.
-  - [ ] `CacheInvalidateMetadata` with scope, namespace, key, and reason fields.
+  - [x] `ObjectDescriptorMetadata`.
+  - [x] `ObjectReferenceMetadata`.
+  - [x] `ObjectReleaseMetadata`.
+  - [x] `ObjectDeltaMetadata` for `ObjectPatch` and `ObjectDelta`.
+  - [x] `CacheReferenceMetadata` and `CacheMissMetadata`.
+  - [x] `CacheInvalidateMetadata` with scope, namespace, key, and reason fields.
   - [ ] Local `CacheLease` validation with object, owner, grant, and TTL fields.
 - [x] Add every frozen runtime enum and numeric mapping.
   - [x] Object kind and runtime role.

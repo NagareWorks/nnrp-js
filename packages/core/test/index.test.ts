@@ -1,5 +1,6 @@
 import { assertEquals, assertInstanceOf, assertNotStrictEquals, assertThrows } from "jsr:@std/assert@1";
 import {
+  type CacheInvalidateMetadata,
   CacheMissReason,
   CacheReuseScope,
   createBackendNativeManifest,
@@ -10,8 +11,12 @@ import {
   createSchemaDescriptor,
   createTransportCandidates,
   createTransportSelectionSummary,
+  decodeCacheInvalidateMetadata,
   decodeRuntimeControlMetadata,
+  decodeRuntimeObjectMetadata,
+  encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
+  encodeRuntimeObjectMetadata,
   ErrorScope,
   isStandardInputProfile,
   MemoryLocationHint,
@@ -38,6 +43,7 @@ import {
   resolveProviderEndpoint,
   type RuntimeControlMetadata,
   RuntimeObjectKind,
+  type RuntimeObjectMetadata,
   RuntimeRole,
   selectTransport,
   throwIfResultDrop,
@@ -617,7 +623,289 @@ Deno.test("@nnrp/core owns encoded and decoded runtime control tails", () => {
   assertEquals(decoded.tail, new Uint8Array([0x41, 0x42]));
 });
 
+const RUNTIME_OBJECT_CODEC_CASES: readonly {
+  readonly messageTypes: readonly NnrpMessageType[];
+  readonly metadata: RuntimeObjectMetadata;
+  readonly fixedLength: number;
+  readonly tail: Uint8Array;
+}[] = [
+  {
+    messageTypes: [NnrpMessageType.ObjectDeclare],
+    metadata: {
+      objectId: 1n,
+      objectKind: RuntimeObjectKind.Tensor,
+      producerRole: RuntimeRole.Runtime,
+      consumerRole: RuntimeRole.Client,
+      sessionId: 2,
+      byteSize: 3n,
+      computeCostUnits: 4,
+      memoryLocationHint: MemoryLocationHint.DeviceMemory,
+      ownershipHint: OwnershipHint.TransferOnRef,
+      lifetimeHintMs: 5,
+      metadataBytes: 2,
+    },
+    fixedLength: 48,
+    tail: new Uint8Array([0x51, 0x52]),
+  },
+  {
+    messageTypes: [NnrpMessageType.ObjectRef],
+    metadata: {
+      objectId: 6n,
+      operationId: 7n,
+      objectVersion: 8n,
+      offset: 9n,
+      length: 10n,
+      flags: 0x07,
+      metadataBytes: 1,
+    },
+    fixedLength: 48,
+    tail: new Uint8Array([0x53]),
+  },
+  {
+    messageTypes: [NnrpMessageType.ObjectRelease],
+    metadata: {
+      objectId: 11n,
+      operationId: 12n,
+      releaseReason: ObjectReleaseReason.Completed,
+      sourceRole: RuntimeRole.Server,
+      flags: 0x03,
+      diagnosticBytes: 2,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x54, 0x55]),
+  },
+  {
+    messageTypes: [NnrpMessageType.ObjectPatch, NnrpMessageType.ObjectDelta],
+    metadata: {
+      objectId: 13n,
+      deltaSequence: 14n,
+      regionOffset: 15n,
+      regionBytes: 16,
+      deltaBytes: 3,
+      flags: 0x07,
+      metadataBytes: 2,
+    },
+    fixedLength: 40,
+    tail: new Uint8Array([0x56, 0x57, 0x58, 0x59, 0x5a]),
+  },
+  {
+    messageTypes: [NnrpMessageType.CacheReference],
+    metadata: {
+      cacheKeyHi: 17n,
+      cacheKeyLo: 18n,
+      profileId: 19,
+      reuseScope: CacheReuseScope.Session,
+      leaseId: 20n,
+      producerTraceId: 21n,
+      expirationHintMs: 22,
+      metadataBytes: 1,
+      flags: 0x03,
+    },
+    fixedLength: 48,
+    tail: new Uint8Array([0x5b]),
+  },
+  {
+    messageTypes: [NnrpMessageType.CacheMiss],
+    metadata: {
+      cacheKeyHi: 23n,
+      cacheKeyLo: 24n,
+      missReason: CacheMissReason.NotFound,
+      profileId: 25,
+      diagnosticBytes: 2,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x5c, 0x5d]),
+  },
+];
+
+Deno.test("@nnrp/core round-trips every Preview4 runtime object metadata layout", () => {
+  for (const testCase of RUNTIME_OBJECT_CODEC_CASES) {
+    for (const messageType of testCase.messageTypes) {
+      const encoded = encodeRuntimeObjectMetadata(messageType, testCase.metadata, testCase.tail);
+      const decoded = decodeRuntimeObjectMetadata(messageType, encoded);
+
+      assertEquals(encoded.byteLength, testCase.fixedLength + testCase.tail.byteLength);
+      assertEquals(decoded.metadata, testCase.metadata);
+      assertEquals(decoded.tail, testCase.tail);
+    }
+  }
+});
+
+Deno.test("@nnrp/core uses frozen little-endian runtime object offsets", () => {
+  const descriptor = encodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectDeclare,
+    {
+      objectId: 0x0102_0304_0506_0708n,
+      objectKind: RuntimeObjectKind.ImageTile,
+      producerRole: RuntimeRole.Runtime,
+      consumerRole: RuntimeRole.Client,
+      sessionId: 0x1112_1314,
+      byteSize: 0x2122_2324_2526_2728n,
+      computeCostUnits: 0x3132_3334,
+      memoryLocationHint: MemoryLocationHint.DeviceMemory,
+      ownershipHint: OwnershipHint.ConsumerOwned,
+      lifetimeHintMs: 0x4142_4344,
+      metadataBytes: 1,
+    },
+    new Uint8Array([0x61]),
+  );
+  const descriptorView = new DataView(descriptor.buffer);
+  assertEquals(descriptorView.getBigUint64(0, true), 0x0102_0304_0506_0708n);
+  assertEquals(descriptorView.getUint16(8, true), RuntimeObjectKind.ImageTile);
+  assertEquals(descriptorView.getUint8(10), RuntimeRole.Runtime);
+  assertEquals(descriptorView.getUint8(11), RuntimeRole.Client);
+  assertEquals(descriptorView.getUint32(12, true), 0x1112_1314);
+  assertEquals(descriptorView.getBigUint64(16, true), 0x2122_2324_2526_2728n);
+  assertEquals(descriptorView.getUint32(24, true), 0x3132_3334);
+  assertEquals(descriptorView.getUint16(28, true), MemoryLocationHint.DeviceMemory);
+  assertEquals(descriptorView.getUint16(30, true), OwnershipHint.ConsumerOwned);
+  assertEquals(descriptorView.getUint32(32, true), 0x4142_4344);
+  assertEquals(descriptorView.getUint32(36, true), 1);
+  assertEquals(descriptorView.getBigUint64(40, true), 0n);
+  assertEquals(descriptor[48], 0x61);
+
+  const cacheReference = encodeRuntimeObjectMetadata(
+    NnrpMessageType.CacheReference,
+    RUNTIME_OBJECT_CODEC_CASES[4].metadata,
+    RUNTIME_OBJECT_CODEC_CASES[4].tail,
+  );
+  const cacheView = new DataView(cacheReference.buffer);
+  assertEquals(cacheView.getBigUint64(20, true), 20n);
+  assertEquals(cacheView.getBigUint64(28, true), 21n);
+  assertEquals(cacheView.getUint32(44, true), 0x03);
+});
+
+Deno.test("@nnrp/core enforces runtime object metadata and tail contracts", () => {
+  const descriptor = RUNTIME_OBJECT_CODEC_CASES[0];
+  assertRuntimeObjectError(
+    () => encodeRuntimeObjectMetadata(NnrpMessageType.ObjectDeclare, RUNTIME_OBJECT_CODEC_CASES[1].metadata),
+    "NNRP_OBJECT_METADATA_MISMATCH",
+  );
+  assertRuntimeObjectError(
+    () => encodeRuntimeObjectMetadata(NnrpMessageType.ObjectDeclare, descriptor.metadata, new Uint8Array([1])),
+    "NNRP_OBJECT_TAIL_LENGTH_INVALID",
+  );
+  assertRuntimeObjectError(
+    () => encodeRuntimeObjectMetadata(NnrpMessageType.ClientHello, descriptor.metadata, descriptor.tail),
+    "NNRP_OBJECT_MESSAGE_UNSUPPORTED",
+  );
+  assertRuntimeObjectError(
+    () => decodeRuntimeObjectMetadata(NnrpMessageType.ObjectRef, new Uint8Array(47)),
+    "NNRP_OBJECT_METADATA_TRUNCATED",
+  );
+
+  const nonZeroReserved = encodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectRelease,
+    RUNTIME_OBJECT_CODEC_CASES[2].metadata,
+    RUNTIME_OBJECT_CODEC_CASES[2].tail,
+  );
+  nonZeroReserved[24] = 1;
+  assertRuntimeObjectError(
+    () => decodeRuntimeObjectMetadata(NnrpMessageType.ObjectRelease, nonZeroReserved),
+    "NNRP_OBJECT_RESERVED_NONZERO",
+  );
+
+  const truncatedDeltaTail = encodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectDelta,
+    RUNTIME_OBJECT_CODEC_CASES[3].metadata,
+    RUNTIME_OBJECT_CODEC_CASES[3].tail,
+  ).slice(0, -1);
+  assertRuntimeObjectError(
+    () => decodeRuntimeObjectMetadata(NnrpMessageType.ObjectDelta, truncatedDeltaTail),
+    "NNRP_OBJECT_TAIL_LENGTH_INVALID",
+  );
+});
+
+Deno.test("@nnrp/core rejects reserved runtime object values and accepts private enums", () => {
+  assertRuntimeObjectError(
+    () =>
+      encodeRuntimeObjectMetadata(NnrpMessageType.ObjectDeclare, {
+        ...(RUNTIME_OBJECT_CODEC_CASES[0].metadata as unknown as Record<string, unknown>),
+        objectId: 1 as unknown as bigint,
+      } as unknown as RuntimeObjectMetadata, RUNTIME_OBJECT_CODEC_CASES[0].tail),
+    "NNRP_OBJECT_INTEGER_INVALID",
+  );
+  assertRuntimeObjectError(
+    () =>
+      encodeRuntimeObjectMetadata(NnrpMessageType.ObjectRef, {
+        ...(RUNTIME_OBJECT_CODEC_CASES[1].metadata as unknown as Record<string, unknown>),
+        flags: 0x08,
+      } as unknown as RuntimeObjectMetadata, RUNTIME_OBJECT_CODEC_CASES[1].tail),
+    "NNRP_OBJECT_FLAGS_INVALID",
+  );
+  assertRuntimeObjectError(
+    () =>
+      encodeRuntimeObjectMetadata(NnrpMessageType.CacheMiss, {
+        ...(RUNTIME_OBJECT_CODEC_CASES[5].metadata as unknown as Record<string, unknown>),
+        missReason: 0x0008,
+      } as unknown as RuntimeObjectMetadata, RUNTIME_OBJECT_CODEC_CASES[5].tail),
+    "NNRP_OBJECT_ENUM_INVALID",
+  );
+
+  const privateDescriptor = {
+    ...(RUNTIME_OBJECT_CODEC_CASES[0].metadata as unknown as Record<string, unknown>),
+    objectKind: 0x8000,
+    producerRole: 0x80,
+    memoryLocationHint: 0x8001,
+    ownershipHint: 0xffff,
+  } as unknown as RuntimeObjectMetadata;
+  const decoded = decodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectDeclare,
+    encodeRuntimeObjectMetadata(NnrpMessageType.ObjectDeclare, privateDescriptor, RUNTIME_OBJECT_CODEC_CASES[0].tail),
+  );
+  assertEquals(decoded.metadata, privateDescriptor);
+});
+
+Deno.test("@nnrp/core owns encoded and decoded runtime object tails", () => {
+  const sourceTail = new Uint8Array([0x71, 0x72]);
+  const encoded = encodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectDeclare,
+    RUNTIME_OBJECT_CODEC_CASES[0].metadata,
+    sourceTail,
+  );
+  sourceTail[0] = 0xff;
+  assertEquals(encoded.slice(48), new Uint8Array([0x71, 0x72]));
+
+  const decoded = decodeRuntimeObjectMetadata(NnrpMessageType.ObjectDeclare, encoded);
+  assertNotStrictEquals(decoded.tail.buffer, encoded.buffer);
+  encoded[48] = 0xee;
+  assertEquals(decoded.tail, new Uint8Array([0x71, 0x72]));
+});
+
+Deno.test("@nnrp/core encodes the frozen baseline cache invalidation metadata", () => {
+  const metadata: CacheInvalidateMetadata = {
+    invalidateScope: 3,
+    cacheNamespace: 0x0102_0304,
+    cacheKeyHi: 0x1112_1314,
+    cacheKeyLo: 0x2122_2324,
+    reasonCode: 0x3132_3334,
+  };
+  const encoded = encodeCacheInvalidateMetadata(metadata);
+  const view = new DataView(encoded.buffer);
+  assertEquals(encoded.byteLength, 20);
+  assertEquals(view.getUint32(0, true), 3);
+  assertEquals(view.getUint32(4, true), 0x0102_0304);
+  assertEquals(view.getUint32(8, true), 0x1112_1314);
+  assertEquals(view.getUint32(12, true), 0x2122_2324);
+  assertEquals(view.getUint32(16, true), 0x3132_3334);
+  assertEquals(decodeCacheInvalidateMetadata(encoded), metadata);
+
+  assertRuntimeObjectError(
+    () => encodeCacheInvalidateMetadata({ ...metadata, invalidateScope: 4 }),
+    "NNRP_CACHE_INVALIDATE_SCOPE_INVALID",
+  );
+  assertRuntimeObjectError(
+    () => decodeCacheInvalidateMetadata(new Uint8Array(19)),
+    "NNRP_CACHE_INVALIDATE_LENGTH_INVALID",
+  );
+});
+
 function assertRuntimeControlError(action: () => unknown, code: string): void {
+  const error = assertThrows(action, NnrpProtocolError);
+  assertEquals(error.diagnostic.code, code);
+}
+
+function assertRuntimeObjectError(action: () => unknown, code: string): void {
   const error = assertThrows(action, NnrpProtocolError);
   assertEquals(error.diagnostic.code, code);
 }

@@ -139,6 +139,90 @@ export enum CacheMissReason {
   PermissionDenied = 0x0007,
 }
 
+export interface ObjectDescriptorMetadata {
+  readonly objectId: bigint;
+  readonly objectKind: RuntimeObjectKind;
+  readonly producerRole: RuntimeRole;
+  readonly consumerRole: RuntimeRole;
+  readonly sessionId: number;
+  readonly byteSize: bigint;
+  readonly computeCostUnits: number;
+  readonly memoryLocationHint: MemoryLocationHint;
+  readonly ownershipHint: OwnershipHint;
+  readonly lifetimeHintMs: number;
+  readonly metadataBytes: number;
+}
+
+export interface ObjectReferenceMetadata {
+  readonly objectId: bigint;
+  readonly operationId: bigint;
+  readonly objectVersion: bigint;
+  readonly offset: bigint;
+  readonly length: bigint;
+  readonly flags: number;
+  readonly metadataBytes: number;
+}
+
+export interface ObjectReleaseMetadata {
+  readonly objectId: bigint;
+  readonly operationId: bigint;
+  readonly releaseReason: ObjectReleaseReason;
+  readonly sourceRole: RuntimeRole;
+  readonly flags: number;
+  readonly diagnosticBytes: number;
+}
+
+export interface ObjectDeltaMetadata {
+  readonly objectId: bigint;
+  readonly deltaSequence: bigint;
+  readonly regionOffset: bigint;
+  readonly regionBytes: number;
+  readonly deltaBytes: number;
+  readonly flags: number;
+  readonly metadataBytes: number;
+}
+
+export interface CacheReferenceMetadata {
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
+  readonly profileId: number;
+  readonly reuseScope: CacheReuseScope;
+  readonly leaseId: bigint;
+  readonly producerTraceId: bigint;
+  readonly expirationHintMs: number;
+  readonly metadataBytes: number;
+  readonly flags: number;
+}
+
+export interface CacheMissMetadata {
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
+  readonly missReason: CacheMissReason;
+  readonly profileId: number;
+  readonly diagnosticBytes: number;
+}
+
+export type RuntimeObjectMetadata =
+  | ObjectDescriptorMetadata
+  | ObjectReferenceMetadata
+  | ObjectReleaseMetadata
+  | ObjectDeltaMetadata
+  | CacheReferenceMetadata
+  | CacheMissMetadata;
+
+export interface DecodedRuntimeObjectMetadata {
+  readonly metadata: RuntimeObjectMetadata;
+  readonly tail: Uint8Array;
+}
+
+export interface CacheInvalidateMetadata {
+  readonly invalidateScope: number;
+  readonly cacheNamespace: number;
+  readonly cacheKeyHi: number;
+  readonly cacheKeyLo: number;
+  readonly reasonCode: number;
+}
+
 export interface ControlRequestMetadata {
   readonly operationId: bigint;
   readonly controlSequence: bigint;
@@ -802,6 +886,106 @@ export function decodeRuntimeControlMetadata(
   const tail = payload.slice(layout.length);
   validateRuntimeControlTail(layout, metadata, tail.byteLength);
   return { metadata, tail };
+}
+
+export function encodeRuntimeObjectMetadata(
+  messageType: NnrpMessageType,
+  metadata: RuntimeObjectMetadata,
+  tail: Uint8Array = new Uint8Array(),
+): Uint8Array {
+  const layout = getRuntimeObjectLayout(messageType);
+  if (!(tail instanceof Uint8Array)) {
+    throw runtimeObjectError("NNRP_OBJECT_TAIL_INVALID", "Runtime object tail must be a Uint8Array.");
+  }
+
+  validateRuntimeObjectMetadata(layout, metadata);
+  const ownedTail = tail.slice();
+  validateRuntimeObjectTail(layout, metadata, ownedTail.byteLength);
+
+  const encoded = new Uint8Array(layout.length + ownedTail.byteLength);
+  const view = new DataView(encoded.buffer);
+  const values = metadata as unknown as Record<string, unknown>;
+  for (const field of layout.fields) {
+    writeRuntimeInteger(view, field, values[field.name]);
+  }
+  encoded.set(ownedTail, layout.length);
+  return encoded;
+}
+
+export function decodeRuntimeObjectMetadata(
+  messageType: NnrpMessageType,
+  payload: Uint8Array,
+): DecodedRuntimeObjectMetadata {
+  const layout = getRuntimeObjectLayout(messageType);
+  if (!(payload instanceof Uint8Array)) {
+    throw runtimeObjectError("NNRP_OBJECT_PAYLOAD_INVALID", "Runtime object payload must be a Uint8Array.");
+  }
+  if (payload.byteLength < layout.length) {
+    throw runtimeObjectError(
+      "NNRP_OBJECT_METADATA_TRUNCATED",
+      `Runtime object metadata requires ${layout.length} bytes but received ${payload.byteLength}.`,
+    );
+  }
+
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  for (const reserved of layout.reserved ?? []) {
+    const reservedValue = readRuntimeInteger(view, reserved);
+    if (reservedValue !== 0 && reservedValue !== 0n) {
+      throw runtimeObjectError(
+        "NNRP_OBJECT_RESERVED_NONZERO",
+        `Runtime object reserved field at offset ${reserved.offset} must be zero.`,
+      );
+    }
+  }
+
+  const decoded: Record<string, bigint | number> = {};
+  for (const field of layout.fields) {
+    decoded[field.name] = readRuntimeInteger(view, field);
+  }
+  const metadata = decoded as unknown as RuntimeObjectMetadata;
+  validateRuntimeObjectMetadata(layout, metadata);
+
+  const tail = payload.slice(layout.length);
+  validateRuntimeObjectTail(layout, metadata, tail.byteLength);
+  return { metadata, tail };
+}
+
+export function encodeCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): Uint8Array {
+  validateCacheInvalidateMetadata(metadata);
+  const encoded = new Uint8Array(20);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.invalidateScope, true);
+  view.setUint32(4, metadata.cacheNamespace, true);
+  view.setUint32(8, metadata.cacheKeyHi, true);
+  view.setUint32(12, metadata.cacheKeyLo, true);
+  view.setUint32(16, metadata.reasonCode, true);
+  return encoded;
+}
+
+export function decodeCacheInvalidateMetadata(payload: Uint8Array): CacheInvalidateMetadata {
+  if (!(payload instanceof Uint8Array)) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_PAYLOAD_INVALID",
+      "Cache invalidate metadata must be a Uint8Array.",
+    );
+  }
+  if (payload.byteLength !== 20) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_LENGTH_INVALID",
+      `Cache invalidate metadata requires exactly 20 bytes but received ${payload.byteLength}.`,
+    );
+  }
+
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const metadata: CacheInvalidateMetadata = {
+    invalidateScope: view.getUint32(0, true),
+    cacheNamespace: view.getUint32(4, true),
+    cacheKeyHi: view.getUint32(8, true),
+    cacheKeyLo: view.getUint32(12, true),
+    reasonCode: view.getUint32(16, true),
+  };
+  validateCacheInvalidateMetadata(metadata);
+  return metadata;
 }
 
 export class NnrpResultDropError extends NnrpProtocolError {
@@ -1701,6 +1885,128 @@ interface RuntimeControlLayout {
   readonly reserved?: readonly RuntimeReservedField[];
 }
 
+type RuntimeObjectEnumField =
+  | "objectKind"
+  | "runtimeRole"
+  | "memoryLocationHint"
+  | "ownershipHint"
+  | "objectReleaseReason"
+  | "cacheReuseScope"
+  | "cacheMissReason";
+
+interface RuntimeObjectField extends RuntimeIntegerField {
+  readonly enumField?: RuntimeObjectEnumField;
+}
+
+interface RuntimeObjectLayout {
+  readonly name: string;
+  readonly length: number;
+  readonly fields: readonly RuntimeObjectField[];
+  readonly flagMask?: number;
+  readonly tailFields?: readonly ("metadataBytes" | "diagnosticBytes" | "deltaBytes")[];
+  readonly reserved?: readonly RuntimeReservedField[];
+}
+
+const OBJECT_DESCRIPTOR_LAYOUT: RuntimeObjectLayout = {
+  name: "ObjectDescriptorMetadata",
+  length: 48,
+  fields: [
+    { name: "objectId", offset: 0, kind: "u64" },
+    { name: "objectKind", offset: 8, kind: "u16", enumField: "objectKind" },
+    { name: "producerRole", offset: 10, kind: "u8", enumField: "runtimeRole" },
+    { name: "consumerRole", offset: 11, kind: "u8", enumField: "runtimeRole" },
+    { name: "sessionId", offset: 12, kind: "u32" },
+    { name: "byteSize", offset: 16, kind: "u64" },
+    { name: "computeCostUnits", offset: 24, kind: "u32" },
+    { name: "memoryLocationHint", offset: 28, kind: "u16", enumField: "memoryLocationHint" },
+    { name: "ownershipHint", offset: 30, kind: "u16", enumField: "ownershipHint" },
+    { name: "lifetimeHintMs", offset: 32, kind: "u32" },
+    { name: "metadataBytes", offset: 36, kind: "u32" },
+  ],
+  tailFields: ["metadataBytes"],
+  reserved: [{ offset: 40, kind: "u64" }],
+};
+
+const OBJECT_REFERENCE_LAYOUT: RuntimeObjectLayout = {
+  name: "ObjectReferenceMetadata",
+  length: 48,
+  fields: [
+    { name: "objectId", offset: 0, kind: "u64" },
+    { name: "operationId", offset: 8, kind: "u64" },
+    { name: "objectVersion", offset: 16, kind: "u64" },
+    { name: "offset", offset: 24, kind: "u64" },
+    { name: "length", offset: 32, kind: "u64" },
+    { name: "flags", offset: 40, kind: "u32" },
+    { name: "metadataBytes", offset: 44, kind: "u32" },
+  ],
+  flagMask: 0x07,
+  tailFields: ["metadataBytes"],
+};
+
+const OBJECT_RELEASE_LAYOUT: RuntimeObjectLayout = {
+  name: "ObjectReleaseMetadata",
+  length: 32,
+  fields: [
+    { name: "objectId", offset: 0, kind: "u64" },
+    { name: "operationId", offset: 8, kind: "u64" },
+    { name: "releaseReason", offset: 16, kind: "u16", enumField: "objectReleaseReason" },
+    { name: "sourceRole", offset: 18, kind: "u8", enumField: "runtimeRole" },
+    { name: "flags", offset: 19, kind: "u8" },
+    { name: "diagnosticBytes", offset: 20, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailFields: ["diagnosticBytes"],
+  reserved: [{ offset: 24, kind: "u64" }],
+};
+
+const OBJECT_DELTA_LAYOUT: RuntimeObjectLayout = {
+  name: "ObjectDeltaMetadata",
+  length: 40,
+  fields: [
+    { name: "objectId", offset: 0, kind: "u64" },
+    { name: "deltaSequence", offset: 8, kind: "u64" },
+    { name: "regionOffset", offset: 16, kind: "u64" },
+    { name: "regionBytes", offset: 24, kind: "u32" },
+    { name: "deltaBytes", offset: 28, kind: "u32" },
+    { name: "flags", offset: 32, kind: "u32" },
+    { name: "metadataBytes", offset: 36, kind: "u32" },
+  ],
+  flagMask: 0x07,
+  tailFields: ["metadataBytes", "deltaBytes"],
+};
+
+const CACHE_REFERENCE_LAYOUT: RuntimeObjectLayout = {
+  name: "CacheReferenceMetadata",
+  length: 48,
+  fields: [
+    { name: "cacheKeyHi", offset: 0, kind: "u64" },
+    { name: "cacheKeyLo", offset: 8, kind: "u64" },
+    { name: "profileId", offset: 16, kind: "u16" },
+    { name: "reuseScope", offset: 18, kind: "u16", enumField: "cacheReuseScope" },
+    { name: "leaseId", offset: 20, kind: "u64" },
+    { name: "producerTraceId", offset: 28, kind: "u64" },
+    { name: "expirationHintMs", offset: 36, kind: "u32" },
+    { name: "metadataBytes", offset: 40, kind: "u32" },
+    { name: "flags", offset: 44, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailFields: ["metadataBytes"],
+};
+
+const CACHE_MISS_LAYOUT: RuntimeObjectLayout = {
+  name: "CacheMissMetadata",
+  length: 32,
+  fields: [
+    { name: "cacheKeyHi", offset: 0, kind: "u64" },
+    { name: "cacheKeyLo", offset: 8, kind: "u64" },
+    { name: "missReason", offset: 16, kind: "u16", enumField: "cacheMissReason" },
+    { name: "profileId", offset: 18, kind: "u16" },
+    { name: "diagnosticBytes", offset: 20, kind: "u32" },
+  ],
+  tailFields: ["diagnosticBytes"],
+  reserved: [{ offset: 24, kind: "u64" }],
+};
+
 const CONTROL_REQUEST_LAYOUT: RuntimeControlLayout = {
   name: "ControlRequestMetadata",
   length: 32,
@@ -1947,6 +2253,157 @@ function getRuntimeControlLayout(messageType: NnrpMessageType): RuntimeControlLa
   }
 }
 
+function getRuntimeObjectLayout(messageType: NnrpMessageType): RuntimeObjectLayout {
+  switch (messageType) {
+    case NnrpMessageType.ObjectDeclare:
+      return OBJECT_DESCRIPTOR_LAYOUT;
+    case NnrpMessageType.ObjectRef:
+      return OBJECT_REFERENCE_LAYOUT;
+    case NnrpMessageType.ObjectRelease:
+      return OBJECT_RELEASE_LAYOUT;
+    case NnrpMessageType.ObjectPatch:
+    case NnrpMessageType.ObjectDelta:
+      return OBJECT_DELTA_LAYOUT;
+    case NnrpMessageType.CacheReference:
+      return CACHE_REFERENCE_LAYOUT;
+    case NnrpMessageType.CacheMiss:
+      return CACHE_MISS_LAYOUT;
+    default:
+      throw runtimeObjectError(
+        "NNRP_OBJECT_MESSAGE_UNSUPPORTED",
+        `Message type ${messageType} does not use Preview4 runtime object metadata.`,
+      );
+  }
+}
+
+function validateRuntimeObjectMetadata(layout: RuntimeObjectLayout, metadata: RuntimeObjectMetadata): void {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    throw runtimeObjectError("NNRP_OBJECT_METADATA_MISMATCH", `${layout.name} must be a metadata object.`);
+  }
+
+  const values = metadata as unknown as Record<string, unknown>;
+  const actualFields = Object.keys(values).sort();
+  const expectedFields = layout.fields.map((field) => field.name).sort();
+  if (
+    actualFields.length !== expectedFields.length ||
+    actualFields.some((field, index) => field !== expectedFields[index])
+  ) {
+    throw runtimeObjectError(
+      "NNRP_OBJECT_METADATA_MISMATCH",
+      `Message requires ${layout.name} fields: ${expectedFields.join(", ")}.`,
+    );
+  }
+
+  for (const field of layout.fields) {
+    validateRuntimeObjectInteger(field, values[field.name]);
+    if (field.enumField !== undefined) {
+      validateRuntimeObjectEnum(field.enumField, values[field.name] as number);
+    }
+  }
+
+  if (layout.flagMask !== undefined) {
+    const flags = values.flags as number;
+    if ((flags & ~layout.flagMask) !== 0) {
+      throw runtimeObjectError(
+        "NNRP_OBJECT_FLAGS_INVALID",
+        `${layout.name}.flags contains reserved bits outside 0x${layout.flagMask.toString(16)}.`,
+      );
+    }
+  }
+}
+
+function validateRuntimeObjectTail(
+  layout: RuntimeObjectLayout,
+  metadata: RuntimeObjectMetadata,
+  actualBytes: number,
+): void {
+  const values = metadata as unknown as Record<string, number>;
+  const declaredBytes = (layout.tailFields ?? []).reduce((total, field) => total + (values[field] as number), 0);
+  if (declaredBytes !== actualBytes) {
+    throw runtimeObjectError(
+      "NNRP_OBJECT_TAIL_LENGTH_INVALID",
+      `${layout.name} declares ${declaredBytes} tail bytes but received ${actualBytes}.`,
+    );
+  }
+}
+
+function validateRuntimeObjectInteger(field: RuntimeIntegerField, value: unknown): void {
+  if (field.kind === "u64") {
+    if (typeof value !== "bigint" || value < 0n || value > 0xffff_ffff_ffff_ffffn) {
+      throw runtimeObjectError(
+        "NNRP_OBJECT_INTEGER_INVALID",
+        `${field.name} must be a bigint in the u64 wire range.`,
+      );
+    }
+    return;
+  }
+
+  const maximum = field.kind === "u32" ? 0xffff_ffff : field.kind === "u16" ? 0xffff : 0xff;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > maximum) {
+    throw runtimeObjectError(
+      "NNRP_OBJECT_INTEGER_INVALID",
+      `${field.name} must be an integer in the ${field.kind} wire range.`,
+    );
+  }
+}
+
+function validateRuntimeObjectEnum(field: RuntimeObjectEnumField, value: number): void {
+  const [lastStandard, privateStart, privateEnd] = field === "runtimeRole"
+    ? [RuntimeRole.ConformanceRunner, 0x80, 0xff]
+    : [
+      field === "objectKind"
+        ? RuntimeObjectKind.CacheManifest
+        : field === "memoryLocationHint"
+        ? MemoryLocationHint.ObjectStore
+        : field === "ownershipHint"
+        ? OwnershipHint.ReleaseOnDrop
+        : field === "objectReleaseReason"
+        ? ObjectReleaseReason.ConformanceInjection
+        : field === "cacheReuseScope"
+        ? CacheReuseScope.Profile
+        : CacheMissReason.PermissionDenied,
+      0x8000,
+      0xffff,
+    ];
+  if ((value >= 0 && value <= lastStandard) || (value >= privateStart && value <= privateEnd)) {
+    return;
+  }
+  throw runtimeObjectError(
+    "NNRP_OBJECT_ENUM_INVALID",
+    `${field} must use a frozen standard value or its private extension range.`,
+  );
+}
+
+function validateCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): void {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_METADATA_MISMATCH",
+      "CacheInvalidateMetadata must be a metadata object.",
+    );
+  }
+  const values = metadata as unknown as Record<string, unknown>;
+  const expectedFields = ["cacheKeyHi", "cacheKeyLo", "cacheNamespace", "invalidateScope", "reasonCode"];
+  const actualFields = Object.keys(values).sort();
+  if (
+    actualFields.length !== expectedFields.length ||
+    actualFields.some((field, index) => field !== expectedFields[index])
+  ) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_METADATA_MISMATCH",
+      `CacheInvalidateMetadata requires fields: ${expectedFields.join(", ")}.`,
+    );
+  }
+  for (const field of expectedFields) {
+    validateRuntimeObjectInteger({ name: field, offset: 0, kind: "u32" }, values[field]);
+  }
+  if ((values.invalidateScope as number) > 3) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_SCOPE_INVALID",
+      "invalidateScope must be WholeSession, Namespace, ObjectKind, or ObjectKey.",
+    );
+  }
+}
+
 function validateRuntimeControlMetadata(
   layout: RuntimeControlLayout,
   metadata: RuntimeControlMetadata,
@@ -2102,6 +2559,15 @@ function readRuntimeInteger(
 }
 
 function runtimeControlError(code: string, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code,
+    message,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
+function runtimeObjectError(code: string, message: string): NnrpProtocolError {
   return new NnrpProtocolError({
     code,
     message,
