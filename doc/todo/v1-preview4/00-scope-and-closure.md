@@ -30,11 +30,11 @@
 
 ## Closure Automation
 
-- [ ] Replace the Preview3 todo checker with a Preview4 checker.
-  - [ ] Validate every markdown checkbox in `doc/todo/v1-preview4`.
-  - [ ] Reject a checked parent with an unchecked child.
-  - [ ] Reject deferred-contract phrases and old-preview compatibility language.
-  - [ ] Reject `transport-ws`, `webtransport`, `score`, `tcp-only`, and `quic-only` as API identifiers.
+- [x] Replace the Preview3 todo checker with a Preview4 checker.
+  - [x] Validate every markdown checkbox in `doc/todo/v1-preview4`.
+  - [x] Reject a checked parent with an unchecked child.
+  - [x] Reject deferred-contract phrases and old-preview compatibility language.
+  - [x] Reject `transport-ws`, `webtransport`, `score`, `tcp-only`, and `quic-only` as API identifiers.
 - [ ] Add ownership checks to CI.
   - [ ] Validate package dependency direction.
   - [ ] Validate artifact placement.
@@ -43,5 +43,5 @@
 ## Acceptance Evidence
 
 - [ ] `deno task runtime-policy` proves package and runtime ownership.
-- [ ] `deno task todo:check` proves parent/child closure and vocabulary rules.
+- [x] `deno task todo:check` proves parent/child closure and vocabulary rules.
 - [ ] Unit tests prove missing providers fail explicitly without fallback execution.

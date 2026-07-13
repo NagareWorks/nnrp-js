@@ -118,7 +118,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.3.8' }}
-        run: deno task todo:check && deno task benchmark:smoke && deno task release-dry-run
+        run: deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run
       - name: Download native benchmark artifact
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         env:
