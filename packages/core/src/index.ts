@@ -75,6 +75,8 @@ export interface NnrpTransportEndpoint {
   readonly endpoint: string | URL;
 }
 
+const NNRP_DEFAULT_PORT = 4433;
+
 export interface NnrpTransportConnection {
   readonly kind: NnrpTransportKind;
   readonly endpoint: string;
@@ -512,6 +514,45 @@ export function createTransportSelectionSummary(
   };
 }
 
+export function parseApplicationEndpoint(endpoint: string | URL): URL {
+  const raw = normalizeEndpointValue(endpoint);
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch (cause) {
+    throw invalidApplicationEndpoint("NNRP application endpoint is malformed.", cause);
+  }
+
+  if (parsed.protocol !== "nnrp:" && parsed.protocol !== "nnrps:") {
+    throw invalidApplicationEndpoint("NNRP application endpoint must use nnrp:// or nnrps://.");
+  }
+  if (parsed.hostname.length === 0) {
+    throw invalidApplicationEndpoint("NNRP application endpoint requires an authority host.");
+  }
+
+  return parsed;
+}
+
+export function resolveProviderEndpoint(
+  endpoint: string | URL,
+  transport: NnrpTransportKind,
+  providerEndpoint?: string | URL,
+): string {
+  const applicationEndpoint = parseApplicationEndpoint(endpoint);
+
+  switch (transport) {
+    case "tcp":
+    case "quic":
+      return providerEndpoint === undefined
+        ? applicationHostPort(applicationEndpoint)
+        : parseHostPortProviderEndpoint(providerEndpoint, transport);
+    case "ipc":
+      return parseIpcProviderEndpoint(providerEndpoint, transport);
+    case "websocket":
+      return parseWebsocketProviderEndpoint(applicationEndpoint, providerEndpoint, transport);
+  }
+}
+
 export interface NormalizeSubmitRequestOptions {
   readonly copyPayloads?: boolean;
   readonly strictProfiles?: boolean;
@@ -858,6 +899,125 @@ function createPayloadDescriptor(descriptor: NnrpPayloadDescriptor): NnrpPayload
     ...(descriptor.cache === undefined ? {} : { cache: createCacheMetadata(descriptor.cache) }),
     ...(descriptor.metadata === undefined ? {} : { metadata: { ...descriptor.metadata } }),
   };
+}
+
+function normalizeEndpointValue(endpoint: string | URL): string {
+  const value = endpoint instanceof URL ? endpoint.toString() : endpoint.trim();
+  if (value.length === 0) {
+    throw invalidApplicationEndpoint("NNRP application endpoint cannot be empty.");
+  }
+  return value;
+}
+
+function applicationHostPort(endpoint: URL): string {
+  return `${endpoint.hostname}:${endpoint.port || NNRP_DEFAULT_PORT}`;
+}
+
+function parseHostPortProviderEndpoint(
+  endpoint: string | URL,
+  transport: Extract<NnrpTransportKind, "tcp" | "quic">,
+): string {
+  if (endpoint instanceof URL) {
+    throw invalidProviderEndpoint(transport, `${transport} provider endpoint must use host:port form.`);
+  }
+
+  const value = endpoint.trim();
+  if (value.length === 0 || value.includes("://")) {
+    throw invalidProviderEndpoint(transport, `${transport} provider endpoint must use host:port form.`);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(`tcp://${value}`);
+  } catch (cause) {
+    throw invalidProviderEndpoint(transport, `${transport} provider endpoint is malformed.`, cause);
+  }
+
+  if (
+    parsed.hostname.length === 0 || parsed.port.length === 0 || parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    (parsed.pathname !== "" && parsed.pathname !== "/") || parsed.search.length > 0 || parsed.hash.length > 0
+  ) {
+    throw invalidProviderEndpoint(transport, `${transport} provider endpoint must contain only host and port.`);
+  }
+
+  const port = Number(parsed.port);
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw invalidProviderEndpoint(transport, `${transport} provider endpoint has an invalid port.`);
+  }
+
+  return `${parsed.hostname}:${port}`;
+}
+
+function parseIpcProviderEndpoint(
+  endpoint: string | URL | undefined,
+  transport: Extract<NnrpTransportKind, "ipc">,
+): string {
+  if (endpoint === undefined) {
+    throw invalidProviderEndpoint(transport, "IPC selection requires an explicit unix:// or npipe:// endpoint.");
+  }
+
+  const value = endpoint instanceof URL ? endpoint.toString() : endpoint.trim();
+  const scheme = value.startsWith("unix://") ? "unix://" : value.startsWith("npipe://") ? "npipe://" : undefined;
+  if (scheme === undefined || value.slice(scheme.length).replace(/^\/+|\/+$/g, "").length === 0) {
+    throw invalidProviderEndpoint(transport, "IPC provider endpoint must use unix:// or npipe:// with a locator.");
+  }
+
+  return value;
+}
+
+function parseWebsocketProviderEndpoint(
+  applicationEndpoint: URL,
+  endpoint: string | URL | undefined,
+  transport: Extract<NnrpTransportKind, "websocket">,
+): string {
+  if (endpoint === undefined) {
+    throw invalidProviderEndpoint(transport, "websocket selection requires an explicit ws:// or wss:// endpoint.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  } catch (cause) {
+    throw invalidProviderEndpoint(transport, "websocket provider endpoint is malformed.", cause);
+  }
+
+  if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
+    throw invalidProviderEndpoint(transport, "websocket provider endpoint must use ws:// or wss://.");
+  }
+  if (
+    (applicationEndpoint.protocol === "nnrps:" && parsed.protocol !== "wss:") ||
+    (applicationEndpoint.protocol === "nnrp:" && parsed.protocol !== "ws:")
+  ) {
+    throw invalidProviderEndpoint(transport, "websocket provider endpoint must preserve application security intent.");
+  }
+
+  return parsed.toString();
+}
+
+function invalidApplicationEndpoint(message: string, cause?: unknown): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_APPLICATION_ENDPOINT_INVALID",
+    message,
+    source: "core",
+    retryable: false,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+function invalidProviderEndpoint(
+  transport: NnrpTransportKind,
+  message: string,
+  cause?: unknown,
+): NnrpTransportError {
+  return new NnrpTransportError({
+    code: "NNRP_PROVIDER_ENDPOINT_INVALID",
+    message,
+    source: "transport",
+    retryable: false,
+    transport,
+    ...(cause === undefined ? {} : { cause }),
+  });
 }
 
 function createCacheMetadata(metadata: NnrpCacheMetadata): NnrpCacheMetadata {

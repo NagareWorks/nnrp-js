@@ -32,15 +32,15 @@
 
 ## Endpoint Model
 
-- [ ] Add the application endpoint parser.
-  - [ ] Accept `nnrp://` and `nnrps://` application endpoints.
-  - [ ] Preserve authority, path, query, and security intent in the parsed result.
-  - [ ] Reject provider-local schemes in the application endpoint field.
+- [x] Add the application endpoint parser.
+  - [x] Accept `nnrp://` and `nnrps://` application endpoints.
+  - [x] Preserve authority, path, query, and security intent in the parsed result.
+  - [x] Reject provider-local schemes in the application endpoint field.
 - [ ] Add provider endpoint resolution.
-  - [ ] Derive TCP and QUIC host/port endpoints from the application endpoint.
-  - [ ] Resolve IPC `unix://` and `npipe://` endpoints from an explicit `providerEndpoint` override.
-  - [ ] Resolve WebSocket `ws://` and `wss://` endpoints from an explicit `providerEndpoint` override.
-  - [ ] Reject a provider override whose scheme does not match the selected provider.
+  - [x] Derive TCP and QUIC host/port endpoints from the application endpoint.
+  - [x] Resolve IPC `unix://` and `npipe://` endpoints from an explicit `providerEndpoint` override.
+  - [x] Resolve WebSocket `ws://` and `wss://` endpoints from an explicit `providerEndpoint` override.
+  - [x] Reject a provider override whose scheme does not match the selected provider.
   - [ ] Keep provider-local endpoint strings out of operation metadata and public request payloads.
 
 ## Public Types and Tests
@@ -52,7 +52,7 @@
 - [ ] Add contract tests.
   - [x] Cover every transport kind and policy.
   - [x] Cover single-provider, multi-provider, preference, and force behavior.
-  - [ ] Cover application and provider endpoint validation.
+  - [x] Cover application and provider endpoint validation.
   - [ ] Cover capability token serialization and rejection.
 
 ## Acceptance Evidence

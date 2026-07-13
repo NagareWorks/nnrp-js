@@ -321,6 +321,8 @@ export declare function createBrowserWasmManifest(capabilities?: readonly NnrpCa
 export declare function selectTransport(candidates: readonly NnrpTransportCandidate[], policy?: NnrpTransportPolicy): NnrpTransportSelection;
 export declare function createTransportCandidates(options: NnrpTransportCandidateOptions): readonly NnrpTransportCandidate[];
 export declare function createTransportSelectionSummary(selection: NnrpTransportSelection): NnrpTransportSelectionSummary;
+export declare function parseApplicationEndpoint(endpoint: string | URL): URL;
+export declare function resolveProviderEndpoint(endpoint: string | URL, transport: NnrpTransportKind, providerEndpoint?: string | URL): string;
 export interface NormalizeSubmitRequestOptions {
     readonly copyPayloads?: boolean;
     readonly strictProfiles?: boolean;

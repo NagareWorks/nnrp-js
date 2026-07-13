@@ -25,6 +25,8 @@ import {
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
   normalizeSubmitRequest,
+  parseApplicationEndpoint,
+  resolveProviderEndpoint,
   selectTransport,
   throwIfResultDrop,
   validateEventPollOptions,
@@ -200,6 +202,72 @@ Deno.test("@nnrp/core reports policy-rejected transport candidates", () => {
 
   assertEquals(selection.selected?.kind, "tcp");
   assertEquals(summary.rejected, [{ kind: "quic", reason: "policy-rejected", score: 100 }]);
+});
+
+Deno.test("@nnrp/core parses application endpoints without losing URL semantics", () => {
+  const endpoint = parseApplicationEndpoint("nnrps://runtime.example:7443/session/default?tenant=a#result");
+
+  assertEquals(endpoint.protocol, "nnrps:");
+  assertEquals(endpoint.host, "runtime.example:7443");
+  assertEquals(endpoint.pathname, "/session/default");
+  assertEquals(endpoint.search, "?tenant=a");
+  assertEquals(endpoint.hash, "#result");
+});
+
+Deno.test("@nnrp/core rejects empty, malformed, and provider-local application endpoints", () => {
+  for (const endpoint of ["", "not a URL", "ws://runtime.example/nnrp", "unix:///tmp/nnrp.sock", "nnrp:///path"]) {
+    const error = assertThrows(() => parseApplicationEndpoint(endpoint), NnrpProtocolError);
+    assertEquals(error.diagnostic.code, "NNRP_APPLICATION_ENDPOINT_INVALID");
+  }
+});
+
+Deno.test("@nnrp/core derives TCP and QUIC provider endpoints", () => {
+  assertEquals(resolveProviderEndpoint("nnrp://127.0.0.1:7443/session", "tcp"), "127.0.0.1:7443");
+  assertEquals(resolveProviderEndpoint("nnrps://runtime.example/session", "quic"), "runtime.example:4433");
+  assertEquals(
+    resolveProviderEndpoint("nnrp://runtime.example/session", "tcp", "[::1]:9000"),
+    "[::1]:9000",
+  );
+});
+
+Deno.test("@nnrp/core validates provider-local endpoint schemes and security intent", () => {
+  assertEquals(
+    resolveProviderEndpoint("nnrp://runtime.example/session", "ipc", "unix:///tmp/nnrp.sock"),
+    "unix:///tmp/nnrp.sock",
+  );
+  assertEquals(
+    resolveProviderEndpoint("nnrp://runtime.example/session", "ipc", new URL("npipe://nnrp-runtime")),
+    "npipe://nnrp-runtime",
+  );
+  assertEquals(
+    resolveProviderEndpoint("nnrps://runtime.example/session", "websocket", "wss://runtime.example/nnrp"),
+    "wss://runtime.example/nnrp",
+  );
+
+  for (
+    const [transport, providerEndpoint] of [
+      ["tcp", "ws://runtime.example/nnrp"],
+      ["ipc", "127.0.0.1:4433"],
+      ["websocket", "unix:///tmp/nnrp.sock"],
+      ["websocket", "ws://runtime.example/nnrp"],
+    ] as const
+  ) {
+    const error = assertThrows(
+      () => resolveProviderEndpoint("nnrps://runtime.example/session", transport, providerEndpoint),
+      NnrpTransportError,
+    );
+    assertEquals(error.diagnostic.code, "NNRP_PROVIDER_ENDPOINT_INVALID");
+  }
+});
+
+Deno.test("@nnrp/core requires explicit IPC and WebSocket provider endpoints", () => {
+  for (const transport of ["ipc", "websocket"] as const) {
+    const error = assertThrows(
+      () => resolveProviderEndpoint("nnrp://runtime.example/session", transport),
+      NnrpTransportError,
+    );
+    assertEquals(error.diagnostic.transport, transport);
+  }
 });
 
 Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () => {
