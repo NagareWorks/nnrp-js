@@ -36,11 +36,11 @@
 
 ## Runtime Event Union
 
-- [ ] Replace the Preview3 runtime event union with the frozen Preview4 union.
-  - [ ] Add control-event discriminants.
-  - [ ] Add object/cache-event discriminants.
-  - [ ] Add recoverable-error and retry events.
-  - [ ] Keep terminal result, flow, close, and diagnostics typed distinctly.
+- [x] Replace the Preview3 runtime event union with the frozen Preview4 union.
+  - [x] Add control-event discriminants.
+  - [x] Add object/cache-event discriminants.
+  - [x] Add recoverable-error and retry events.
+  - [x] Keep terminal result, flow, close, and diagnostics typed distinctly.
 - [ ] Implement event ordering rules.
   - [ ] Preserve wire order within one operation.
   - [ ] Permit interleaving across operations.
@@ -50,17 +50,17 @@
 ## Runtime Adapter Calls
 
 - [ ] Bind Preview4 native exports.
-  - [ ] Bind `nnrp_client_submit_control`.
+  - [x] Bind the role-neutral `nnrp_runtime_frame_send` coarse frame export.
   - [ ] Bind `nnrp_client_submit_runtime_object_loop_compact`.
   - [ ] Bind server receive, control/result send, and event polling exports used by the frozen API.
 - [ ] Bind equivalent browser WASM exports.
   - [ ] Decode control/object batches in browser workers.
   - [ ] Keep native and browser event shapes identical.
-  - [ ] Copy owned bytes before a native or WASM buffer is released.
+  - [x] Copy owned bytes before a native or WASM buffer is released.
 
 ## Acceptance Evidence
 
 - [ ] Golden vectors round-trip every metadata type against Rust Preview4 fixtures.
 - [ ] Negative vectors cover length, range, message/type, and truncation failures.
 - [ ] Native and WASM parity tests produce identical normalized events.
-- [ ] Public API snapshots match the frozen JavaScript runtime page in `nnrp-doc`.
+- [x] Public API snapshots match the frozen JavaScript runtime page in `nnrp-doc`.

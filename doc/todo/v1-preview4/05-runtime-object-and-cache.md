@@ -2,15 +2,15 @@
 
 ## Shared Session Methods
 
-- [ ] Add the same object/cache methods to native client, browser client, and server sessions.
-  - [ ] `declareObject(metadata, body?)`.
-  - [ ] `referenceObject(metadata, body?)`.
-  - [ ] `releaseObject(metadata, diagnostic?)`.
-  - [ ] `patchObject(metadata, delta)`.
-  - [ ] `sendObjectDelta(metadata, delta)`.
-  - [ ] `referenceCache(metadata, body?)`.
-  - [ ] `reportCacheMiss(metadata, diagnostic?)`.
-  - [ ] `invalidateCache(metadata)`.
+- [x] Add the same object/cache methods to native client, browser client, and server sessions.
+  - [x] `declareObject(metadata, body?)`.
+  - [x] `referenceObject(metadata, body?)`.
+  - [x] `releaseObject(metadata, diagnostic?)`.
+  - [x] `patchObject(metadata, delta)`.
+  - [x] `sendObjectDelta(metadata, delta)`.
+  - [x] `referenceCache(metadata, body?)`.
+  - [x] `reportCacheMiss(metadata, diagnostic?)`.
+  - [x] `invalidateCache(metadata)`.
 - [ ] Enforce object lifecycle validation.
   - [ ] Require declaration before a local reference when local tracking is enabled.
   - [ ] Track version and delta sequence monotonically.

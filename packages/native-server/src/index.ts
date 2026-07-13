@@ -1,19 +1,23 @@
 import {
+  type CacheInvalidateMetadata,
+  type CacheMissMetadata,
+  type CacheReferenceMetadata,
   createBackendNativeManifest,
   createCapabilityManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
+  encodeCacheInvalidateMetadata,
+  encodeRuntimeControlMetadata,
+  encodeRuntimeObjectMetadata,
   type NnrpAbortSignalLike,
-  type NnrpCancelOptions,
-  type NnrpCancelRequest,
   type NnrpCapability,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
   type NnrpInputProfile,
+  NnrpMessageType,
   type NnrpNormalizedSubmitRequest,
-  type NnrpOperationRef,
   NnrpProtocolError,
   NnrpRecoveryError,
   type NnrpResult,
@@ -30,12 +34,23 @@ import {
   type NnrpTransportPolicy,
   type NnrpTransportProvider,
   type NnrpTransportSelectionSummary,
-  normalizeCancelRequest,
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
   normalizeSubmitRequest,
+  type ObjectDeltaMetadata,
+  type ObjectDescriptorMetadata,
+  type ObjectReferenceMetadata,
+  type ObjectReleaseMetadata,
+  type PartialResultMetadata,
+  type PressureMetadata,
+  type ProgressMetadata,
+  type RecoverableErrorMetadata,
+  type ResultDropReasonMetadata,
+  type RetryAfterMetadata,
+  type RuntimeControlMetadata,
   selectTransport,
   throwIfResultDrop,
+  type TraceContextMetadata,
   validateEventPollOptions,
   validateSessionMetadata,
 } from "@nnrp/core";
@@ -45,9 +60,10 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const EXPECTED_PROTOCOL_MAJOR = 1;
+const EMPTY_PAYLOAD = new Uint8Array();
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 1;
-const MINIMUM_ABI_MINOR = 5;
+const MINIMUM_ABI_MINOR = 12;
 const TRANSPORT_SLOT_QUIC = 0x00000001;
 const TRANSPORT_SLOT_TCP = 0x00000002;
 const REQUIRED_TRANSPORT_SLOTS = TRANSPORT_SLOT_TCP;
@@ -69,10 +85,12 @@ const RUNTIME_FEATURE_EXECUTABLE_RESUME = 0x0000000000002000n;
 const RUNTIME_FEATURE_CLIENT_COMPLETION_HELPERS = 0x0000000000004000n;
 const RUNTIME_FEATURE_CLIENT_COARSE_RESULT_HELPERS = 0x0000000000008000n;
 const RUNTIME_FEATURE_CLIENT_COMPACT_RESULT_HELPERS = 0x0000000000010000n;
+const RUNTIME_FEATURE_PREVIEW4_RUNTIME_FRAME_SEND = 0x0000000000080000n;
 const REQUIRED_NATIVE_SYMBOLS = [
   "nnrp_runtime_capabilities",
   "nnrp_client_submit_result_compact",
   "nnrp_client_await_events",
+  "nnrp_runtime_frame_send",
 ] as const;
 const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
   RUNTIME_FEATURE_CLIENT_API |
@@ -90,7 +108,8 @@ const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
   RUNTIME_FEATURE_EXECUTABLE_RESUME |
   RUNTIME_FEATURE_CLIENT_COMPLETION_HELPERS |
   RUNTIME_FEATURE_CLIENT_COARSE_RESULT_HELPERS |
-  RUNTIME_FEATURE_CLIENT_COMPACT_RESULT_HELPERS;
+  RUNTIME_FEATURE_CLIENT_COMPACT_RESULT_HELPERS |
+  RUNTIME_FEATURE_PREVIEW4_RUNTIME_FRAME_SEND;
 
 export interface NnrpNativeLibraryOptions {
   readonly path?: string;
@@ -134,9 +153,11 @@ export interface NnrpNativeSubmitValidationRequest {
   readonly submit: NnrpNormalizedSubmitRequest;
 }
 
-export interface NnrpNativeCancelRequest {
+export interface NnrpNativeRuntimeFrameSendRequest {
   readonly sessionOptions: NnrpSessionOptions;
-  readonly cancel: NnrpCancelRequest;
+  readonly messageType: NnrpMessageType;
+  readonly frameId: number;
+  readonly payload: Uint8Array;
 }
 
 export interface NnrpNativeSessionPatchRequest {
@@ -179,7 +200,7 @@ export interface NnrpNativeFfiBinding {
   ): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
   submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
   submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
-  cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
+  sendRuntimeFrame?(request: NnrpNativeRuntimeFrameSendRequest): void | Promise<void>;
   patchSession?(
     request: NnrpNativeSessionPatchRequest,
   ): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
@@ -368,14 +389,14 @@ export class NnrpBackendRuntime {
     return await submitNoWait(await this.#validateSubmit(request));
   }
 
-  public cancel(request: NnrpNativeCancelRequest): Promise<void> {
+  public sendRuntimeFrame(request: NnrpNativeRuntimeFrameSendRequest): Promise<void> {
     this.#ensureOpen();
-    const cancel = this.#binding.ffi?.cancel;
-    if (cancel === undefined) {
-      return Promise.reject(bindingNotConnectedError("cancel"));
+    const sendRuntimeFrame = this.#binding.ffi?.sendRuntimeFrame;
+    if (sendRuntimeFrame === undefined) {
+      return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
     }
 
-    return Promise.resolve(cancel(request));
+    return Promise.resolve(sendRuntimeFrame(request));
   }
 
   public async patchSession(request: NnrpNativeSessionPatchRequest): Promise<NnrpSessionPatchResult> {
@@ -746,9 +767,9 @@ class NnrpClientSession {
   readonly #state: NnrpClientSessionState;
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
-  readonly #cancelledOperations = new Set<string>();
   readonly #capacityWaiters: Array<() => void> = [];
   #availableCredits: number;
+  #nextRuntimeFrameId = 1;
   #closed = false;
 
   public constructor(state: NnrpClientSessionState) {
@@ -805,24 +826,18 @@ class NnrpClientSession {
     });
   }
 
-  public cancel(operation: NnrpOperationRef, options: NnrpCancelOptions = {}): Promise<void> {
-    let normalized: NnrpCancelRequest;
-    try {
-      this.#ensureOpen();
-      normalized = normalizeCancelRequest(operation, options);
-      this.#beginCancel(normalized.operation);
-    } catch (error) {
-      return Promise.reject(error);
-    }
-
-    return this.#state.client.runtime.cancel({
+  public sendControl(
+    messageType: NnrpMessageType,
+    metadata: RuntimeControlMetadata,
+    tail: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    this.#ensureOpen();
+    assertClientRuntimeControlMessage(messageType);
+    return this.#state.client.runtime.sendRuntimeFrame({
       sessionOptions: this.#state.options,
-      cancel: normalized,
-    }).then(() => {
-      this.#finishOperation(normalized.operation);
-    }).catch((error) => {
-      this.#cancelledOperations.delete(operationKey(normalized.operation));
-      throw error;
+      messageType,
+      frameId: this.#nextRuntimeFrameId++,
+      payload: encodeRuntimeControlMetadata(messageType, metadata, tail),
     });
   }
 
@@ -850,7 +865,6 @@ class NnrpClientSession {
     if (event.type === "close") {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
-      this.#cancelledOperations.clear();
       this.#drainCapacityWaiters();
     }
   }
@@ -923,7 +937,6 @@ class NnrpClientSession {
     this.#closed = true;
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
-    this.#cancelledOperations.clear();
     this.#drainCapacityWaiters();
     return Promise.resolve();
   }
@@ -950,7 +963,6 @@ class NnrpClientSession {
 
     this.#inFlightFrames.add(frameId);
     this.#terminalFrames.delete(frameId);
-    this.#cancelledOperations.delete(operationKey(frameId));
   }
 
   #reserveOrAwaitSubmitCapacity(): Promise<void> | undefined {
@@ -997,44 +1009,6 @@ class NnrpClientSession {
     this.#inFlightFrames.delete(frameId);
   }
 
-  #finishOperation(operation: NnrpOperationRef): void {
-    if (typeof operation === "number") {
-      this.#finishFrame(operation);
-      this.#terminalFrames.add(operation);
-      return;
-    }
-
-    if (operation <= BigInt(Number.MAX_SAFE_INTEGER)) {
-      const frameId = Number(operation);
-      this.#finishFrame(frameId);
-      this.#terminalFrames.add(frameId);
-    }
-  }
-
-  #beginCancel(operation: NnrpOperationRef): void {
-    const key = operationKey(operation);
-    if (this.#cancelledOperations.has(key)) {
-      throw new NnrpProtocolError({
-        code: "NNRP_OPERATION_CANCEL_DUPLICATE",
-        message: `Operation ${key} has already been cancelled for this session.`,
-        source: "core",
-        retryable: false,
-      });
-    }
-
-    const frameId = operationFrameId(operation);
-    if (frameId !== undefined && this.#terminalFrames.has(frameId)) {
-      throw new NnrpProtocolError({
-        code: "NNRP_OPERATION_TERMINAL",
-        message: `Operation ${key} already reached a terminal state.`,
-        source: "core",
-        retryable: false,
-      });
-    }
-
-    this.#cancelledOperations.add(key);
-  }
-
   #finishTerminalFrame(frameId: number): void {
     if (this.#terminalFrames.has(frameId)) {
       throw new NnrpProtocolError({
@@ -1047,7 +1021,6 @@ class NnrpClientSession {
 
     this.#terminalFrames.add(frameId);
     this.#finishFrame(frameId);
-    this.#cancelledOperations.delete(operationKey(frameId));
   }
 }
 
@@ -1115,6 +1088,7 @@ export interface NnrpServerSessionState {
 
 export class NnrpServerSession {
   readonly #state: NnrpServerSessionState | undefined;
+  #nextRuntimeFrameId = 1;
   #closed = false;
 
   public constructor(state?: NnrpServerSessionState) {
@@ -1156,6 +1130,93 @@ export class NnrpServerSession {
     return Promise.reject(bindingNotConnectedError("sendResult"));
   }
 
+  public sendProgress(metadata: ProgressMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.sendControl(NnrpMessageType.Progress, metadata, body);
+  }
+
+  public sendPartialResult(metadata: PartialResultMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.sendControl(NnrpMessageType.PartialResult, metadata, body);
+  }
+
+  public sendBackpressure(metadata: PressureMetadata): Promise<void> {
+    return this.sendControl(NnrpMessageType.Backpressure, metadata);
+  }
+
+  public sendCreditUpdate(metadata: PressureMetadata): Promise<void> {
+    return this.sendControl(NnrpMessageType.CreditUpdate, metadata);
+  }
+
+  public sendResultDropReason(
+    metadata: ResultDropReasonMetadata,
+    diagnostic: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    return this.sendControl(NnrpMessageType.ResultDropReason, metadata, diagnostic);
+  }
+
+  public sendTraceContext(metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.sendControl(NnrpMessageType.TraceContext, metadata, body);
+  }
+
+  public sendRecoverableError(
+    metadata: RecoverableErrorMetadata,
+    diagnostic: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    return this.sendControl(NnrpMessageType.ErrorRecoverable, metadata, diagnostic);
+  }
+
+  public sendRetryAfter(metadata: RetryAfterMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.sendControl(NnrpMessageType.RetryAfter, metadata, diagnostic);
+  }
+
+  public declareObject(metadata: ObjectDescriptorMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectDeclare, metadata, body);
+  }
+
+  public referenceObject(metadata: ObjectReferenceMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectRef, metadata, body);
+  }
+
+  public releaseObject(metadata: ObjectReleaseMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectRelease, metadata, diagnostic);
+  }
+
+  public patchObject(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectPatch, metadata, delta);
+  }
+
+  public sendObjectDelta(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectDelta, metadata, delta);
+  }
+
+  public referenceCache(metadata: CacheReferenceMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.CacheReference, metadata, body);
+  }
+
+  public reportCacheMiss(metadata: CacheMissMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.CacheMiss, metadata, diagnostic);
+  }
+
+  public invalidateCache(metadata: CacheInvalidateMetadata): Promise<void> {
+    try {
+      return this.#sendRuntimeFrame(NnrpMessageType.CacheInvalidate, encodeCacheInvalidateMetadata(metadata));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  public sendControl(
+    messageType: NnrpMessageType,
+    metadata: RuntimeControlMetadata,
+    tail: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    try {
+      assertServerRuntimeControlMessage(messageType);
+      return this.#sendRuntimeFrame(messageType, encodeRuntimeControlMetadata(messageType, metadata, tail));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   public close(): Promise<void> {
     this.#closed = true;
     return Promise.resolve();
@@ -1168,6 +1229,44 @@ export class NnrpServerSession {
   #ensureOpen(): void {
     if (this.#closed) {
       throw closedError("server session");
+    }
+  }
+
+  #sendRuntimeObject(
+    messageType: NnrpMessageType,
+    metadata:
+      | ObjectDescriptorMetadata
+      | ObjectReferenceMetadata
+      | ObjectReleaseMetadata
+      | ObjectDeltaMetadata
+      | CacheReferenceMetadata
+      | CacheMissMetadata,
+    tail: Uint8Array,
+  ): Promise<void> {
+    try {
+      return this.#sendRuntimeFrame(messageType, encodeRuntimeObjectMetadata(messageType, metadata, tail));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  #sendRuntimeFrame(messageType: NnrpMessageType, payload: Uint8Array): Promise<void> {
+    try {
+      this.#ensureOpen();
+      const state = this.#state;
+      if (state === undefined) {
+        return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
+      }
+      const frameId = this.#nextRuntimeFrameId;
+      this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      return state.runtime.sendRuntimeFrame({
+        sessionOptions: state.options,
+        messageType,
+        frameId,
+        payload,
+      });
+    } catch (error) {
+      return Promise.reject(error);
     }
   }
 }
@@ -1558,6 +1657,54 @@ function eventSessionId(event: NnrpRuntimeEvent): string | undefined {
   return event.sessionId;
 }
 
+function assertClientRuntimeControlMessage(messageType: NnrpMessageType): void {
+  if (
+    messageType === NnrpMessageType.Cancel ||
+    messageType === NnrpMessageType.Abort ||
+    messageType === NnrpMessageType.PriorityUpdate ||
+    messageType === NnrpMessageType.Deadline ||
+    messageType === NnrpMessageType.ExpireAt ||
+    messageType === NnrpMessageType.Supersede ||
+    messageType === NnrpMessageType.BudgetUpdate ||
+    messageType === NnrpMessageType.CapabilityNegotiation ||
+    messageType === NnrpMessageType.DegradeProfile ||
+    messageType === NnrpMessageType.RouteHint ||
+    messageType === NnrpMessageType.ExecutionHint ||
+    messageType === NnrpMessageType.TraceContext
+  ) {
+    return;
+  }
+
+  throw new NnrpProtocolError({
+    code: "NNRP_CLIENT_RUNTIME_MESSAGE_DIRECTION_INVALID",
+    message: `Message type ${messageType} cannot be sent by a client session.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
+function assertServerRuntimeControlMessage(messageType: NnrpMessageType): void {
+  if (
+    messageType === NnrpMessageType.Progress ||
+    messageType === NnrpMessageType.PartialResult ||
+    messageType === NnrpMessageType.Backpressure ||
+    messageType === NnrpMessageType.CreditUpdate ||
+    messageType === NnrpMessageType.TraceContext ||
+    messageType === NnrpMessageType.ResultDropReason ||
+    messageType === NnrpMessageType.ErrorRecoverable ||
+    messageType === NnrpMessageType.RetryAfter
+  ) {
+    return;
+  }
+
+  throw new NnrpProtocolError({
+    code: "NNRP_SERVER_RUNTIME_MESSAGE_DIRECTION_INVALID",
+    message: `Message type ${messageType} cannot be sent by a server session.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
 function closedError(target: string): NnrpCapabilityError {
   return new NnrpCapabilityError({
     code: "NNRP_NATIVE_CLOSED",
@@ -1694,22 +1841,6 @@ function nativeRuntimeReadinessError(code: string, message: string): NnrpCapabil
     source: "native",
     retryable: false,
   });
-}
-
-function operationKey(operation: NnrpOperationRef): string {
-  return operation.toString();
-}
-
-function operationFrameId(operation: NnrpOperationRef): number | undefined {
-  if (typeof operation === "number") {
-    return operation;
-  }
-
-  if (operation <= BigInt(Number.MAX_SAFE_INTEGER)) {
-    return Number(operation);
-  }
-
-  return undefined;
 }
 
 type NodePlatform = NodeJS.Platform;

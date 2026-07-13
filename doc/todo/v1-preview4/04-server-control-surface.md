@@ -10,16 +10,16 @@
 
 ## Incremental Result and Flow Methods
 
-- [ ] Add every frozen server control method.
-  - [ ] `sendProgress(metadata, body?)`.
-  - [ ] `sendPartialResult(metadata, body?)`.
-  - [ ] `sendBackpressure(metadata)`.
-  - [ ] `sendCreditUpdate(metadata)`.
-  - [ ] `sendResultDropReason(metadata, diagnostic?)`.
-  - [ ] `sendTraceContext(metadata, body?)`.
-  - [ ] `sendRecoverableError(metadata, diagnostic?)`.
-  - [ ] `sendRetryAfter(metadata, diagnostic?)`.
-  - [ ] `sendControl(messageType, metadata, tail?)`.
+- [x] Add every frozen server control method.
+  - [x] `sendProgress(metadata, body?)`.
+  - [x] `sendPartialResult(metadata, body?)`.
+  - [x] `sendBackpressure(metadata)`.
+  - [x] `sendCreditUpdate(metadata)`.
+  - [x] `sendResultDropReason(metadata, diagnostic?)`.
+  - [x] `sendTraceContext(metadata, body?)`.
+  - [x] `sendRecoverableError(metadata, diagnostic?)`.
+  - [x] `sendRetryAfter(metadata, diagnostic?)`.
+  - [x] `sendControl(messageType, metadata, tail?)`.
 - [ ] Keep final result semantics separate.
   - [ ] Preserve `sendResult(result)` as the terminal result API.
   - [ ] Reject partial-result or progress sends after a terminal result.
@@ -28,10 +28,10 @@
 
 ## Runtime and Provider Integration
 
-- [ ] Route every method through the codec and one coarse runtime call.
-  - [ ] Validate message direction before dispatch.
-  - [ ] Validate body/diagnostic length before dispatch.
-  - [ ] Map native status and diagnostics to typed errors.
+- [x] Route every method through the codec and one coarse runtime call.
+  - [x] Validate message direction before dispatch.
+  - [x] Validate body/diagnostic length before dispatch.
+  - [x] Map native status and diagnostics to typed errors.
 - [ ] Keep listener lifecycle provider-neutral.
   - [ ] The server role receives a selected provider from `@nnrp/core` policy resolution.
   - [ ] The server role does not import provider implementation internals.
@@ -41,5 +41,5 @@
 
 - [ ] Server tests cover every receive and send method.
 - [ ] State-machine tests cover partial, terminal, duplicate-terminal, and post-terminal behavior.
-- [ ] Direction tests reject client-only messages from server send helpers.
-- [ ] Public API snapshots match the frozen JavaScript server page in `nnrp-doc`.
+- [x] Direction tests reject client-only messages from server send helpers.
+- [x] Public API snapshots match the frozen JavaScript server page in `nnrp-doc`.

@@ -4,16 +4,16 @@ import {
   NnrpProtocolError,
   NnrpTimeoutError,
   NnrpTransportError,
-  normalizeCancelRequest,
   normalizeSubmitRequest,
 } from "@nnrp/core";
 import { NnrpBrowserClientSession } from "@nnrp/browser-client";
 import { NnrpClientSession } from "@nnrp/native-client";
+import { NnrpServerSession } from "@nnrp/native-server";
 
 const failures: string[] = [];
 
 checkSessionMethodParity();
-checkOperationIdNormalization();
+checkServerControlSurface();
 checkBinaryPayloadOwnership();
 checkDiagnosticErrorFamilies();
 
@@ -30,6 +30,26 @@ function checkSessionMethodParity(): void {
     "submit",
     "submitNoWait",
     "cancel",
+    "abort",
+    "updatePriority",
+    "updateDeadline",
+    "expireAt",
+    "supersede",
+    "updateBudget",
+    "negotiateCapabilities",
+    "degradeProfile",
+    "sendRouteHint",
+    "sendExecutionHint",
+    "sendTraceContext",
+    "sendControl",
+    "declareObject",
+    "referenceObject",
+    "releaseObject",
+    "patchObject",
+    "sendObjectDelta",
+    "referenceCache",
+    "reportCacheMiss",
+    "invalidateCache",
     "patch",
     "inFlightFrames",
     "completeEvent",
@@ -50,11 +70,30 @@ function checkSessionMethodParity(): void {
   }
 }
 
-function checkOperationIdNormalization(): void {
-  const largeOperationId = 9_007_199_254_740_993n;
-  const normalized = normalizeCancelRequest(largeOperationId);
-  if (normalized.operation !== largeOperationId) {
-    failures.push("operation ids beyond Number.MAX_SAFE_INTEGER must remain bigint values");
+function checkServerControlSurface(): void {
+  const methods = [
+    "sendProgress",
+    "sendPartialResult",
+    "sendBackpressure",
+    "sendCreditUpdate",
+    "sendResultDropReason",
+    "sendTraceContext",
+    "sendRecoverableError",
+    "sendRetryAfter",
+    "sendControl",
+    "declareObject",
+    "referenceObject",
+    "releaseObject",
+    "patchObject",
+    "sendObjectDelta",
+    "referenceCache",
+    "reportCacheMiss",
+    "invalidateCache",
+  ];
+  for (const method of methods) {
+    if (typeof NnrpServerSession.prototype[method as keyof NnrpServerSession] !== "function") {
+      failures.push(`@nnrp/native-server NnrpServerSession is missing ${method}()`);
+    }
   }
 }
 

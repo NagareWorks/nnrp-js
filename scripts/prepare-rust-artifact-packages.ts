@@ -1,4 +1,4 @@
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.3.8";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.1";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
@@ -28,7 +28,7 @@ for (const transportPackage of transportPackages) {
   }
 }
 
-await prepareBrowserWasmPrimitives(version);
+await prepareBrowserWasmArtifact(version);
 
 async function prepareNativeTransportArtifactPackage(
   transportPackage: TransportPackagePolicy,
@@ -48,9 +48,9 @@ async function prepareNativeTransportArtifactPackage(
   await copyFile(`${extractDir}/${policy.library}`, `${outputDir}/${policy.library}`);
 }
 
-async function prepareBrowserWasmPrimitives(artifactVersion: string): Promise<void> {
-  const assetName = `nnrp-wasm-primitives-${artifactVersion}.zip`;
-  const extractDir = `${cacheDir}/browser-wasm-primitives`;
+async function prepareBrowserWasmArtifact(artifactVersion: string): Promise<void> {
+  const assetName = `nnrp-wasm-browser-${artifactVersion}.zip`;
+  const extractDir = `${cacheDir}/browser-wasm`;
   await downloadReleaseAsset(assetName);
   await resetDir(extractDir);
   await extractZip(`${cacheDir}/${assetName}`, extractDir);

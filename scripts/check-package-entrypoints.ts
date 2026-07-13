@@ -14,8 +14,6 @@ const entrypoints: readonly PackageEntrypoint[] = [
       "createTransportCandidates",
       "createTransportSelectionSummary",
       "isStandardInputProfile",
-      "normalizeCancelRequest",
-      "normalizeOperationRef",
       "normalizeSubmitRequest",
       "selectTransport",
       "validateEventPollOptions",

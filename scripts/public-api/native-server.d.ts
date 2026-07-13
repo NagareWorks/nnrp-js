@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -36,9 +36,11 @@ export interface NnrpNativeSubmitValidationRequest {
     readonly sessionOptions: NnrpSessionOptions;
     readonly submit: NnrpNormalizedSubmitRequest;
 }
-export interface NnrpNativeCancelRequest {
+export interface NnrpNativeRuntimeFrameSendRequest {
     readonly sessionOptions: NnrpSessionOptions;
-    readonly cancel: NnrpCancelRequest;
+    readonly messageType: NnrpMessageType;
+    readonly frameId: number;
+    readonly payload: Uint8Array;
 }
 export interface NnrpNativeSessionPatchRequest {
     readonly sessionOptions: NnrpSessionOptions;
@@ -70,7 +72,7 @@ export interface NnrpNativeFfiBinding {
     validateSubmit?(request: NnrpNativeSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
     submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
-    cancel?(request: NnrpNativeCancelRequest): void | Promise<void>;
+    sendRuntimeFrame?(request: NnrpNativeRuntimeFrameSendRequest): void | Promise<void>;
     patchSession?(request: NnrpNativeSessionPatchRequest): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     accept?(request: NnrpNativeAcceptRequest): NnrpNativeAcceptedSession | void | Promise<NnrpNativeAcceptedSession | void>;
@@ -164,7 +166,7 @@ export declare class NnrpBackendRuntime {
     get bindingMode(): string;
     submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint>;
-    cancel(request: NnrpNativeCancelRequest): Promise<void>;
+    sendRuntimeFrame(request: NnrpNativeRuntimeFrameSendRequest): Promise<void>;
     patchSession(request: NnrpNativeSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession>;
@@ -205,7 +207,7 @@ declare class NnrpClientSession {
     get sessionId(): string;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
-    cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;
+    sendControl(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Promise<void>;
     inFlightFrames(): readonly number[];
     completeEvent(event: NnrpRuntimeEvent): void;
     nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
@@ -242,6 +244,23 @@ export declare class NnrpServerSession {
     get sessionId(): string;
     receive(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     sendResult(_result: NnrpResult): Promise<void>;
+    sendProgress(metadata: ProgressMetadata, body?: Uint8Array): Promise<void>;
+    sendPartialResult(metadata: PartialResultMetadata, body?: Uint8Array): Promise<void>;
+    sendBackpressure(metadata: PressureMetadata): Promise<void>;
+    sendCreditUpdate(metadata: PressureMetadata): Promise<void>;
+    sendResultDropReason(metadata: ResultDropReasonMetadata, diagnostic?: Uint8Array): Promise<void>;
+    sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array): Promise<void>;
+    sendRecoverableError(metadata: RecoverableErrorMetadata, diagnostic?: Uint8Array): Promise<void>;
+    sendRetryAfter(metadata: RetryAfterMetadata, diagnostic?: Uint8Array): Promise<void>;
+    declareObject(metadata: ObjectDescriptorMetadata, body?: Uint8Array): Promise<void>;
+    referenceObject(metadata: ObjectReferenceMetadata, body?: Uint8Array): Promise<void>;
+    releaseObject(metadata: ObjectReleaseMetadata, diagnostic?: Uint8Array): Promise<void>;
+    patchObject(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void>;
+    sendObjectDelta(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void>;
+    referenceCache(metadata: CacheReferenceMetadata, body?: Uint8Array): Promise<void>;
+    reportCacheMiss(metadata: CacheMissMetadata, diagnostic?: Uint8Array): Promise<void>;
+    invalidateCache(metadata: CacheInvalidateMetadata): Promise<void>;
+    sendControl(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Promise<void>;
     close(): Promise<void>;
     get closed(): boolean;
 }

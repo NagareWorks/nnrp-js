@@ -1,4 +1,4 @@
-import { type NnrpCancelOptions, type NnrpCancelRequest, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, type NnrpNormalizedSubmitRequest, type NnrpOperationRef, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -54,9 +54,11 @@ export interface NnrpWasmSubmitRequest {
     readonly sessionOptions: NnrpBrowserSessionOptions;
     readonly submit: NnrpNormalizedSubmitRequest;
 }
-export interface NnrpWasmCancelRequest {
+export interface NnrpWasmRuntimeFrameSendRequest {
     readonly sessionOptions: NnrpBrowserSessionOptions;
-    readonly cancel: NnrpCancelRequest;
+    readonly messageType: NnrpMessageType;
+    readonly frameId: number;
+    readonly payload: Uint8Array;
 }
 export interface NnrpWasmSessionPatchRequest {
     readonly sessionOptions: NnrpBrowserSessionOptions;
@@ -89,7 +91,7 @@ export interface NnrpWasmPrimitiveBinding {
     validateSubmit?(request: NnrpWasmSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
     submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
-    cancel?(request: NnrpWasmCancelRequest): void | Promise<void>;
+    sendRuntimeFrame?(request: NnrpWasmRuntimeFrameSendRequest): void | Promise<void>;
     patchSession?(request: NnrpWasmSessionPatchRequest): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
     awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     close?(): void | Promise<void>;
@@ -130,7 +132,7 @@ export declare class NnrpBrowserRuntime {
     protocolVersion(): Promise<NnrpWasmProtocolVersion>;
     submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint>;
-    cancel(request: NnrpWasmCancelRequest): Promise<void>;
+    sendRuntimeFrame(request: NnrpWasmRuntimeFrameSendRequest): Promise<void>;
     patchSession(request: NnrpWasmSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     awaitEvents(request: NnrpWasmEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     close(): Promise<void>;
@@ -164,7 +166,27 @@ export declare class NnrpBrowserClientSession {
     get sessionId(): string;
     submit(request: NnrpSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest): Promise<bigint>;
-    cancel(operation: NnrpOperationRef, options?: NnrpCancelOptions): Promise<void>;
+    cancel(metadata: ControlRequestMetadata, diagnostic?: Uint8Array): Promise<void>;
+    abort(metadata: ControlRequestMetadata, diagnostic?: Uint8Array): Promise<void>;
+    updatePriority(metadata: SchedulingMetadata): Promise<void>;
+    updateDeadline(metadata: SchedulingMetadata): Promise<void>;
+    expireAt(metadata: SchedulingMetadata): Promise<void>;
+    supersede(metadata: SupersedeMetadata, diagnostic?: Uint8Array): Promise<void>;
+    updateBudget(metadata: BudgetMetadata): Promise<void>;
+    negotiateCapabilities(metadata: CapabilityMetadata, body?: Uint8Array): Promise<void>;
+    degradeProfile(metadata: CapabilityMetadata, body?: Uint8Array): Promise<void>;
+    sendRouteHint(metadata: RouteHintMetadata, body?: Uint8Array): Promise<void>;
+    sendExecutionHint(metadata: RouteHintMetadata, body?: Uint8Array): Promise<void>;
+    sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array): Promise<void>;
+    sendControl(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Promise<void>;
+    declareObject(metadata: ObjectDescriptorMetadata, body?: Uint8Array): Promise<void>;
+    referenceObject(metadata: ObjectReferenceMetadata, body?: Uint8Array): Promise<void>;
+    releaseObject(metadata: ObjectReleaseMetadata, diagnostic?: Uint8Array): Promise<void>;
+    patchObject(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void>;
+    sendObjectDelta(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void>;
+    referenceCache(metadata: CacheReferenceMetadata, body?: Uint8Array): Promise<void>;
+    reportCacheMiss(metadata: CacheMissMetadata, diagnostic?: Uint8Array): Promise<void>;
+    invalidateCache(metadata: CacheInvalidateMetadata): Promise<void>;
     inFlightFrames(): readonly number[];
     completeEvent(event: NnrpRuntimeEvent): void;
     nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;

@@ -32,8 +32,6 @@ import {
   type NnrpTransportPolicy,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
-  normalizeCancelRequest,
-  normalizeOperationRef,
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
   normalizeSubmitRequest,
@@ -1354,26 +1352,6 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
 Deno.test("@nnrp/core exposes strict standard profile checks", () => {
   assertEquals(isStandardInputProfile("tool_delta"), true);
   assertEquals(isStandardInputProfile("custom"), false);
-});
-
-Deno.test("@nnrp/core normalizes operation references and cancel requests", () => {
-  assertEquals(normalizeOperationRef(42), 42n);
-  assertEquals(normalizeOperationRef(7n), 7n);
-  assertEquals(normalizeCancelRequest(3, { reason: "user", metadata: { source: "test" } }), {
-    operation: 3n,
-    options: { reason: "user", metadata: { source: "test" } },
-  });
-
-  assertThrows(
-    () => normalizeOperationRef(-1n),
-    NnrpProtocolError,
-    "Operation ids must be non-negative",
-  );
-  assertThrows(
-    () => normalizeOperationRef(-1),
-    NnrpProtocolError,
-    "Operation ids must be non-negative",
-  );
 });
 
 Deno.test("@nnrp/core normalizes recovery tokens and migration requests", () => {

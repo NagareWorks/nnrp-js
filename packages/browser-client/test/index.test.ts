@@ -1,6 +1,11 @@
 import {
+  CacheMissReason,
+  CacheReuseScope,
   createCapabilityManifest,
+  decodeRuntimeControlMetadata,
+  MemoryLocationHint,
   NnrpCapabilityError,
+  NnrpMessageType,
   NnrpProtocolError,
   NnrpRecoveryError,
   NnrpResultDropError,
@@ -8,6 +13,10 @@ import {
   NnrpTimeoutError,
   type NnrpTransportCandidate,
   NnrpTransportError,
+  ObjectReleaseReason,
+  OwnershipHint,
+  RuntimeObjectKind,
+  RuntimeRole,
 } from "@nnrp/core";
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
@@ -394,7 +403,7 @@ Deno.test("@nnrp/browser-client session methods preserve not-instantiated diagno
   assertEquals(noWaitError.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 });
 
-Deno.test("@nnrp/browser-client routes submit, cancel, and event polling through injected primitives", async () => {
+Deno.test("@nnrp/browser-client routes submit, runtime controls, and event polling through injected primitives", async () => {
   const seen: string[] = [];
   const runtime = await openBrowserRuntime({
     primitives: {
@@ -418,8 +427,10 @@ Deno.test("@nnrp/browser-client routes submit, cancel, and event polling through
         seen.push(`submitNoWait:${submit.frameId}:${submit.metadata?.validated ?? ""}`);
         return BigInt(submit.frameId);
       },
-      cancel: ({ cancel }) => {
-        seen.push(`cancel:${cancel.operation}:${cancel.options?.reason ?? ""}`);
+      sendRuntimeFrame: ({ messageType, frameId, payload }) => {
+        const decoded = decodeRuntimeControlMetadata(messageType, payload);
+        const metadata = decoded.metadata as { readonly operationId: bigint };
+        seen.push(`control:${messageType}:${frameId}:${metadata.operationId}:${decoded.tail.length}`);
       },
       awaitEvents: ({ maxEvents }) => [{
         type: "diagnostic",
@@ -447,14 +458,21 @@ Deno.test("@nnrp/browser-client routes submit, cancel, and event polling through
       metadata: { profile: "tensor" },
     },
   );
-  await session.cancel(11, { reason: "done" });
+  await session.cancel({
+    operationId: 11n,
+    controlSequence: 1n,
+    reasonCode: 0,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 4,
+  }, new Uint8Array([100, 111, 110, 101]));
   assertEquals(await session.submitNoWait({ frameId: 12 }), 12n);
   const event = await session.nextEvent();
 
   assertEquals(seen, [
     "validate:11:tensor",
     "submit:11:kv-block:true",
-    "cancel:11:done",
+    `control:${NnrpMessageType.Cancel}:1:11:4`,
     "validate:12:",
     "submitNoWait:12:true",
   ]);
@@ -668,11 +686,10 @@ Deno.test("@nnrp/browser-client rejects duplicate in-flight frames and releases 
   assertEquals(await session.submit({ frameId: 5 }), { frameId: 5 });
 });
 
-Deno.test("@nnrp/browser-client tracks no-wait frames until cancel or terminal events", async () => {
+Deno.test("@nnrp/browser-client tracks no-wait frames until terminal events", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
       submitNoWait: ({ submit }) => BigInt(submit.frameId),
-      cancel: () => {},
     },
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
@@ -686,7 +703,7 @@ Deno.test("@nnrp/browser-client tracks no-wait frames until cancel or terminal e
   );
   assertEquals(duplicate.diagnostic.code, "NNRP_FRAME_IN_FLIGHT");
 
-  await session.cancel(21);
+  session.completeEvent({ type: "result", result: { frameId: 21, metadata: {} } });
   assertEquals(session.inFlightFrames(), []);
 
   await session.submitNoWait({ frameId: 22 });
@@ -739,32 +756,28 @@ Deno.test("@nnrp/browser-client awaits submit capacity and rejects no-wait when 
   assertEquals(submitted, [41]);
 });
 
-Deno.test("@nnrp/browser-client rejects duplicate cancel and cancel after terminal events", async () => {
+Deno.test("@nnrp/browser-client rejects server-only runtime controls", async () => {
   const runtime = await openBrowserRuntime({
     primitives: {
-      submitNoWait: ({ submit }) => BigInt(submit.frameId),
-      cancel: () => {},
+      sendRuntimeFrame: () => {},
     },
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
-  await session.submitNoWait({ frameId: 12 });
-  await session.cancel(12);
-  const duplicateCancel = await assertRejects(
-    () => session.cancel(12),
+  const error = await assertRejects(
+    () =>
+      session.sendControl(NnrpMessageType.Progress, {
+        operationId: 12n,
+        progressSequence: 1n,
+        stageCode: 1,
+        percentX100: 5000,
+        objectId: 0n,
+        bodyBytes: 0,
+      }),
     NnrpProtocolError,
   );
 
-  assertEquals(duplicateCancel.diagnostic.code, "NNRP_OPERATION_CANCEL_DUPLICATE");
-
-  await session.submitNoWait({ frameId: 13 });
-  session.completeEvent({ type: "result", result: { frameId: 13 } });
-  const terminalCancel = await assertRejects(
-    () => session.cancel(13),
-    NnrpProtocolError,
-  );
-
-  assertEquals(terminalCancel.diagnostic.code, "NNRP_OPERATION_TERMINAL");
+  assertEquals(error.diagnostic.code, "NNRP_CLIENT_RUNTIME_MESSAGE_DIRECTION_INVALID");
 });
 
 Deno.test("@nnrp/browser-client rejects duplicate terminal events and clears frames on close", async () => {
@@ -833,7 +846,13 @@ Deno.test("@nnrp/browser-client preserves not-instantiated diagnostics for direc
     NnrpWasmBindingUnavailableError,
   );
   await assertRejects(
-    () => runtime.cancel({ sessionOptions: {}, cancel: { operation: 1n } }),
+    () =>
+      runtime.sendRuntimeFrame({
+        sessionOptions: {},
+        messageType: NnrpMessageType.Cancel,
+        frameId: 1,
+        payload: new Uint8Array(),
+      }),
     NnrpWasmBindingUnavailableError,
   );
   await assertRejects(
@@ -881,13 +900,21 @@ Deno.test("@nnrp/browser-client validates session metadata before opening sessio
   );
 });
 
-Deno.test("@nnrp/browser-client validates cancel and event polling before WASM dispatch", async () => {
+Deno.test("@nnrp/browser-client validates runtime control and event polling before WASM dispatch", async () => {
   const runtime = await openBrowserRuntime();
   const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
   const session = client.openSession();
 
-  const cancelError = await assertRejects(
-    () => session.cancel(-1),
+  const controlError = await assertRejects(
+    () =>
+      session.cancel({
+        operationId: -1n,
+        controlSequence: 1n,
+        reasonCode: 0,
+        sourceRole: RuntimeRole.Client,
+        flags: 0,
+        diagnosticBytes: 0,
+      }),
     NnrpProtocolError,
   );
   const eventError = await assertRejects(
@@ -895,8 +922,184 @@ Deno.test("@nnrp/browser-client validates cancel and event polling before WASM d
     NnrpProtocolError,
   );
 
-  assertEquals(cancelError.diagnostic.code, "NNRP_OPERATION_ID_INVALID");
+  assertEquals(controlError.diagnostic.code, "NNRP_CONTROL_INTEGER_INVALID");
   assertEquals(eventError.diagnostic.code, "NNRP_EVENT_TIMEOUT_INVALID");
+});
+
+Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime API", async () => {
+  const seen: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number; readonly payload: Uint8Array }> =
+    [];
+  const runtime = await openBrowserRuntime({
+    primitives: {
+      sendRuntimeFrame: ({ messageType, frameId, payload }) => {
+        seen.push({ messageType, frameId, payload });
+      },
+    },
+  });
+  const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession({
+    sessionId: "runtime-api",
+  });
+  const one = new Uint8Array([1]);
+  const control = {
+    operationId: 1n,
+    controlSequence: 2n,
+    reasonCode: 3,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 1,
+  } as const;
+  const scheduling = {
+    operationId: 1n,
+    controlSequence: 2n,
+    priorityClass: 3,
+    priorityDelta: -1,
+    deadlineUnixMs: 4n,
+    flags: 0,
+  } as const;
+
+  await session.cancel(control, one);
+  await session.abort(control, one);
+  await session.updatePriority(scheduling);
+  await session.updateDeadline(scheduling);
+  await session.expireAt(scheduling);
+  await session.supersede({
+    oldOperationId: 1n,
+    newOperationId: 2n,
+    controlSequence: 3n,
+    dropReasonCode: 4,
+    flags: 0,
+    diagnosticBytes: 1,
+  }, one);
+  await session.updateBudget({
+    operationId: 1n,
+    computeBudgetUnits: 2n,
+    memoryBudgetBytes: 3n,
+    bandwidthBudgetBytes: 4n,
+    tokenBudget: 5,
+    flags: 0,
+  });
+  const capability = {
+    profileId: 1,
+    capabilityCount: 1,
+    costModelId: 2,
+    preferenceRank: 3,
+    limitBytes: 4n,
+    limitUnits: 5n,
+    bodyBytes: 1,
+    flags: 0,
+  } as const;
+  await session.negotiateCapabilities(capability, one);
+  await session.degradeProfile(capability, one);
+  const route = {
+    operationId: 1n,
+    routeId: 2,
+    executorClass: 3,
+    affinityClass: 4,
+    deadlineUnixMs: 5n,
+    bodyBytes: 1,
+    flags: 0,
+  } as const;
+  await session.sendRouteHint(route, one);
+  await session.sendExecutionHint(route, one);
+  await session.sendTraceContext({
+    traceId: 1n,
+    spanId: 2n,
+    parentSpanId: 3n,
+    stageCode: 4,
+    flags: 0,
+    bodyBytes: 1,
+  }, one);
+  await session.declareObject({
+    objectId: 1n,
+    objectKind: RuntimeObjectKind.Tensor,
+    producerRole: RuntimeRole.Client,
+    consumerRole: RuntimeRole.Server,
+    sessionId: 1,
+    byteSize: 1n,
+    computeCostUnits: 1,
+    memoryLocationHint: MemoryLocationHint.HostMemory,
+    ownershipHint: OwnershipHint.SessionOwned,
+    lifetimeHintMs: 1,
+    metadataBytes: 1,
+  }, one);
+  await session.referenceObject({
+    objectId: 1n,
+    operationId: 2n,
+    objectVersion: 3n,
+    offset: 0n,
+    length: 1n,
+    flags: 0,
+    metadataBytes: 1,
+  }, one);
+  await session.releaseObject({
+    objectId: 1n,
+    operationId: 2n,
+    releaseReason: ObjectReleaseReason.Completed,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 1,
+  }, one);
+  const delta = {
+    objectId: 1n,
+    deltaSequence: 2n,
+    regionOffset: 0n,
+    regionBytes: 1,
+    deltaBytes: 1,
+    flags: 0,
+    metadataBytes: 0,
+  } as const;
+  await session.patchObject(delta, one);
+  await session.sendObjectDelta(delta, one);
+  await session.referenceCache({
+    cacheKeyHi: 1n,
+    cacheKeyLo: 2n,
+    profileId: 3,
+    reuseScope: CacheReuseScope.Session,
+    leaseId: 4n,
+    producerTraceId: 5n,
+    expirationHintMs: 6,
+    metadataBytes: 1,
+    flags: 0,
+  }, one);
+  await session.reportCacheMiss({
+    cacheKeyHi: 1n,
+    cacheKeyLo: 2n,
+    missReason: CacheMissReason.NotFound,
+    profileId: 3,
+    diagnosticBytes: 1,
+  }, one);
+  await session.invalidateCache({
+    invalidateScope: 1,
+    cacheNamespace: 2,
+    cacheKeyHi: 3,
+    cacheKeyLo: 4,
+    reasonCode: 5,
+  });
+
+  assertEquals(seen.map(({ messageType }) => messageType), [
+    NnrpMessageType.Cancel,
+    NnrpMessageType.Abort,
+    NnrpMessageType.PriorityUpdate,
+    NnrpMessageType.Deadline,
+    NnrpMessageType.ExpireAt,
+    NnrpMessageType.Supersede,
+    NnrpMessageType.BudgetUpdate,
+    NnrpMessageType.CapabilityNegotiation,
+    NnrpMessageType.DegradeProfile,
+    NnrpMessageType.RouteHint,
+    NnrpMessageType.ExecutionHint,
+    NnrpMessageType.TraceContext,
+    NnrpMessageType.ObjectDeclare,
+    NnrpMessageType.ObjectRef,
+    NnrpMessageType.ObjectRelease,
+    NnrpMessageType.ObjectPatch,
+    NnrpMessageType.ObjectDelta,
+    NnrpMessageType.CacheReference,
+    NnrpMessageType.CacheMiss,
+    NnrpMessageType.CacheInvalidate,
+  ]);
+  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 20 }, (_, index) => index + 1));
+  assertEquals(seen.every(({ payload }) => payload.byteLength > 0), true);
 });
 
 Deno.test("@nnrp/browser-client cancels event polling with abort signals", async () => {

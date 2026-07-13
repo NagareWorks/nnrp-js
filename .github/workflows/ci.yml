@@ -177,6 +177,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: deno task artifacts:prepare
+      - name: Native runtime frame smoke
+        run: deno task native-runtime-frame-smoke
       - name: Package entrypoint smoke
         run: deno task package-check
       - name: SDK command smoke

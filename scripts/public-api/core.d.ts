@@ -198,6 +198,20 @@ export interface CacheInvalidateMetadata {
     readonly cacheKeyLo: number;
     readonly reasonCode: number;
 }
+interface NnrpRuntimeFrameEventBase<TType extends string, TMessageType extends NnrpMessageType, TMetadata> {
+    readonly type: TType;
+    readonly messageType: TMessageType;
+    readonly metadata: TMetadata;
+    readonly sessionId?: string;
+}
+type NnrpRuntimeFrameEventWithTail<TType extends string, TMessageType extends NnrpMessageType, TMetadata, TTail extends string> = NnrpRuntimeFrameEventBase<TType, TMessageType, TMetadata> & Readonly<Partial<Record<TTail, Uint8Array>>>;
+export type NnrpRuntimeFrameEvent = NnrpRuntimeFrameEventWithTail<"cancel", NnrpMessageType.Cancel, ControlRequestMetadata, "diagnostic"> | NnrpRuntimeFrameEventWithTail<"abort", NnrpMessageType.Abort, ControlRequestMetadata, "diagnostic"> | NnrpRuntimeFrameEventBase<"priority-update", NnrpMessageType.PriorityUpdate, SchedulingMetadata> | NnrpRuntimeFrameEventBase<"deadline", NnrpMessageType.Deadline, SchedulingMetadata> | NnrpRuntimeFrameEventBase<"expire-at", NnrpMessageType.ExpireAt, SchedulingMetadata> | NnrpRuntimeFrameEventWithTail<"supersede", NnrpMessageType.Supersede, SupersedeMetadata, "diagnostic"> | NnrpRuntimeFrameEventBase<"budget-update", NnrpMessageType.BudgetUpdate, BudgetMetadata> | NnrpRuntimeFrameEventWithTail<"progress", NnrpMessageType.Progress, ProgressMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"partial-result", NnrpMessageType.PartialResult, PartialResultMetadata, "body"> | NnrpRuntimeFrameEventBase<"backpressure", NnrpMessageType.Backpressure, PressureMetadata> | NnrpRuntimeFrameEventBase<"credit-update", NnrpMessageType.CreditUpdate, PressureMetadata> | NnrpRuntimeFrameEventWithTail<"capability-negotiation", NnrpMessageType.CapabilityNegotiation, CapabilityMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"degrade-profile", NnrpMessageType.DegradeProfile, CapabilityMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"route-hint", NnrpMessageType.RouteHint, RouteHintMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"execution-hint", NnrpMessageType.ExecutionHint, RouteHintMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"trace-context", NnrpMessageType.TraceContext, TraceContextMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"result-drop-reason", NnrpMessageType.ResultDropReason, ResultDropReasonMetadata, "diagnostic"> | NnrpRuntimeFrameEventWithTail<"recoverable-error", NnrpMessageType.ErrorRecoverable, RecoverableErrorMetadata, "diagnostic"> | NnrpRuntimeFrameEventWithTail<"retry-after", NnrpMessageType.RetryAfter, RetryAfterMetadata, "diagnostic"> | NnrpRuntimeFrameEventWithTail<"object-declare", NnrpMessageType.ObjectDeclare, ObjectDescriptorMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"object-ref", NnrpMessageType.ObjectRef, ObjectReferenceMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"object-release", NnrpMessageType.ObjectRelease, ObjectReleaseMetadata, "diagnostic"> | (NnrpRuntimeFrameEventBase<"object-patch", NnrpMessageType.ObjectPatch, ObjectDeltaMetadata> & {
+    readonly metadataBody?: Uint8Array;
+    readonly delta?: Uint8Array;
+}) | (NnrpRuntimeFrameEventBase<"object-delta", NnrpMessageType.ObjectDelta, ObjectDeltaMetadata> & {
+    readonly metadataBody?: Uint8Array;
+    readonly delta?: Uint8Array;
+}) | NnrpRuntimeFrameEventWithTail<"cache-reference", NnrpMessageType.CacheReference, CacheReferenceMetadata, "body"> | NnrpRuntimeFrameEventWithTail<"cache-miss", NnrpMessageType.CacheMiss, CacheMissMetadata, "diagnostic"> | NnrpRuntimeFrameEventBase<"cache-invalidate", NnrpMessageType.CacheInvalidate, CacheInvalidateMetadata>;
 export interface ControlRequestMetadata {
     readonly operationId: bigint;
     readonly controlSequence: bigint;
@@ -321,7 +335,6 @@ export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
 export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefer-ipc" | "prefer-websocket" | "force-quic" | "force-tcp" | "force-ipc" | "force-websocket";
 export type NnrpOperationId = bigint;
 export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
-export type NnrpOperationRef = NnrpOperationId | number;
 export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "control.retry_after" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
@@ -538,7 +551,7 @@ export type NnrpRuntimeEvent = {
     readonly frameId: number;
     readonly sessionId?: string;
     readonly diagnostic: NnrpDiagnostic;
-} | NnrpSessionMigrationEvent | {
+} | NnrpSessionMigrationEvent | NnrpRuntimeFrameEvent | {
     readonly type: "close";
     readonly sessionId?: string;
     readonly diagnostic?: NnrpDiagnostic;
@@ -556,19 +569,6 @@ export interface NnrpResultHintMetadata {
     readonly frameId: number;
     readonly expectedBytes?: number;
     readonly transport?: NnrpTransportKind;
-}
-export interface NnrpCancelOptions {
-    readonly reason?: string;
-    readonly metadata?: Readonly<Record<string, string>>;
-}
-export interface NnrpCancelRequest {
-    readonly operation: NnrpOperationRef;
-    readonly options?: NnrpCancelOptions;
-}
-export interface NnrpCancelResult {
-    readonly operation: NnrpOperationId;
-    readonly state: Extract<NnrpOperationState, "cancelled">;
-    readonly diagnostic?: NnrpDiagnostic;
 }
 export interface NnrpAbortSignalLike {
     readonly aborted: boolean;
@@ -655,12 +655,11 @@ export declare function normalizeCachePutRequest(request: NnrpCachePutRequest): 
 export declare function normalizeCacheInvalidateRequest(request: NnrpCacheInvalidateRequest): NnrpCacheInvalidateRequest;
 export declare function isStandardInputProfile(profile: string): profile is NnrpInputProfile;
 export declare function normalizeSubmitRequest(request: NnrpSubmitRequest, options?: NormalizeSubmitRequestOptions): NnrpNormalizedSubmitRequest;
-export declare function normalizeOperationRef(operation: NnrpOperationRef): NnrpOperationId;
-export declare function normalizeCancelRequest(operation: NnrpOperationRef, options?: NnrpCancelOptions): NnrpCancelRequest;
 export declare function createRecoveryToken(token: string | NnrpBinaryPayload, metadata?: Readonly<Record<string, string>>): NnrpRecoveryToken;
 export declare function normalizeSessionMigrationRequest(request: NnrpSessionMigrationRequest): NnrpSessionMigrationRequest;
 export declare function throwIfResultDrop(event: NnrpRuntimeEvent): void;
 export declare function validateEventPollOptions(options?: NnrpEventPollOptions): void;
 export declare function validateSessionMetadata(options?: NnrpSessionMetadataOptions): void;
 export declare function normalizeSessionPatchRequest(request: NnrpSessionPatchRequest): NnrpSessionPatchRequest;
+export {};
 //# sourceMappingURL=index.d.ts.map

@@ -223,6 +223,91 @@ export interface CacheInvalidateMetadata {
   readonly reasonCode: number;
 }
 
+interface NnrpRuntimeFrameEventBase<
+  TType extends string,
+  TMessageType extends NnrpMessageType,
+  TMetadata,
+> {
+  readonly type: TType;
+  readonly messageType: TMessageType;
+  readonly metadata: TMetadata;
+  readonly sessionId?: string;
+}
+
+type NnrpRuntimeFrameEventWithTail<
+  TType extends string,
+  TMessageType extends NnrpMessageType,
+  TMetadata,
+  TTail extends string,
+> =
+  & NnrpRuntimeFrameEventBase<TType, TMessageType, TMetadata>
+  & Readonly<Partial<Record<TTail, Uint8Array>>>;
+
+export type NnrpRuntimeFrameEvent =
+  | NnrpRuntimeFrameEventWithTail<"cancel", NnrpMessageType.Cancel, ControlRequestMetadata, "diagnostic">
+  | NnrpRuntimeFrameEventWithTail<"abort", NnrpMessageType.Abort, ControlRequestMetadata, "diagnostic">
+  | NnrpRuntimeFrameEventBase<"priority-update", NnrpMessageType.PriorityUpdate, SchedulingMetadata>
+  | NnrpRuntimeFrameEventBase<"deadline", NnrpMessageType.Deadline, SchedulingMetadata>
+  | NnrpRuntimeFrameEventBase<"expire-at", NnrpMessageType.ExpireAt, SchedulingMetadata>
+  | NnrpRuntimeFrameEventWithTail<"supersede", NnrpMessageType.Supersede, SupersedeMetadata, "diagnostic">
+  | NnrpRuntimeFrameEventBase<"budget-update", NnrpMessageType.BudgetUpdate, BudgetMetadata>
+  | NnrpRuntimeFrameEventWithTail<"progress", NnrpMessageType.Progress, ProgressMetadata, "body">
+  | NnrpRuntimeFrameEventWithTail<"partial-result", NnrpMessageType.PartialResult, PartialResultMetadata, "body">
+  | NnrpRuntimeFrameEventBase<"backpressure", NnrpMessageType.Backpressure, PressureMetadata>
+  | NnrpRuntimeFrameEventBase<"credit-update", NnrpMessageType.CreditUpdate, PressureMetadata>
+  | NnrpRuntimeFrameEventWithTail<
+    "capability-negotiation",
+    NnrpMessageType.CapabilityNegotiation,
+    CapabilityMetadata,
+    "body"
+  >
+  | NnrpRuntimeFrameEventWithTail<"degrade-profile", NnrpMessageType.DegradeProfile, CapabilityMetadata, "body">
+  | NnrpRuntimeFrameEventWithTail<"route-hint", NnrpMessageType.RouteHint, RouteHintMetadata, "body">
+  | NnrpRuntimeFrameEventWithTail<"execution-hint", NnrpMessageType.ExecutionHint, RouteHintMetadata, "body">
+  | NnrpRuntimeFrameEventWithTail<"trace-context", NnrpMessageType.TraceContext, TraceContextMetadata, "body">
+  | NnrpRuntimeFrameEventWithTail<
+    "result-drop-reason",
+    NnrpMessageType.ResultDropReason,
+    ResultDropReasonMetadata,
+    "diagnostic"
+  >
+  | NnrpRuntimeFrameEventWithTail<
+    "recoverable-error",
+    NnrpMessageType.ErrorRecoverable,
+    RecoverableErrorMetadata,
+    "diagnostic"
+  >
+  | NnrpRuntimeFrameEventWithTail<"retry-after", NnrpMessageType.RetryAfter, RetryAfterMetadata, "diagnostic">
+  | NnrpRuntimeFrameEventWithTail<
+    "object-declare",
+    NnrpMessageType.ObjectDeclare,
+    ObjectDescriptorMetadata,
+    "body"
+  >
+  | NnrpRuntimeFrameEventWithTail<"object-ref", NnrpMessageType.ObjectRef, ObjectReferenceMetadata, "body">
+  | NnrpRuntimeFrameEventWithTail<
+    "object-release",
+    NnrpMessageType.ObjectRelease,
+    ObjectReleaseMetadata,
+    "diagnostic"
+  >
+  | (NnrpRuntimeFrameEventBase<"object-patch", NnrpMessageType.ObjectPatch, ObjectDeltaMetadata> & {
+    readonly metadataBody?: Uint8Array;
+    readonly delta?: Uint8Array;
+  })
+  | (NnrpRuntimeFrameEventBase<"object-delta", NnrpMessageType.ObjectDelta, ObjectDeltaMetadata> & {
+    readonly metadataBody?: Uint8Array;
+    readonly delta?: Uint8Array;
+  })
+  | NnrpRuntimeFrameEventWithTail<
+    "cache-reference",
+    NnrpMessageType.CacheReference,
+    CacheReferenceMetadata,
+    "body"
+  >
+  | NnrpRuntimeFrameEventWithTail<"cache-miss", NnrpMessageType.CacheMiss, CacheMissMetadata, "diagnostic">
+  | NnrpRuntimeFrameEventBase<"cache-invalidate", NnrpMessageType.CacheInvalidate, CacheInvalidateMetadata>;
+
 export interface ControlRequestMetadata {
   readonly operationId: bigint;
   readonly controlSequence: bigint;
@@ -387,8 +472,6 @@ export type NnrpTransportPolicy =
 export type NnrpOperationId = bigint;
 
 export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
-
-export type NnrpOperationRef = NnrpOperationId | number;
 
 export type NnrpCapability =
   | "client.session"
@@ -723,6 +806,7 @@ export type NnrpRuntimeEvent =
     readonly diagnostic: NnrpDiagnostic;
   }
   | NnrpSessionMigrationEvent
+  | NnrpRuntimeFrameEvent
   | { readonly type: "close"; readonly sessionId?: string; readonly diagnostic?: NnrpDiagnostic }
   | { readonly type: "diagnostic"; readonly sessionId?: string; readonly diagnostic: NnrpDiagnostic };
 
@@ -736,22 +820,6 @@ export interface NnrpResultHintMetadata {
   readonly frameId: number;
   readonly expectedBytes?: number;
   readonly transport?: NnrpTransportKind;
-}
-
-export interface NnrpCancelOptions {
-  readonly reason?: string;
-  readonly metadata?: Readonly<Record<string, string>>;
-}
-
-export interface NnrpCancelRequest {
-  readonly operation: NnrpOperationRef;
-  readonly options?: NnrpCancelOptions;
-}
-
-export interface NnrpCancelResult {
-  readonly operation: NnrpOperationId;
-  readonly state: Extract<NnrpOperationState, "cancelled">;
-  readonly diagnostic?: NnrpDiagnostic;
 }
 
 export interface NnrpAbortSignalLike {
@@ -1213,47 +1281,6 @@ export function normalizeSubmitRequest(
     ...(request.cacheKey === undefined ? {} : { cacheKey: request.cacheKey }),
     ...(request.descriptor === undefined ? {} : { descriptor: createPayloadDescriptor(request.descriptor) }),
     ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
-  };
-}
-
-export function normalizeOperationRef(operation: NnrpOperationRef): NnrpOperationId {
-  if (typeof operation === "bigint") {
-    if (operation < 0n) {
-      throw new NnrpProtocolError({
-        code: "NNRP_OPERATION_ID_INVALID",
-        message: "Operation ids must be non-negative.",
-        source: "core",
-        retryable: false,
-      });
-    }
-
-    return operation;
-  }
-
-  if (!Number.isSafeInteger(operation) || operation < 0) {
-    throw new NnrpProtocolError({
-      code: "NNRP_OPERATION_ID_INVALID",
-      message: "Operation ids must be non-negative safe integers.",
-      source: "core",
-      retryable: false,
-    });
-  }
-
-  return BigInt(operation);
-}
-
-export function normalizeCancelRequest(
-  operation: NnrpOperationRef,
-  options: NnrpCancelOptions = {},
-): NnrpCancelRequest {
-  const normalized = normalizeOperationRef(operation);
-
-  return {
-    operation: normalized,
-    options: {
-      ...(options.reason === undefined ? {} : { reason: options.reason }),
-      ...(options.metadata === undefined ? {} : { metadata: { ...options.metadata } }),
-    },
   };
 }
 

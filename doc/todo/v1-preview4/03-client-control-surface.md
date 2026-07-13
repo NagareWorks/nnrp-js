@@ -2,24 +2,24 @@
 
 ## Native and Browser Parity
 
-- [ ] Add the same Preview4 methods to `NnrpClientSession` and `NnrpBrowserClientSession`.
-  - [ ] `cancel(metadata, diagnostic?)`.
-  - [ ] `abort(metadata, diagnostic?)`.
-  - [ ] `updatePriority(metadata)`.
-  - [ ] `updateDeadline(metadata)`.
-  - [ ] `expireAt(metadata)`.
-  - [ ] `supersede(metadata, diagnostic?)`.
-  - [ ] `updateBudget(metadata)`.
-  - [ ] `negotiateCapabilities(metadata, body?)`.
-  - [ ] `degradeProfile(metadata, body?)`.
-  - [ ] `sendRouteHint(metadata, body?)`.
-  - [ ] `sendExecutionHint(metadata, body?)`.
-  - [ ] `sendTraceContext(metadata, body?)`.
-  - [ ] `sendControl(messageType, metadata, tail?)`.
-- [ ] Route every method through the codec and one coarse runtime submit call.
-  - [ ] Allocate control sequence values consistently per operation/session.
-  - [ ] Validate the message direction before runtime dispatch.
-  - [ ] Surface native/WASM status and diagnostics as typed JavaScript errors.
+- [x] Add the same Preview4 methods to `NnrpClientSession` and `NnrpBrowserClientSession`.
+  - [x] `cancel(metadata, diagnostic?)`.
+  - [x] `abort(metadata, diagnostic?)`.
+  - [x] `updatePriority(metadata)`.
+  - [x] `updateDeadline(metadata)`.
+  - [x] `expireAt(metadata)`.
+  - [x] `supersede(metadata, diagnostic?)`.
+  - [x] `updateBudget(metadata)`.
+  - [x] `negotiateCapabilities(metadata, body?)`.
+  - [x] `degradeProfile(metadata, body?)`.
+  - [x] `sendRouteHint(metadata, body?)`.
+  - [x] `sendExecutionHint(metadata, body?)`.
+  - [x] `sendTraceContext(metadata, body?)`.
+  - [x] `sendControl(messageType, metadata, tail?)`.
+- [x] Route every method through the codec and one coarse runtime submit call.
+  - [x] Preserve caller-supplied control sequence values through encoding and dispatch.
+  - [x] Validate the message direction before runtime dispatch.
+  - [x] Surface native/WASM status and diagnostics as typed JavaScript errors.
 
 ## Submit Cancellation and Deadlines
 
@@ -36,16 +36,16 @@
 
 ## Event Consumption
 
-- [ ] Extend `nextEvent()` and `events()` with the complete Preview4 event union.
-  - [ ] Preserve operation-local ordering.
-  - [ ] Preserve backpressure and credit updates.
-  - [ ] Preserve progress and partial-result sequence values.
-  - [ ] Preserve object/cache event metadata and owned tail bytes.
+- [x] Extend `nextEvent()` and `events()` with the complete Preview4 event union.
+  - [x] Preserve operation-local ordering.
+  - [x] Preserve backpressure and credit updates.
+  - [x] Preserve progress and partial-result sequence values.
+  - [x] Preserve object/cache event metadata and owned tail bytes.
 
 ## Acceptance Evidence
 
-- [ ] Native-client tests cover every public control method and failure path.
-- [ ] Browser-client tests cover every public control method and failure path.
+- [x] Native-client tests cover every public control method and failure path.
+- [x] Browser-client tests cover every public control method and failure path.
 - [ ] AbortSignal tests cover pre-dispatch, in-flight, terminal, and listener-cleanup cases.
-- [ ] Type tests prove native and browser client session method parity.
-- [ ] Public API snapshots match the frozen JavaScript client page in `nnrp-doc`.
+- [x] Type tests prove native and browser client session method parity.
+- [x] Public API snapshots match the frozen JavaScript client page in `nnrp-doc`.
