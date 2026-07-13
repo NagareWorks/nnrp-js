@@ -2,21 +2,21 @@
 
 ## Control Metadata Codecs
 
-- [ ] Implement encode/decode/validation for every frozen control metadata type.
-  - [ ] `ControlRequestMetadata` for `Cancel` and `Abort`.
-  - [ ] `SchedulingMetadata` for `PriorityUpdate`, `Deadline`, and `ExpireAt`.
-  - [ ] `SupersedeMetadata` and `BudgetMetadata`.
-  - [ ] `ProgressMetadata` and `PartialResultMetadata`.
-  - [ ] `PressureMetadata` for `Backpressure` and `CreditUpdate`.
-  - [ ] `CapabilityMetadata` for `CapabilityNegotiation` and `DegradeProfile`.
-  - [ ] `RouteHintMetadata` for `RouteHint` and `ExecutionHint`.
-  - [ ] `TraceContextMetadata` and `ResultDropReasonMetadata`.
-  - [ ] `RecoverableErrorMetadata` and `RetryAfterMetadata`.
-- [ ] Enforce metadata/tail contracts.
-  - [ ] Reject mismatched message and metadata types.
-  - [ ] Reject body, diagnostic, and metadata byte-length mismatches.
-  - [ ] Reject integers outside their frozen wire width.
-  - [ ] Preserve unknown extension-safe flags without changing built-in semantics.
+- [x] Implement encode/decode/validation for every frozen control metadata type.
+  - [x] `ControlRequestMetadata` for `Cancel` and `Abort`.
+  - [x] `SchedulingMetadata` for `PriorityUpdate`, `Deadline`, and `ExpireAt`.
+  - [x] `SupersedeMetadata` and `BudgetMetadata`.
+  - [x] `ProgressMetadata` and `PartialResultMetadata`.
+  - [x] `PressureMetadata` for `Backpressure` and `CreditUpdate`.
+  - [x] `CapabilityMetadata` for `CapabilityNegotiation` and `DegradeProfile`.
+  - [x] `RouteHintMetadata` for `RouteHint` and `ExecutionHint`.
+  - [x] `TraceContextMetadata` and `ResultDropReasonMetadata`.
+  - [x] `RecoverableErrorMetadata` and `RetryAfterMetadata`.
+- [x] Enforce metadata/tail contracts.
+  - [x] Reject mismatched message and metadata types.
+  - [x] Reject body, diagnostic, and metadata byte-length mismatches.
+  - [x] Reject integers outside their frozen wire width.
+  - [x] Reject reserved built-in flag bits while preserving frozen private enum ranges.
 
 ## Object and Cache Codecs
 

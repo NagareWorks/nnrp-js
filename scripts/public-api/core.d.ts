@@ -53,6 +53,139 @@ export declare enum NnrpMessageType {
     ErrorRecoverable = 72,
     RetryAfter = 73
 }
+export declare enum RuntimeRole {
+    Unspecified = 0,
+    Client = 1,
+    Server = 2,
+    Runtime = 3,
+    Subagent = 4,
+    Tool = 5,
+    Scheduler = 6,
+    ConformanceRunner = 7
+}
+export declare enum ErrorScope {
+    Connection = 0,
+    Session = 1,
+    Frame = 2
+}
+export interface ControlRequestMetadata {
+    readonly operationId: bigint;
+    readonly controlSequence: bigint;
+    readonly reasonCode: number;
+    readonly sourceRole: RuntimeRole;
+    readonly flags: number;
+    readonly diagnosticBytes: number;
+}
+export interface SchedulingMetadata {
+    readonly operationId: bigint;
+    readonly controlSequence: bigint;
+    readonly priorityClass: number;
+    readonly priorityDelta: number;
+    readonly deadlineUnixMs: bigint;
+    readonly flags: number;
+}
+export interface SupersedeMetadata {
+    readonly oldOperationId: bigint;
+    readonly newOperationId: bigint;
+    readonly controlSequence: bigint;
+    readonly dropReasonCode: number;
+    readonly flags: number;
+    readonly diagnosticBytes: number;
+}
+export interface BudgetMetadata {
+    readonly operationId: bigint;
+    readonly computeBudgetUnits: bigint;
+    readonly memoryBudgetBytes: bigint;
+    readonly bandwidthBudgetBytes: bigint;
+    readonly tokenBudget: number;
+    readonly flags: number;
+}
+export interface ProgressMetadata {
+    readonly operationId: bigint;
+    readonly progressSequence: bigint;
+    readonly stageCode: number;
+    readonly percentX100: number;
+    readonly objectId: bigint;
+    readonly bodyBytes: number;
+}
+export interface PartialResultMetadata {
+    readonly operationId: bigint;
+    readonly resultSequence: bigint;
+    readonly objectId: bigint;
+    readonly deltaSequence: bigint;
+    readonly bodyBytes: number;
+    readonly flags: number;
+}
+export interface PressureMetadata {
+    readonly scopeId: bigint;
+    readonly creditWindow: bigint;
+    readonly pressureLevel: number;
+    readonly pressureReason: number;
+    readonly retryAfterMs: number;
+    readonly flags: number;
+}
+export interface CapabilityMetadata {
+    readonly profileId: number;
+    readonly capabilityCount: number;
+    readonly costModelId: number;
+    readonly preferenceRank: number;
+    readonly limitBytes: bigint;
+    readonly limitUnits: bigint;
+    readonly bodyBytes: number;
+    readonly flags: number;
+}
+export interface RouteHintMetadata {
+    readonly operationId: bigint;
+    readonly routeId: number;
+    readonly executorClass: number;
+    readonly affinityClass: number;
+    readonly deadlineUnixMs: bigint;
+    readonly bodyBytes: number;
+    readonly flags: number;
+}
+export interface TraceContextMetadata {
+    readonly traceId: bigint;
+    readonly spanId: bigint;
+    readonly parentSpanId: bigint;
+    readonly stageCode: number;
+    readonly flags: number;
+    readonly bodyBytes: number;
+}
+export interface ResultDropReasonMetadata {
+    readonly operationId: bigint;
+    readonly resultSequence: bigint;
+    readonly dropReasonCode: number;
+    readonly sourceRole: RuntimeRole;
+    readonly flags: number;
+    readonly diagnosticBytes: number;
+}
+export interface RecoverableErrorMetadata {
+    readonly errorCode: number;
+    readonly errorScope: ErrorScope;
+    readonly recoveryAction: number;
+    readonly sourceRole: RuntimeRole;
+    readonly flags: number;
+    readonly retryAfterMs: number;
+    readonly relatedSessionId: number;
+    readonly relatedFrameId: number;
+    readonly relatedViewId: number;
+    readonly diagnosticBytes: number;
+}
+export interface RetryAfterMetadata {
+    readonly scopeId: bigint;
+    readonly controlSequence: bigint;
+    readonly retryAfterMs: number;
+    readonly jitterMs: number;
+    readonly reasonCode: number;
+    readonly sourceRole: RuntimeRole;
+    readonly flags: number;
+    readonly diagnosticBytes: number;
+}
+export type RuntimeControlMetadata = ControlRequestMetadata | SchedulingMetadata | SupersedeMetadata | BudgetMetadata | ProgressMetadata | PartialResultMetadata | PressureMetadata | CapabilityMetadata | RouteHintMetadata | TraceContextMetadata | ResultDropReasonMetadata | RecoverableErrorMetadata | RetryAfterMetadata;
+export interface DecodedRuntimeControlMetadata {
+    readonly metadata: RuntimeControlMetadata;
+    readonly tail: Uint8Array;
+}
 export type NnrpBuildMode = "backend-native" | "browser-wasm";
 export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
 export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefer-ipc" | "prefer-websocket" | "force-quic" | "force-tcp" | "force-ipc" | "force-websocket";
@@ -353,6 +486,8 @@ export declare class NnrpTimeoutError extends NnrpError {
 export declare class NnrpProtocolError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
 }
+export declare function encodeRuntimeControlMetadata(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Uint8Array;
+export declare function decodeRuntimeControlMetadata(messageType: NnrpMessageType, payload: Uint8Array): DecodedRuntimeControlMetadata;
 export declare class NnrpResultDropError extends NnrpProtocolError {
     readonly frameId: number;
     readonly sessionId?: string;

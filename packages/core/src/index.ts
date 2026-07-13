@@ -55,6 +55,169 @@ export enum NnrpMessageType {
   RetryAfter = 0x49,
 }
 
+export enum RuntimeRole {
+  Unspecified = 0,
+  Client = 1,
+  Server = 2,
+  Runtime = 3,
+  Subagent = 4,
+  Tool = 5,
+  Scheduler = 6,
+  ConformanceRunner = 7,
+}
+
+export enum ErrorScope {
+  Connection = 0,
+  Session = 1,
+  Frame = 2,
+}
+
+export interface ControlRequestMetadata {
+  readonly operationId: bigint;
+  readonly controlSequence: bigint;
+  readonly reasonCode: number;
+  readonly sourceRole: RuntimeRole;
+  readonly flags: number;
+  readonly diagnosticBytes: number;
+}
+
+export interface SchedulingMetadata {
+  readonly operationId: bigint;
+  readonly controlSequence: bigint;
+  readonly priorityClass: number;
+  readonly priorityDelta: number;
+  readonly deadlineUnixMs: bigint;
+  readonly flags: number;
+}
+
+export interface SupersedeMetadata {
+  readonly oldOperationId: bigint;
+  readonly newOperationId: bigint;
+  readonly controlSequence: bigint;
+  readonly dropReasonCode: number;
+  readonly flags: number;
+  readonly diagnosticBytes: number;
+}
+
+export interface BudgetMetadata {
+  readonly operationId: bigint;
+  readonly computeBudgetUnits: bigint;
+  readonly memoryBudgetBytes: bigint;
+  readonly bandwidthBudgetBytes: bigint;
+  readonly tokenBudget: number;
+  readonly flags: number;
+}
+
+export interface ProgressMetadata {
+  readonly operationId: bigint;
+  readonly progressSequence: bigint;
+  readonly stageCode: number;
+  readonly percentX100: number;
+  readonly objectId: bigint;
+  readonly bodyBytes: number;
+}
+
+export interface PartialResultMetadata {
+  readonly operationId: bigint;
+  readonly resultSequence: bigint;
+  readonly objectId: bigint;
+  readonly deltaSequence: bigint;
+  readonly bodyBytes: number;
+  readonly flags: number;
+}
+
+export interface PressureMetadata {
+  readonly scopeId: bigint;
+  readonly creditWindow: bigint;
+  readonly pressureLevel: number;
+  readonly pressureReason: number;
+  readonly retryAfterMs: number;
+  readonly flags: number;
+}
+
+export interface CapabilityMetadata {
+  readonly profileId: number;
+  readonly capabilityCount: number;
+  readonly costModelId: number;
+  readonly preferenceRank: number;
+  readonly limitBytes: bigint;
+  readonly limitUnits: bigint;
+  readonly bodyBytes: number;
+  readonly flags: number;
+}
+
+export interface RouteHintMetadata {
+  readonly operationId: bigint;
+  readonly routeId: number;
+  readonly executorClass: number;
+  readonly affinityClass: number;
+  readonly deadlineUnixMs: bigint;
+  readonly bodyBytes: number;
+  readonly flags: number;
+}
+
+export interface TraceContextMetadata {
+  readonly traceId: bigint;
+  readonly spanId: bigint;
+  readonly parentSpanId: bigint;
+  readonly stageCode: number;
+  readonly flags: number;
+  readonly bodyBytes: number;
+}
+
+export interface ResultDropReasonMetadata {
+  readonly operationId: bigint;
+  readonly resultSequence: bigint;
+  readonly dropReasonCode: number;
+  readonly sourceRole: RuntimeRole;
+  readonly flags: number;
+  readonly diagnosticBytes: number;
+}
+
+export interface RecoverableErrorMetadata {
+  readonly errorCode: number;
+  readonly errorScope: ErrorScope;
+  readonly recoveryAction: number;
+  readonly sourceRole: RuntimeRole;
+  readonly flags: number;
+  readonly retryAfterMs: number;
+  readonly relatedSessionId: number;
+  readonly relatedFrameId: number;
+  readonly relatedViewId: number;
+  readonly diagnosticBytes: number;
+}
+
+export interface RetryAfterMetadata {
+  readonly scopeId: bigint;
+  readonly controlSequence: bigint;
+  readonly retryAfterMs: number;
+  readonly jitterMs: number;
+  readonly reasonCode: number;
+  readonly sourceRole: RuntimeRole;
+  readonly flags: number;
+  readonly diagnosticBytes: number;
+}
+
+export type RuntimeControlMetadata =
+  | ControlRequestMetadata
+  | SchedulingMetadata
+  | SupersedeMetadata
+  | BudgetMetadata
+  | ProgressMetadata
+  | PartialResultMetadata
+  | PressureMetadata
+  | CapabilityMetadata
+  | RouteHintMetadata
+  | TraceContextMetadata
+  | ResultDropReasonMetadata
+  | RecoverableErrorMetadata
+  | RetryAfterMetadata;
+
+export interface DecodedRuntimeControlMetadata {
+  readonly metadata: RuntimeControlMetadata;
+  readonly tail: Uint8Array;
+}
+
 export type NnrpBuildMode = "backend-native" | "browser-wasm";
 
 export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
@@ -510,6 +673,68 @@ export class NnrpProtocolError extends NnrpError {
     super(diagnostic);
     this.name = "NnrpProtocolError";
   }
+}
+
+export function encodeRuntimeControlMetadata(
+  messageType: NnrpMessageType,
+  metadata: RuntimeControlMetadata,
+  tail: Uint8Array = new Uint8Array(),
+): Uint8Array {
+  const layout = getRuntimeControlLayout(messageType);
+  if (!(tail instanceof Uint8Array)) {
+    throw runtimeControlError("NNRP_CONTROL_TAIL_INVALID", "Runtime control tail must be a Uint8Array.");
+  }
+
+  validateRuntimeControlMetadata(layout, metadata);
+  const ownedTail = tail.slice();
+  validateRuntimeControlTail(layout, metadata, ownedTail.byteLength);
+
+  const encoded = new Uint8Array(layout.length + ownedTail.byteLength);
+  const view = new DataView(encoded.buffer);
+  const values = metadata as unknown as Record<string, unknown>;
+  for (const field of layout.fields) {
+    writeRuntimeInteger(view, field, values[field.name]);
+  }
+  encoded.set(ownedTail, layout.length);
+  return encoded;
+}
+
+export function decodeRuntimeControlMetadata(
+  messageType: NnrpMessageType,
+  payload: Uint8Array,
+): DecodedRuntimeControlMetadata {
+  const layout = getRuntimeControlLayout(messageType);
+  if (!(payload instanceof Uint8Array)) {
+    throw runtimeControlError("NNRP_CONTROL_PAYLOAD_INVALID", "Runtime control payload must be a Uint8Array.");
+  }
+  if (payload.byteLength < layout.length) {
+    throw runtimeControlError(
+      "NNRP_CONTROL_METADATA_TRUNCATED",
+      `Runtime control metadata requires ${layout.length} bytes but received ${payload.byteLength}.`,
+    );
+  }
+
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  for (const reserved of layout.reserved ?? []) {
+    const reservedValue = readRuntimeInteger(view, reserved);
+    if (reservedValue !== 0 && reservedValue !== 0n) {
+      throw runtimeControlError(
+        "NNRP_CONTROL_RESERVED_NONZERO",
+        `Runtime control reserved field at offset ${reserved.offset} must be zero.`,
+      );
+    }
+  }
+
+  const decoded: Record<string, bigint | number> = {};
+  for (const field of layout.fields) {
+    decoded[field.name] = readRuntimeInteger(view, field);
+  }
+  const metadata = decoded as unknown as RuntimeControlMetadata;
+  validateRuntimeControlMetadata(layout, metadata);
+
+  const tail = payload.slice(layout.length);
+  validateRuntimeControlTail(layout, metadata, tail.byteLength);
+  return { metadata, tail };
 }
 
 export class NnrpResultDropError extends NnrpProtocolError {
@@ -1382,4 +1607,438 @@ function validateCapabilityManifestOptions(options: NnrpCapabilityManifestOption
       });
     }
   }
+}
+
+type RuntimeIntegerKind = "u64" | "u32" | "u16" | "u8" | "i16";
+
+interface RuntimeIntegerField {
+  readonly name: string;
+  readonly offset: number;
+  readonly kind: RuntimeIntegerKind;
+  readonly runtimeRole?: boolean;
+  readonly errorScope?: boolean;
+}
+
+interface RuntimeReservedField {
+  readonly offset: number;
+  readonly kind: RuntimeIntegerKind;
+}
+
+interface RuntimeControlLayout {
+  readonly name: string;
+  readonly length: number;
+  readonly fields: readonly RuntimeIntegerField[];
+  readonly flagMask?: number;
+  readonly tailField?: "bodyBytes" | "diagnosticBytes";
+  readonly percentField?: "percentX100";
+  readonly reserved?: readonly RuntimeReservedField[];
+}
+
+const CONTROL_REQUEST_LAYOUT: RuntimeControlLayout = {
+  name: "ControlRequestMetadata",
+  length: 32,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "controlSequence", offset: 8, kind: "u64" },
+    { name: "reasonCode", offset: 16, kind: "u16" },
+    { name: "sourceRole", offset: 18, kind: "u8", runtimeRole: true },
+    { name: "flags", offset: 19, kind: "u8" },
+    { name: "diagnosticBytes", offset: 20, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "diagnosticBytes",
+  reserved: [{ offset: 24, kind: "u64" }],
+};
+
+const SCHEDULING_LAYOUT: RuntimeControlLayout = {
+  name: "SchedulingMetadata",
+  length: 32,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "controlSequence", offset: 8, kind: "u64" },
+    { name: "priorityClass", offset: 16, kind: "u16" },
+    { name: "priorityDelta", offset: 18, kind: "i16" },
+    { name: "deadlineUnixMs", offset: 20, kind: "u64" },
+    { name: "flags", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x03,
+};
+
+const SUPERSEDE_LAYOUT: RuntimeControlLayout = {
+  name: "SupersedeMetadata",
+  length: 32,
+  fields: [
+    { name: "oldOperationId", offset: 0, kind: "u64" },
+    { name: "newOperationId", offset: 8, kind: "u64" },
+    { name: "controlSequence", offset: 16, kind: "u64" },
+    { name: "dropReasonCode", offset: 24, kind: "u16" },
+    { name: "flags", offset: 26, kind: "u16" },
+    { name: "diagnosticBytes", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x01,
+  tailField: "diagnosticBytes",
+};
+
+const BUDGET_LAYOUT: RuntimeControlLayout = {
+  name: "BudgetMetadata",
+  length: 40,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "computeBudgetUnits", offset: 8, kind: "u64" },
+    { name: "memoryBudgetBytes", offset: 16, kind: "u64" },
+    { name: "bandwidthBudgetBytes", offset: 24, kind: "u64" },
+    { name: "tokenBudget", offset: 32, kind: "u32" },
+    { name: "flags", offset: 36, kind: "u32" },
+  ],
+  flagMask: 0x03,
+};
+
+const PROGRESS_LAYOUT: RuntimeControlLayout = {
+  name: "ProgressMetadata",
+  length: 32,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "progressSequence", offset: 8, kind: "u64" },
+    { name: "stageCode", offset: 16, kind: "u16" },
+    { name: "percentX100", offset: 18, kind: "u16" },
+    { name: "objectId", offset: 20, kind: "u64" },
+    { name: "bodyBytes", offset: 28, kind: "u32" },
+  ],
+  tailField: "bodyBytes",
+  percentField: "percentX100",
+};
+
+const PARTIAL_RESULT_LAYOUT: RuntimeControlLayout = {
+  name: "PartialResultMetadata",
+  length: 40,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "resultSequence", offset: 8, kind: "u64" },
+    { name: "objectId", offset: 16, kind: "u64" },
+    { name: "deltaSequence", offset: 24, kind: "u64" },
+    { name: "bodyBytes", offset: 32, kind: "u32" },
+    { name: "flags", offset: 36, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "bodyBytes",
+};
+
+const PRESSURE_LAYOUT: RuntimeControlLayout = {
+  name: "PressureMetadata",
+  length: 32,
+  fields: [
+    { name: "scopeId", offset: 0, kind: "u64" },
+    { name: "creditWindow", offset: 8, kind: "u64" },
+    { name: "pressureLevel", offset: 16, kind: "u16" },
+    { name: "pressureReason", offset: 18, kind: "u16" },
+    { name: "retryAfterMs", offset: 20, kind: "u32" },
+    { name: "flags", offset: 24, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  reserved: [{ offset: 28, kind: "u32" }],
+};
+
+const CAPABILITY_LAYOUT: RuntimeControlLayout = {
+  name: "CapabilityMetadata",
+  length: 32,
+  fields: [
+    { name: "profileId", offset: 0, kind: "u16" },
+    { name: "capabilityCount", offset: 2, kind: "u16" },
+    { name: "costModelId", offset: 4, kind: "u16" },
+    { name: "preferenceRank", offset: 6, kind: "u16" },
+    { name: "limitBytes", offset: 8, kind: "u64" },
+    { name: "limitUnits", offset: 16, kind: "u64" },
+    { name: "bodyBytes", offset: 24, kind: "u32" },
+    { name: "flags", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "bodyBytes",
+};
+
+const ROUTE_HINT_LAYOUT: RuntimeControlLayout = {
+  name: "RouteHintMetadata",
+  length: 32,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "routeId", offset: 8, kind: "u32" },
+    { name: "executorClass", offset: 12, kind: "u16" },
+    { name: "affinityClass", offset: 14, kind: "u16" },
+    { name: "deadlineUnixMs", offset: 16, kind: "u64" },
+    { name: "bodyBytes", offset: 24, kind: "u32" },
+    { name: "flags", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "bodyBytes",
+};
+
+const TRACE_CONTEXT_LAYOUT: RuntimeControlLayout = {
+  name: "TraceContextMetadata",
+  length: 32,
+  fields: [
+    { name: "traceId", offset: 0, kind: "u64" },
+    { name: "spanId", offset: 8, kind: "u64" },
+    { name: "parentSpanId", offset: 16, kind: "u64" },
+    { name: "stageCode", offset: 24, kind: "u16" },
+    { name: "flags", offset: 26, kind: "u16" },
+    { name: "bodyBytes", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "bodyBytes",
+};
+
+const RESULT_DROP_REASON_LAYOUT: RuntimeControlLayout = {
+  name: "ResultDropReasonMetadata",
+  length: 32,
+  fields: [
+    { name: "operationId", offset: 0, kind: "u64" },
+    { name: "resultSequence", offset: 8, kind: "u64" },
+    { name: "dropReasonCode", offset: 16, kind: "u16" },
+    { name: "sourceRole", offset: 18, kind: "u8", runtimeRole: true },
+    { name: "flags", offset: 19, kind: "u8" },
+    { name: "diagnosticBytes", offset: 20, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "diagnosticBytes",
+  reserved: [{ offset: 24, kind: "u64" }],
+};
+
+const RECOVERABLE_ERROR_LAYOUT: RuntimeControlLayout = {
+  name: "RecoverableErrorMetadata",
+  length: 32,
+  fields: [
+    { name: "errorCode", offset: 0, kind: "u32" },
+    { name: "errorScope", offset: 4, kind: "u32", errorScope: true },
+    { name: "recoveryAction", offset: 8, kind: "u16" },
+    { name: "sourceRole", offset: 10, kind: "u8", runtimeRole: true },
+    { name: "flags", offset: 11, kind: "u8" },
+    { name: "retryAfterMs", offset: 12, kind: "u32" },
+    { name: "relatedSessionId", offset: 16, kind: "u32" },
+    { name: "relatedFrameId", offset: 20, kind: "u32" },
+    { name: "relatedViewId", offset: 24, kind: "u32" },
+    { name: "diagnosticBytes", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "diagnosticBytes",
+};
+
+const RETRY_AFTER_LAYOUT: RuntimeControlLayout = {
+  name: "RetryAfterMetadata",
+  length: 32,
+  fields: [
+    { name: "scopeId", offset: 0, kind: "u64" },
+    { name: "controlSequence", offset: 8, kind: "u64" },
+    { name: "retryAfterMs", offset: 16, kind: "u32" },
+    { name: "jitterMs", offset: 20, kind: "u32" },
+    { name: "reasonCode", offset: 24, kind: "u16" },
+    { name: "sourceRole", offset: 26, kind: "u8", runtimeRole: true },
+    { name: "flags", offset: 27, kind: "u8" },
+    { name: "diagnosticBytes", offset: 28, kind: "u32" },
+  ],
+  flagMask: 0x03,
+  tailField: "diagnosticBytes",
+};
+
+function getRuntimeControlLayout(messageType: NnrpMessageType): RuntimeControlLayout {
+  switch (messageType) {
+    case NnrpMessageType.Cancel:
+    case NnrpMessageType.Abort:
+      return CONTROL_REQUEST_LAYOUT;
+    case NnrpMessageType.PriorityUpdate:
+    case NnrpMessageType.Deadline:
+    case NnrpMessageType.ExpireAt:
+      return SCHEDULING_LAYOUT;
+    case NnrpMessageType.Supersede:
+      return SUPERSEDE_LAYOUT;
+    case NnrpMessageType.BudgetUpdate:
+      return BUDGET_LAYOUT;
+    case NnrpMessageType.Progress:
+      return PROGRESS_LAYOUT;
+    case NnrpMessageType.PartialResult:
+      return PARTIAL_RESULT_LAYOUT;
+    case NnrpMessageType.Backpressure:
+    case NnrpMessageType.CreditUpdate:
+      return PRESSURE_LAYOUT;
+    case NnrpMessageType.CapabilityNegotiation:
+    case NnrpMessageType.DegradeProfile:
+      return CAPABILITY_LAYOUT;
+    case NnrpMessageType.RouteHint:
+    case NnrpMessageType.ExecutionHint:
+      return ROUTE_HINT_LAYOUT;
+    case NnrpMessageType.TraceContext:
+      return TRACE_CONTEXT_LAYOUT;
+    case NnrpMessageType.ResultDropReason:
+      return RESULT_DROP_REASON_LAYOUT;
+    case NnrpMessageType.ErrorRecoverable:
+      return RECOVERABLE_ERROR_LAYOUT;
+    case NnrpMessageType.RetryAfter:
+      return RETRY_AFTER_LAYOUT;
+    default:
+      throw runtimeControlError(
+        "NNRP_CONTROL_MESSAGE_UNSUPPORTED",
+        `Message type ${messageType} does not use Preview4 runtime control metadata.`,
+      );
+  }
+}
+
+function validateRuntimeControlMetadata(
+  layout: RuntimeControlLayout,
+  metadata: RuntimeControlMetadata,
+): void {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    throw runtimeControlError(
+      "NNRP_CONTROL_METADATA_MISMATCH",
+      `${layout.name} must be a metadata object.`,
+    );
+  }
+
+  const values = metadata as unknown as Record<string, unknown>;
+  const actualFields = Object.keys(values).sort();
+  const expectedFields = layout.fields.map((field) => field.name).sort();
+  if (
+    actualFields.length !== expectedFields.length ||
+    actualFields.some((field, index) => field !== expectedFields[index])
+  ) {
+    throw runtimeControlError(
+      "NNRP_CONTROL_METADATA_MISMATCH",
+      `Message requires ${layout.name} fields: ${expectedFields.join(", ")}.`,
+    );
+  }
+
+  for (const field of layout.fields) {
+    validateRuntimeInteger(field, values[field.name]);
+    if (field.runtimeRole) {
+      validateRuntimeRole(values[field.name] as number);
+    }
+    if (field.errorScope) {
+      validateErrorScope(values[field.name] as number);
+    }
+  }
+
+  if (layout.flagMask !== undefined) {
+    const flags = values.flags as number;
+    if ((flags & ~layout.flagMask) !== 0) {
+      throw runtimeControlError(
+        "NNRP_CONTROL_FLAGS_INVALID",
+        `${layout.name}.flags contains reserved bits outside 0x${layout.flagMask.toString(16)}.`,
+      );
+    }
+  }
+
+  if (
+    layout.percentField !== undefined &&
+    (values[layout.percentField] as number) > 10_000 &&
+    (values[layout.percentField] as number) !== 0xffff
+  ) {
+    throw runtimeControlError(
+      "NNRP_CONTROL_PROGRESS_INVALID",
+      `${layout.name}.percentX100 must be 0..10000 or the 0xffff unknown-value sentinel.`,
+    );
+  }
+}
+
+function validateRuntimeControlTail(
+  layout: RuntimeControlLayout,
+  metadata: RuntimeControlMetadata,
+  actualBytes: number,
+): void {
+  const declaredBytes = layout.tailField === undefined
+    ? 0
+    : (metadata as unknown as Record<string, number>)[layout.tailField];
+  if (declaredBytes !== actualBytes) {
+    throw runtimeControlError(
+      "NNRP_CONTROL_TAIL_LENGTH_INVALID",
+      `${layout.name} declares ${declaredBytes} tail bytes but received ${actualBytes}.`,
+    );
+  }
+}
+
+function validateRuntimeInteger(field: RuntimeIntegerField, value: unknown): void {
+  if (field.kind === "u64") {
+    if (typeof value !== "bigint" || value < 0n || value > 0xffff_ffff_ffff_ffffn) {
+      throw runtimeControlError(
+        "NNRP_CONTROL_INTEGER_INVALID",
+        `${field.name} must be a bigint in the u64 wire range.`,
+      );
+    }
+    return;
+  }
+
+  const [minimum, maximum] = field.kind === "i16"
+    ? [-0x8000, 0x7fff]
+    : [0, field.kind === "u32" ? 0xffff_ffff : field.kind === "u16" ? 0xffff : 0xff];
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
+    throw runtimeControlError(
+      "NNRP_CONTROL_INTEGER_INVALID",
+      `${field.name} must be an integer in the ${field.kind} wire range.`,
+    );
+  }
+}
+
+function validateRuntimeRole(value: number): void {
+  if (
+    (value >= RuntimeRole.Unspecified && value <= RuntimeRole.ConformanceRunner) || (value >= 0x80 && value <= 0xff)
+  ) {
+    return;
+  }
+  throw runtimeControlError(
+    "NNRP_CONTROL_ROLE_INVALID",
+    "Runtime role must use a frozen standard value or the private extension range 0x80-0xff.",
+  );
+}
+
+function validateErrorScope(value: number): void {
+  if (value >= ErrorScope.Connection && value <= ErrorScope.Frame) {
+    return;
+  }
+  throw runtimeControlError(
+    "NNRP_CONTROL_ERROR_SCOPE_INVALID",
+    "Error scope must be Connection, Session, or Frame.",
+  );
+}
+
+function writeRuntimeInteger(view: DataView, field: RuntimeIntegerField, value: unknown): void {
+  switch (field.kind) {
+    case "u64":
+      view.setBigUint64(field.offset, value as bigint, true);
+      break;
+    case "u32":
+      view.setUint32(field.offset, value as number, true);
+      break;
+    case "u16":
+      view.setUint16(field.offset, value as number, true);
+      break;
+    case "u8":
+      view.setUint8(field.offset, value as number);
+      break;
+    case "i16":
+      view.setInt16(field.offset, value as number, true);
+      break;
+  }
+}
+
+function readRuntimeInteger(
+  view: DataView,
+  field: RuntimeIntegerField | RuntimeReservedField,
+): bigint | number {
+  switch (field.kind) {
+    case "u64":
+      return view.getBigUint64(field.offset, true);
+    case "u32":
+      return view.getUint32(field.offset, true);
+    case "u16":
+      return view.getUint16(field.offset, true);
+    case "u8":
+      return view.getUint8(field.offset);
+    case "i16":
+      return view.getInt16(field.offset, true);
+  }
+}
+
+function runtimeControlError(code: string, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code,
+    message,
+    source: "protocol",
+    retryable: false,
+  });
 }

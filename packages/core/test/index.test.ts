@@ -8,6 +8,9 @@ import {
   createSchemaDescriptor,
   createTransportCandidates,
   createTransportSelectionSummary,
+  decodeRuntimeControlMetadata,
+  encodeRuntimeControlMetadata,
+  ErrorScope,
   isStandardInputProfile,
   NNRP_PROTOCOL_VERSION,
   NnrpCapabilityError,
@@ -28,6 +31,8 @@ import {
   normalizeSubmitRequest,
   parseApplicationEndpoint,
   resolveProviderEndpoint,
+  type RuntimeControlMetadata,
+  RuntimeRole,
   selectTransport,
   throwIfResultDrop,
   validateEventPollOptions,
@@ -128,6 +133,414 @@ Deno.test("@nnrp/core exposes the exact NNRP/1 Preview4 message type registry", 
     NNRP_MESSAGE_TYPES.map(([name, value]) => `${name}:${value}`),
   );
 });
+
+const RUNTIME_CONTROL_CODEC_CASES: readonly {
+  readonly messageTypes: readonly NnrpMessageType[];
+  readonly metadata: RuntimeControlMetadata;
+  readonly fixedLength: number;
+  readonly tail: Uint8Array;
+}[] = [
+  {
+    messageTypes: [NnrpMessageType.Cancel, NnrpMessageType.Abort],
+    metadata: {
+      operationId: 1n,
+      controlSequence: 2n,
+      reasonCode: 3,
+      sourceRole: RuntimeRole.Client,
+      flags: 0x03,
+      diagnosticBytes: 2,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0xaa, 0xbb]),
+  },
+  {
+    messageTypes: [NnrpMessageType.PriorityUpdate, NnrpMessageType.Deadline, NnrpMessageType.ExpireAt],
+    metadata: {
+      operationId: 3n,
+      controlSequence: 4n,
+      priorityClass: 5,
+      priorityDelta: -6,
+      deadlineUnixMs: 1_800_000_000_000n,
+      flags: 0x01,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array(),
+  },
+  {
+    messageTypes: [NnrpMessageType.Supersede],
+    metadata: {
+      oldOperationId: 7n,
+      newOperationId: 8n,
+      controlSequence: 9n,
+      dropReasonCode: 10,
+      flags: 0x01,
+      diagnosticBytes: 1,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x11]),
+  },
+  {
+    messageTypes: [NnrpMessageType.BudgetUpdate],
+    metadata: {
+      operationId: 11n,
+      computeBudgetUnits: 12n,
+      memoryBudgetBytes: 13n,
+      bandwidthBudgetBytes: 14n,
+      tokenBudget: 15,
+      flags: 0x02,
+    },
+    fixedLength: 40,
+    tail: new Uint8Array(),
+  },
+  {
+    messageTypes: [NnrpMessageType.Progress],
+    metadata: {
+      operationId: 16n,
+      progressSequence: 17n,
+      stageCode: 18,
+      percentX100: 9_999,
+      objectId: 19n,
+      bodyBytes: 2,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x22, 0x23]),
+  },
+  {
+    messageTypes: [NnrpMessageType.PartialResult],
+    metadata: {
+      operationId: 20n,
+      resultSequence: 21n,
+      objectId: 22n,
+      deltaSequence: 23n,
+      bodyBytes: 1,
+      flags: 0x03,
+    },
+    fixedLength: 40,
+    tail: new Uint8Array([0x24]),
+  },
+  {
+    messageTypes: [NnrpMessageType.Backpressure, NnrpMessageType.CreditUpdate],
+    metadata: {
+      scopeId: 25n,
+      creditWindow: 26n,
+      pressureLevel: 27,
+      pressureReason: 28,
+      retryAfterMs: 29,
+      flags: 0x01,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array(),
+  },
+  {
+    messageTypes: [NnrpMessageType.CapabilityNegotiation, NnrpMessageType.DegradeProfile],
+    metadata: {
+      profileId: 30,
+      capabilityCount: 31,
+      costModelId: 32,
+      preferenceRank: 33,
+      limitBytes: 34n,
+      limitUnits: 35n,
+      bodyBytes: 2,
+      flags: 0x02,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x25, 0x26]),
+  },
+  {
+    messageTypes: [NnrpMessageType.RouteHint, NnrpMessageType.ExecutionHint],
+    metadata: {
+      operationId: 36n,
+      routeId: 37,
+      executorClass: 38,
+      affinityClass: 39,
+      deadlineUnixMs: 1_900_000_000_000n,
+      bodyBytes: 1,
+      flags: 0x01,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x27]),
+  },
+  {
+    messageTypes: [NnrpMessageType.TraceContext],
+    metadata: {
+      traceId: 40n,
+      spanId: 41n,
+      parentSpanId: 42n,
+      stageCode: 43,
+      flags: 0x03,
+      bodyBytes: 1,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x28]),
+  },
+  {
+    messageTypes: [NnrpMessageType.ResultDropReason],
+    metadata: {
+      operationId: 44n,
+      resultSequence: 45n,
+      dropReasonCode: 46,
+      sourceRole: RuntimeRole.Runtime,
+      flags: 0x02,
+      diagnosticBytes: 1,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x29]),
+  },
+  {
+    messageTypes: [NnrpMessageType.ErrorRecoverable],
+    metadata: {
+      errorCode: 47,
+      errorScope: ErrorScope.Session,
+      recoveryAction: 49,
+      sourceRole: RuntimeRole.Server,
+      flags: 0x03,
+      retryAfterMs: 50,
+      relatedSessionId: 51,
+      relatedFrameId: 52,
+      relatedViewId: 53,
+      diagnosticBytes: 2,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x2a, 0x2b]),
+  },
+  {
+    messageTypes: [NnrpMessageType.RetryAfter],
+    metadata: {
+      scopeId: 54n,
+      controlSequence: 55n,
+      retryAfterMs: 56,
+      jitterMs: 57,
+      reasonCode: 58,
+      sourceRole: RuntimeRole.Scheduler,
+      flags: 0x01,
+      diagnosticBytes: 1,
+    },
+    fixedLength: 32,
+    tail: new Uint8Array([0x2c]),
+  },
+];
+
+Deno.test("@nnrp/core round-trips every Preview4 runtime control metadata layout", () => {
+  for (const testCase of RUNTIME_CONTROL_CODEC_CASES) {
+    for (const messageType of testCase.messageTypes) {
+      const encoded = encodeRuntimeControlMetadata(messageType, testCase.metadata, testCase.tail);
+      const decoded = decodeRuntimeControlMetadata(messageType, encoded);
+
+      assertEquals(encoded.byteLength, testCase.fixedLength + testCase.tail.byteLength);
+      assertEquals(decoded.metadata, testCase.metadata);
+      assertEquals(decoded.tail, testCase.tail);
+    }
+  }
+});
+
+Deno.test("@nnrp/core uses frozen little-endian runtime control offsets", () => {
+  const control = encodeRuntimeControlMetadata(
+    NnrpMessageType.Cancel,
+    {
+      operationId: 0x0102_0304_0506_0708n,
+      controlSequence: 0x1112_1314_1516_1718n,
+      reasonCode: 0x2122,
+      sourceRole: RuntimeRole.Tool,
+      flags: 0x03,
+      diagnosticBytes: 1,
+    },
+    new Uint8Array([0x31]),
+  );
+  const controlView = new DataView(control.buffer);
+  assertEquals(controlView.getBigUint64(0, true), 0x0102_0304_0506_0708n);
+  assertEquals(controlView.getBigUint64(8, true), 0x1112_1314_1516_1718n);
+  assertEquals(controlView.getUint16(16, true), 0x2122);
+  assertEquals(controlView.getUint8(18), RuntimeRole.Tool);
+  assertEquals(controlView.getUint8(19), 0x03);
+  assertEquals(controlView.getUint32(20, true), 1);
+  assertEquals(controlView.getBigUint64(24, true), 0n);
+  assertEquals(control[32], 0x31);
+
+  const scheduling = encodeRuntimeControlMetadata(NnrpMessageType.PriorityUpdate, {
+    operationId: 1n,
+    controlSequence: 2n,
+    priorityClass: 0x3132,
+    priorityDelta: -1234,
+    deadlineUnixMs: 0x4142_4344_4546_4748n,
+    flags: 0x02,
+  });
+  const schedulingView = new DataView(scheduling.buffer);
+  assertEquals(schedulingView.getUint16(16, true), 0x3132);
+  assertEquals(schedulingView.getInt16(18, true), -1234);
+  assertEquals(schedulingView.getBigUint64(20, true), 0x4142_4344_4546_4748n);
+  assertEquals(schedulingView.getUint32(28, true), 0x02);
+});
+
+Deno.test("@nnrp/core enforces runtime control metadata and tail contracts", () => {
+  const control = RUNTIME_CONTROL_CODEC_CASES[0];
+  assertRuntimeControlError(
+    () => encodeRuntimeControlMetadata(NnrpMessageType.Cancel, RUNTIME_CONTROL_CODEC_CASES[1].metadata),
+    "NNRP_CONTROL_METADATA_MISMATCH",
+  );
+  assertRuntimeControlError(
+    () => encodeRuntimeControlMetadata(NnrpMessageType.Cancel, control.metadata, new Uint8Array([1])),
+    "NNRP_CONTROL_TAIL_LENGTH_INVALID",
+  );
+  assertRuntimeControlError(
+    () => encodeRuntimeControlMetadata(NnrpMessageType.ClientHello, control.metadata, control.tail),
+    "NNRP_CONTROL_MESSAGE_UNSUPPORTED",
+  );
+  assertRuntimeControlError(
+    () => decodeRuntimeControlMetadata(NnrpMessageType.Cancel, new Uint8Array(31)),
+    "NNRP_CONTROL_METADATA_TRUNCATED",
+  );
+
+  const nonZeroReserved = encodeRuntimeControlMetadata(NnrpMessageType.Cancel, control.metadata, control.tail);
+  nonZeroReserved[24] = 1;
+  assertRuntimeControlError(
+    () => decodeRuntimeControlMetadata(NnrpMessageType.Cancel, nonZeroReserved),
+    "NNRP_CONTROL_RESERVED_NONZERO",
+  );
+
+  const trailingBytes = new Uint8Array(33);
+  assertRuntimeControlError(
+    () => decodeRuntimeControlMetadata(NnrpMessageType.PriorityUpdate, trailingBytes),
+    "NNRP_CONTROL_TAIL_LENGTH_INVALID",
+  );
+});
+
+Deno.test("@nnrp/core rejects invalid runtime control values", () => {
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.Cancel, {
+        operationId: 1 as unknown as bigint,
+        controlSequence: 2n,
+        reasonCode: 3,
+        sourceRole: RuntimeRole.Client,
+        flags: 0,
+        diagnosticBytes: 0,
+      }),
+    "NNRP_CONTROL_INTEGER_INVALID",
+  );
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.BudgetUpdate, {
+        operationId: 1n,
+        computeBudgetUnits: 2n,
+        memoryBudgetBytes: 3n,
+        bandwidthBudgetBytes: 4n,
+        tokenBudget: 0x1_0000_0000,
+        flags: 0,
+      }),
+    "NNRP_CONTROL_INTEGER_INVALID",
+  );
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.PriorityUpdate, {
+        operationId: 1n,
+        controlSequence: 2n,
+        priorityClass: 3,
+        priorityDelta: -0x8001,
+        deadlineUnixMs: 4n,
+        flags: 0,
+      }),
+    "NNRP_CONTROL_INTEGER_INVALID",
+  );
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.Progress, {
+        operationId: 1n,
+        progressSequence: 2n,
+        stageCode: 3,
+        percentX100: 10_001,
+        objectId: 4n,
+        bodyBytes: 0,
+      }),
+    "NNRP_CONTROL_PROGRESS_INVALID",
+  );
+  const unknownProgress = encodeRuntimeControlMetadata(NnrpMessageType.Progress, {
+    operationId: 1n,
+    progressSequence: 2n,
+    stageCode: 3,
+    percentX100: 0xffff,
+    objectId: 4n,
+    bodyBytes: 0,
+  });
+  assertEquals(
+    (decodeRuntimeControlMetadata(NnrpMessageType.Progress, unknownProgress).metadata as { percentX100: number })
+      .percentX100,
+    0xffff,
+  );
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.ErrorRecoverable, {
+        errorCode: 1,
+        errorScope: 3 as ErrorScope,
+        recoveryAction: 2,
+        sourceRole: RuntimeRole.Server,
+        flags: 0,
+        retryAfterMs: 0,
+        relatedSessionId: 0,
+        relatedFrameId: 0,
+        relatedViewId: 0,
+        diagnosticBytes: 0,
+      }),
+    "NNRP_CONTROL_ERROR_SCOPE_INVALID",
+  );
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.Cancel, {
+        operationId: 1n,
+        controlSequence: 2n,
+        reasonCode: 3,
+        sourceRole: 8 as RuntimeRole,
+        flags: 0,
+        diagnosticBytes: 0,
+      }),
+    "NNRP_CONTROL_ROLE_INVALID",
+  );
+  assertRuntimeControlError(
+    () =>
+      encodeRuntimeControlMetadata(NnrpMessageType.RetryAfter, {
+        scopeId: 1n,
+        controlSequence: 2n,
+        retryAfterMs: 3,
+        jitterMs: 4,
+        reasonCode: 5,
+        sourceRole: RuntimeRole.Server,
+        flags: 0x04,
+        diagnosticBytes: 0,
+      }),
+    "NNRP_CONTROL_FLAGS_INVALID",
+  );
+
+  const privateRole = encodeRuntimeControlMetadata(NnrpMessageType.Cancel, {
+    operationId: 1n,
+    controlSequence: 2n,
+    reasonCode: 3,
+    sourceRole: 0x80 as RuntimeRole,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+  assertEquals(
+    (decodeRuntimeControlMetadata(NnrpMessageType.Cancel, privateRole).metadata as { sourceRole: RuntimeRole })
+      .sourceRole,
+    0x80,
+  );
+});
+
+Deno.test("@nnrp/core owns encoded and decoded runtime control tails", () => {
+  const metadata = RUNTIME_CONTROL_CODEC_CASES[0].metadata;
+  const sourceTail = new Uint8Array([0x41, 0x42]);
+  const encoded = encodeRuntimeControlMetadata(NnrpMessageType.Cancel, metadata, sourceTail);
+  sourceTail[0] = 0xff;
+  assertEquals(encoded.slice(32), new Uint8Array([0x41, 0x42]));
+
+  const decoded = decodeRuntimeControlMetadata(NnrpMessageType.Cancel, encoded);
+  assertNotStrictEquals(decoded.tail.buffer, encoded.buffer);
+  encoded[32] = 0xee;
+  assertEquals(decoded.tail, new Uint8Array([0x41, 0x42]));
+});
+
+function assertRuntimeControlError(action: () => unknown, code: string): void {
+  const error = assertThrows(action, NnrpProtocolError);
+  assertEquals(error.diagnostic.code, code);
+}
 
 Deno.test("@nnrp/core creates a backend native manifest", () => {
   const manifest = createBackendNativeManifest(["flow.update"]);
