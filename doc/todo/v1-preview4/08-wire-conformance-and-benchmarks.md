@@ -1,0 +1,62 @@
+# 08 - Wire Conformance and Benchmarks
+
+## Target Manifests
+
+- [ ] Add a JavaScript wire-target manifest generator matching the released schema.
+  - [ ] Emit `protocol_version: nnrp-1-preview4` and the selected suite version.
+  - [ ] Emit only live endpoint entries with `name`, `endpoint`, and `tls`.
+  - [ ] Emit exact capability tokens and positive `max_frame_bytes`/`max_in_flight` limits.
+  - [ ] Validate generated manifests before starting a harness.
+- [ ] Declare modes by actual role behavior.
+  - [ ] Native server harness declares `suite_as_client`.
+  - [ ] Native client harness declares `suite_as_server`.
+  - [ ] Native paired proxy harness declares `suite_as_proxy`.
+  - [ ] Browser client harness declares `suite_as_server` over WebSocket only.
+  - [ ] No harness declares a mode or transport it did not start.
+
+## Live Harnesses
+
+- [ ] Add Node/Deno native harnesses.
+  - [ ] Start server-target mode for TCP, QUIC, IPC, and WebSocket.
+  - [ ] Start client-target mode for TCP, QUIC, IPC, and WebSocket.
+  - [ ] Start paired proxy-target mode with independent ingress and egress evidence.
+  - [ ] Shut down providers and sessions deterministically after each plan.
+- [ ] Add the browser harness.
+  - [ ] Start a browser client against the suite-owned WebSocket endpoint.
+  - [ ] Report browser/WASM observations in the standard case-results schema.
+  - [ ] Capture console, frame, and timing evidence without SDK-adapter translation.
+- [ ] Integrate result validation.
+  - [ ] Write observed frames, terminal state, failures, and evidence paths.
+  - [ ] Run the suite validator on every produced report.
+  - [ ] Keep adapter conformance and OpenAI API profile conformance as separate commands/jobs.
+
+## CI Coverage
+
+- [ ] Add wire-conformance jobs with explicit result states.
+  - [ ] Run the complete Preview4 control/object/cache scenario set on the Linux x86_64 native job.
+  - [ ] Run TCP and IPC on every compatible native CI host.
+  - [ ] Run QUIC and native WebSocket in their configured integration jobs.
+  - [ ] Run browser WebSocket/WASM scenarios in the browser job.
+  - [ ] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
+  - [ ] Fail when a declared capability, mode, or transport has no selected scenario.
+
+## Benchmarks
+
+- [ ] Add Preview4 benchmark entrypoints.
+  - [ ] Runtime-control encode/submit/poll throughput.
+  - [ ] Runtime-object reference and delta throughput.
+  - [ ] IPC loopback throughput and latency.
+  - [ ] Native WebSocket loopback throughput and latency.
+  - [ ] Browser WebSocket/WASM throughput and latency.
+- [ ] Preserve performance evidence.
+  - [ ] Compare coarse-call overhead against the checked-in Preview3 native baseline.
+  - [ ] Record environment, artifact version, payload sizes, concurrency, and sample counts.
+  - [ ] Store machine-readable results and a human-readable report under `doc/benchmarks`.
+  - [ ] Fail the release gate on a configured coarse-FFI regression threshold.
+
+## Acceptance Evidence
+
+- [ ] All generated target manifests validate against `wire-conformance-target.schema.json`.
+- [ ] All reports validate against the selected plan and case-results schema.
+- [ ] CI artifacts identify every executed and skipped matrix cell.
+- [ ] Benchmark reports contain no private hostnames, addresses, tokens, or local user paths.

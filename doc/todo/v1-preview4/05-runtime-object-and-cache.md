@@ -1,0 +1,50 @@
+# 05 - Runtime Objects and Cache References
+
+## Shared Session Methods
+
+- [ ] Add the same object/cache methods to native client, browser client, and server sessions.
+  - [ ] `declareObject(metadata, body?)`.
+  - [ ] `referenceObject(metadata, body?)`.
+  - [ ] `releaseObject(metadata, diagnostic?)`.
+  - [ ] `patchObject(metadata, delta)`.
+  - [ ] `sendObjectDelta(metadata, delta)`.
+  - [ ] `referenceCache(metadata, body?)`.
+  - [ ] `reportCacheMiss(metadata, diagnostic?)`.
+  - [ ] `invalidateCache(metadata)`.
+- [ ] Enforce object lifecycle validation.
+  - [ ] Require declaration before a local reference when local tracking is enabled.
+  - [ ] Track version and delta sequence monotonically.
+  - [ ] Reject a use-after-release operation.
+  - [ ] Release superseded or cancelled operation-owned objects without implicit global invalidation.
+
+## Cache Semantics
+
+- [ ] Implement explicit cache references only.
+  - [ ] Do not perform an implicit cache lookup on request submission.
+  - [ ] Preserve profile, reuse scope, lease, producer trace, expiration, and flags.
+  - [ ] Report misses with the frozen reason and diagnostic contract.
+- [ ] Implement baseline cache invalidation.
+  - [ ] Encode the existing `CacheInvalidate` NNRP/1 frame.
+  - [ ] Preserve namespace and 128-bit cache key components.
+  - [ ] Apply invalidation scope and reason without inventing a Preview4-only replacement frame.
+- [ ] Implement local cache lease validation.
+  - [ ] Validate object/version, lease id, owner scope/id, grant time, and TTL.
+  - [ ] Keep lease state local and out of public native pointer representations.
+
+## Browser and Worker Safety
+
+- [ ] Keep public descriptors structured-clone compatible.
+  - [ ] Use numbers, bigints, strings, plain records, and owned `Uint8Array` values only.
+  - [ ] Expose no native pointer, file descriptor, or borrowed WASM memory view.
+  - [ ] Copy object/cache tail bytes before transferring them to another worker.
+- [ ] Add worker transfer tests.
+  - [ ] Transfer descriptors and references through `structuredClone`.
+  - [ ] Transfer owned payload buffers without invalidating retained metadata.
+  - [ ] Verify native and browser normalized object events are equivalent.
+
+## Acceptance Evidence
+
+- [ ] Lifecycle tests cover declare, ref, patch/delta, release, cancellation, and supersession.
+- [ ] Cache tests cover hit-reference, miss, invalidate, lease expiry, and no-implicit-lookup behavior.
+- [ ] Structured-clone tests cover every public object/cache type.
+- [ ] Public API snapshots match the frozen JavaScript client, server, and runtime pages in `nnrp-doc`.

@@ -1,21 +1,40 @@
-# JavaScript/TypeScript Preview4 Implementation Todo
+# NNRP/1 Preview4 JavaScript/TypeScript Implementation Todo
 
-Preview4 keeps the role package plus transport package architecture and adds runtime control, runtime objects, IPC,
-WebSocket, and wire-level conformance.
+This directory is the closed implementation plan for JavaScript/TypeScript Preview4. The public API contract is frozen
+in `nnrp-doc`; Rust `1.0.0-preview.4.0` owns the native and WASM ABI; and `nnrp-conformance` owns wire-level schemas and
+scenarios.
 
-## Workstreams
+## Closure Rules
 
-- [ ] [01 - Package boundaries and contract](01-package-boundaries-and-contract.md)
-- [ ] [02 - Runtime control API](02-runtime-control-api.md)
-- [ ] [03 - Runtime object and cache references](03-runtime-object-cache-references.md)
-- [ ] [04 - IPC and WebSocket transports](04-ipc-websocket-transports.md)
-- [ ] [05 - Wire conformance and benchmarks](05-wire-conformance-and-benchmarks.md)
-- [ ] [06 - Release, docs, and npm hygiene](06-release-docs-npm-hygiene.md)
+- [ ] Implement only the tasks already listed in this directory.
+- [ ] Do not preserve Preview1, Preview2, or Preview3 aliases, overloads, endpoint forms, message names, transport
+      policies, or artifact layouts.
+- [ ] Do not add a code-path placeholder, mock runtime, config-only provider, or package that delegates its owned
+      behavior to another package.
+- [ ] If implementation evidence contradicts a frozen public API, stop that implementation path and resolve the
+      `nnrp-doc` contract before changing code.
+- [ ] If a new product requirement is discovered, stop the affected workstream and revise the frozen design and this
+      plan before implementation resumes.
+- [ ] Check a parent item only when every child item and its named acceptance evidence are complete.
+- [ ] Keep commits scoped to one workstream and include the matching todo updates in the same commit.
 
-## Coordination Rules
+## Frozen Workstreams
 
-- [ ] Keep role packages focused on client/server user APIs.
-- [ ] Keep transport packages owning real transport behavior and artifacts.
-- [ ] Keep browser WebSocket API as I/O substrate only; NNRP semantics remain in transport package code.
-- [ ] Keep native and WASM artifact loading scoped to the transport package that owns the transport.
-- [ ] Update this index as workstreams split or complete.
+- [ ] [00 - Scope, ownership, and closure](00-scope-and-closure.md)
+- [ ] [01 - Core contract and endpoints](01-core-contract-and-endpoints.md)
+- [ ] [02 - Codecs and runtime events](02-codecs-and-runtime-events.md)
+- [ ] [03 - Client control surface](03-client-control-surface.md)
+- [ ] [04 - Server control surface](04-server-control-surface.md)
+- [ ] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)
+- [ ] [06 - IPC carrier provider](06-ipc-provider.md)
+- [ ] [07 - WebSocket carrier provider](07-websocket-provider.md)
+- [ ] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
+- [ ] [09 - Artifacts, release, and docs](09-artifacts-release-docs.md)
+
+## Release Closure
+
+- [ ] All workstream files contain zero unchecked boxes.
+- [ ] `deno task lint`, `deno task test`, `deno task coverage`, and `deno task package-check` pass.
+- [ ] Native and browser wire-conformance target manifests validate against the released suite schema.
+- [ ] Release dry-run tarballs pass the ownership checks in workstream 09.
+- [ ] The develop-to-main pull request is green before Preview4 publishing starts.
