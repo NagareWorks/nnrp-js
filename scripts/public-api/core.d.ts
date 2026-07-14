@@ -352,12 +352,44 @@ export interface NnrpCapabilityManifest {
     readonly transports: readonly NnrpTransportKind[];
     readonly capabilities: readonly NnrpCapability[];
 }
-export type NnrpTransportRejectionReason = "peer-unsupported" | "local-unavailable" | "policy-rejected" | "probe-failed";
+export type NnrpTransportRejectionReason = "policy-disallowed" | "local-unavailable" | "peer-unsupported" | "limit-exceeded" | "probe-missing" | "probe-failed";
+export type NnrpTransportProviderLimitation = "requires-udp" | "requires-tcp" | "local-host-only" | "native-host-only" | "browser-host-only" | "unix-domain-socket" | "windows-named-pipe";
+export type NnrpTransportProbeState = "not-run" | "succeeded" | "failed" | "missing";
+export interface NnrpTransportProviderCost {
+    readonly modelId: number;
+    readonly units: bigint;
+}
+export interface NnrpTransportProviderLimits {
+    readonly maxFrameBytes: bigint;
+}
+export interface NnrpTransportProviderMetadata {
+    readonly id: string;
+    readonly cost: NnrpTransportProviderCost;
+    readonly preferenceRank: number;
+    readonly limits: NnrpTransportProviderLimits;
+    readonly limitations: readonly NnrpTransportProviderLimitation[];
+}
+export interface NnrpTransportProviderObservation {
+    readonly kind: NnrpTransportKind;
+    readonly metadata: NnrpTransportProviderMetadata;
+    readonly localAvailable: boolean;
+    readonly diagnostic?: NnrpDiagnostic;
+}
+export interface NnrpTransportProbeMetrics {
+    readonly sampleCount: number;
+    readonly successCount: number;
+    readonly medianThroughputBytesPerSecond: bigint;
+    readonly medianRttMicroseconds: bigint;
+}
 export interface NnrpTransportCandidate {
     readonly kind: NnrpTransportKind;
-    readonly peerSupported: boolean;
+    readonly provider: NnrpTransportProviderMetadata;
     readonly localAvailable: boolean;
-    readonly score: number;
+    readonly peerSupported: boolean;
+    readonly withinLimits: boolean;
+    readonly probeState: NnrpTransportProbeState;
+    readonly probe?: NnrpTransportProbeMetrics;
+    readonly selectionRank?: number;
     readonly rejectionReason?: NnrpTransportRejectionReason;
     readonly diagnostic?: NnrpDiagnostic;
 }
@@ -377,10 +409,8 @@ export interface NnrpTransportServer {
     readonly listening: boolean;
     close(): void | Promise<void>;
 }
-export interface NnrpTransportProvider {
-    readonly kind: NnrpTransportKind;
+export interface NnrpTransportProvider extends NnrpTransportProviderObservation {
     readonly endpointSchemes: readonly string[];
-    probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
     connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
     listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }
@@ -392,7 +422,9 @@ export interface NnrpTransportSelection {
 export interface NnrpTransportCandidateOptions {
     readonly local: NnrpCapabilityManifest;
     readonly peer: NnrpCapabilityManifest;
-    readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+    readonly providers: readonly NnrpTransportProviderObservation[];
+    readonly requestedMaxFrameBytes?: bigint;
+    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
 export interface NnrpTransportSelectionSummary {
     readonly policy: NnrpTransportPolicy;
@@ -402,8 +434,8 @@ export interface NnrpTransportSelectionSummary {
 }
 export interface NnrpRejectedTransportCandidate {
     readonly kind: NnrpTransportKind;
+    readonly provider: NnrpTransportProviderMetadata;
     readonly reason: NnrpTransportRejectionReason;
-    readonly score: number;
     readonly diagnostic?: NnrpDiagnostic;
 }
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];

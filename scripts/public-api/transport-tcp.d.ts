@@ -1,14 +1,15 @@
-import { type NnrpDiagnostic, type NnrpTransportCandidate, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportProvider, type NnrpTransportServer } from "@nnrp/core";
+import { type NnrpDiagnostic, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportProvider, type NnrpTransportProviderCost, type NnrpTransportServer } from "@nnrp/core";
 import { type Server, type Socket } from "node:net";
 export interface NnrpTcpTransportProviderOptions {
     readonly available?: boolean;
-    readonly score?: number;
+    readonly cost?: NnrpTransportProviderCost;
+    readonly preferenceRank?: number;
+    readonly maxFrameBytes?: bigint;
     readonly diagnostic?: NnrpDiagnostic;
 }
 export interface NnrpTcpTransportProvider extends NnrpTransportProvider {
     readonly kind: "tcp";
     readonly endpointSchemes: readonly ["tcp"];
-    probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
     connect(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportConnection>;
     listen(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportServer>;
 }

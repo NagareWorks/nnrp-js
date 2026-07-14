@@ -35,9 +35,12 @@ import {
   NnrpResultDropError,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
+  type NnrpTransportCandidate,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportProbeMetrics,
+  type NnrpTransportProviderObservation,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
   normalizeSessionMigrationRequest,
@@ -81,6 +84,62 @@ const PREVIEW4_OBJECT_CAPABILITIES = [
   "object.ownership",
   "cache.reference",
 ] as const;
+
+const DEFAULT_PROBE: NnrpTransportProbeMetrics = {
+  sampleCount: 3,
+  successCount: 3,
+  medianThroughputBytesPerSecond: 1_000_000n,
+  medianRttMicroseconds: 1_000n,
+};
+
+function transportProvider(
+  kind: NnrpTransportKind,
+  overrides: Partial<NnrpTransportProviderObservation> & {
+    readonly id?: string;
+    readonly preferenceRank?: number;
+    readonly maxFrameBytes?: bigint;
+    readonly costModelId?: number;
+    readonly costUnits?: bigint;
+  } = {},
+): NnrpTransportProviderObservation {
+  return {
+    kind,
+    metadata: {
+      id: overrides.id ?? `nnrp.transport.${kind}.test`,
+      cost: { modelId: overrides.costModelId ?? 0, units: overrides.costUnits ?? 0n },
+      preferenceRank: overrides.preferenceRank ?? 0,
+      limits: { maxFrameBytes: overrides.maxFrameBytes ?? 67_108_864n },
+      limitations: [],
+    },
+    localAvailable: overrides.localAvailable ?? true,
+    ...(overrides.diagnostic === undefined ? {} : { diagnostic: overrides.diagnostic }),
+  };
+}
+
+function transportCandidate(
+  kind: NnrpTransportKind,
+  overrides: Partial<NnrpTransportCandidate> & {
+    readonly probe?: NnrpTransportProbeMetrics;
+    readonly id?: string;
+    readonly preferenceRank?: number;
+    readonly costModelId?: number;
+    readonly costUnits?: bigint;
+  } = {},
+): NnrpTransportCandidate {
+  const provider = transportProvider(kind, overrides);
+  const probe = overrides.probe;
+  return {
+    kind,
+    provider: provider.metadata,
+    localAvailable: overrides.localAvailable ?? true,
+    peerSupported: overrides.peerSupported ?? true,
+    withinLimits: overrides.withinLimits ?? true,
+    probeState: overrides.probeState ?? (probe === undefined ? "not-run" : "succeeded"),
+    ...(probe === undefined ? {} : { probe }),
+    ...(overrides.rejectionReason === undefined ? {} : { rejectionReason: overrides.rejectionReason }),
+    ...(overrides.diagnostic === undefined ? {} : { diagnostic: overrides.diagnostic }),
+  };
+}
 
 const NNRP_MESSAGE_TYPES = [
   ["ClientHello", 0x01],
@@ -1090,35 +1149,54 @@ Deno.test("@nnrp/core rejects capability tokens outside the frozen catalog", () 
   assertEquals(error.diagnostic.message.includes("control.private_extension"), true);
 });
 
-Deno.test("@nnrp/core selects the highest scored mutually supported transport", () => {
-  const selection = selectTransport([
-    { kind: "quic", peerSupported: true, localAvailable: true, score: 50 },
-    { kind: "tcp", peerSupported: true, localAvailable: true, score: 80 },
-    { kind: "websocket", peerSupported: false, localAvailable: true, score: 100 },
-  ]);
+Deno.test("@nnrp/core selects the sole eligible provider without probe metrics", () => {
+  const selection = selectTransport([transportCandidate("tcp")]);
 
   assertEquals(selection.selected?.kind, "tcp");
-  assertEquals(selection.policy, "auto");
+  assertEquals(selection.selected?.probeState, "not-run");
+  assertEquals(selection.selected?.selectionRank, 0);
 });
 
-Deno.test("@nnrp/core uses the frozen auto tie order for all carriers", () => {
+Deno.test("@nnrp/core orders probes by success count, throughput, and RTT", () => {
   const selection = selectTransport([
-    { kind: "websocket", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "tcp", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "ipc", peerSupported: true, localAvailable: true, score: 100 },
+    transportCandidate("quic", {
+      probe: { ...DEFAULT_PROBE, successCount: 2, medianThroughputBytesPerSecond: 9_000_000n },
+    }),
+    transportCandidate("tcp", { probe: { ...DEFAULT_PROBE, medianThroughputBytesPerSecond: 2_000_000n } }),
+    transportCandidate("ipc", {
+      probe: { ...DEFAULT_PROBE, medianThroughputBytesPerSecond: 2_000_000n, medianRttMicroseconds: 10n },
+    }),
   ]);
 
   assertEquals(selection.selected?.kind, "ipc");
-  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["ipc", "quic", "tcp", "websocket"]);
+  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["ipc", "tcp", "quic"]);
+  assertEquals(selection.candidates.map((candidate) => candidate.selectionRank), [0, 1, 2]);
+});
+
+Deno.test("@nnrp/core uses numeric transport id and bytewise provider id as final ties", () => {
+  const selection = selectTransport([
+    transportCandidate("websocket", { probe: DEFAULT_PROBE, id: "provider-z" }),
+    transportCandidate("tcp", { probe: DEFAULT_PROBE, id: "provider-z" }),
+    transportCandidate("quic", { probe: DEFAULT_PROBE, id: "provider-z" }),
+    transportCandidate("ipc", { probe: DEFAULT_PROBE, id: "provider-z" }),
+    transportCandidate("quic", { probe: DEFAULT_PROBE, id: "provider-a" }),
+  ]);
+
+  assertEquals(selection.candidates.map((candidate) => `${candidate.kind}:${candidate.provider.id}`), [
+    "quic:provider-a",
+    "quic:provider-z",
+    "tcp:provider-z",
+    "ipc:provider-z",
+    "websocket:provider-z",
+  ]);
 });
 
 Deno.test("@nnrp/core applies every preferred transport policy", () => {
   const candidates = [
-    { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "tcp", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "ipc", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "websocket", peerSupported: true, localAvailable: true, score: 100 },
+    transportCandidate("quic", { probe: DEFAULT_PROBE }),
+    transportCandidate("tcp", { probe: DEFAULT_PROBE }),
+    transportCandidate("ipc", { probe: DEFAULT_PROBE }),
+    transportCandidate("websocket", { probe: DEFAULT_PROBE }),
   ] as const;
 
   assertEquals(selectTransport(candidates, "prefer-quic").selected?.kind, "quic");
@@ -1130,23 +1208,23 @@ Deno.test("@nnrp/core applies every preferred transport policy", () => {
 Deno.test("@nnrp/core preferred policies fall back when the preferred carrier is unavailable", () => {
   const selection = selectTransport(
     [
-      { kind: "ipc", peerSupported: false, localAvailable: true, score: 100 },
-      { kind: "tcp", peerSupported: true, localAvailable: true, score: 80 },
-      { kind: "websocket", peerSupported: true, localAvailable: true, score: 70 },
+      transportCandidate("ipc", { peerSupported: false, probe: DEFAULT_PROBE }),
+      transportCandidate("tcp", { probe: DEFAULT_PROBE }),
+      transportCandidate("websocket", { probe: DEFAULT_PROBE }),
     ],
     "prefer-ipc",
   );
 
   assertEquals(selection.selected?.kind, "tcp");
-  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["ipc", "tcp", "websocket"]);
+  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["tcp", "websocket", "ipc"]);
 });
 
 Deno.test("@nnrp/core applies every forced transport policy", () => {
   const candidates = [
-    { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "tcp", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "ipc", peerSupported: true, localAvailable: true, score: 100 },
-    { kind: "websocket", peerSupported: true, localAvailable: true, score: 100 },
+    transportCandidate("quic", { probe: DEFAULT_PROBE }),
+    transportCandidate("tcp", { probe: DEFAULT_PROBE }),
+    transportCandidate("ipc", { probe: DEFAULT_PROBE }),
+    transportCandidate("websocket", { probe: DEFAULT_PROBE }),
   ] as const;
 
   assertEquals(selectTransport(candidates, "force-quic").selected?.kind, "quic");
@@ -1157,12 +1235,12 @@ Deno.test("@nnrp/core applies every forced transport policy", () => {
 
 Deno.test("@nnrp/core reports no selected transport when a forced provider is unavailable", () => {
   const selection = selectTransport(
-    [{ kind: "tcp", peerSupported: true, localAvailable: true, score: 100 }],
+    [transportCandidate("tcp")],
     "force-ipc",
   );
 
   assertEquals(selection.selected, null);
-  assertEquals(selection.candidates[0]?.rejectionReason, "policy-rejected");
+  assertEquals(selection.candidates[0]?.rejectionReason, "policy-disallowed");
 });
 
 Deno.test("@nnrp/core creates transport candidates from local and peer manifests", () => {
@@ -1176,28 +1254,116 @@ Deno.test("@nnrp/core creates transport candidates from local and peer manifests
   const candidates = createTransportCandidates({
     local,
     peer,
-    scores: { tcp: 10, quic: 100 },
+    providers: [transportProvider("tcp"), transportProvider("quic")],
   });
   const selection = selectTransport(candidates);
   const summary = createTransportSelectionSummary(selection);
 
   assertEquals(selection.selected?.kind, "tcp");
   assertEquals(summary.selected, "tcp");
-  assertEquals(summary.rejected, [{ kind: "quic", reason: "peer-unsupported", score: 100 }]);
+  assertEquals(summary.rejected[0]?.kind, "quic");
+  assertEquals(summary.rejected[0]?.reason, "peer-unsupported");
 });
 
-Deno.test("@nnrp/core reports policy-rejected transport candidates", () => {
+Deno.test("@nnrp/core reports policy-disallowed transport candidates", () => {
   const selection = selectTransport(
     [
-      { kind: "quic", peerSupported: true, localAvailable: true, score: 100 },
-      { kind: "tcp", peerSupported: true, localAvailable: true, score: 10 },
+      transportCandidate("quic", { probe: DEFAULT_PROBE }),
+      transportCandidate("tcp", { probe: DEFAULT_PROBE }),
     ],
     "force-tcp",
   );
   const summary = createTransportSelectionSummary(selection);
 
   assertEquals(selection.selected?.kind, "tcp");
-  assertEquals(summary.rejected, [{ kind: "quic", reason: "policy-rejected", score: 100 }]);
+  assertEquals(summary.rejected[0]?.reason, "policy-disallowed");
+});
+
+Deno.test("@nnrp/core rejects over-limit and missing-probe candidates", () => {
+  const local = createBackendNativeManifest();
+  const peer = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: ["tcp", "quic"],
+    capabilities: ["client.session"],
+  });
+  const selection = selectTransport(createTransportCandidates({
+    local,
+    peer,
+    requestedMaxFrameBytes: 2_048n,
+    providers: [
+      transportProvider("tcp", { maxFrameBytes: 1_024n }),
+      transportProvider("quic", { maxFrameBytes: 4_096n }),
+      transportProvider("quic", { id: "quic-second", maxFrameBytes: 4_096n }),
+    ],
+  }));
+
+  assertEquals(selection.selected, null);
+  assertEquals(selection.candidates.map((candidate) => candidate.rejectionReason), [
+    "probe-missing",
+    "probe-missing",
+    "limit-exceeded",
+  ]);
+});
+
+Deno.test("@nnrp/core compares cost only inside the same non-zero model", () => {
+  const selection = selectTransport([
+    transportCandidate("tcp", { probe: DEFAULT_PROBE, costModelId: 7, costUnits: 20n }),
+    transportCandidate("quic", { probe: DEFAULT_PROBE, costModelId: 7, costUnits: 10n }),
+  ]);
+  assertEquals(selection.selected?.kind, "quic");
+});
+
+Deno.test("@nnrp/core ignores probes for a sole provider and rejects failed probes in a probe set", () => {
+  const failed = selectTransport([transportCandidate("tcp", { probeState: "failed" })]);
+  assertEquals(failed.selected?.kind, "tcp");
+  assertEquals(failed.selected?.probeState, "not-run");
+
+  const probed = selectTransport([
+    transportCandidate("tcp", { probeState: "failed" }),
+    transportCandidate("quic", { probe: DEFAULT_PROBE }),
+  ]);
+  assertEquals(probed.selected?.kind, "quic");
+  assertEquals(probed.candidates[1]?.rejectionReason, "probe-failed");
+});
+
+Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", () => {
+  const local = createBackendNativeManifest();
+  const peer = createBackendNativeManifest();
+  const metadataError = assertThrows(
+    () =>
+      createTransportCandidates({
+        local,
+        peer,
+        providers: [transportProvider("tcp", { preferenceRank: 0x1_0000 })],
+      }),
+    NnrpTransportError,
+  );
+  assertEquals(metadataError.diagnostic.code, "NNRP_TRANSPORT_PROVIDER_METADATA_INVALID");
+
+  const costModelError = assertThrows(
+    () =>
+      createTransportCandidates({
+        local,
+        peer,
+        providers: [transportProvider("tcp", { costModelId: 0x1_0000 })],
+      }),
+    NnrpTransportError,
+  );
+  assertEquals(costModelError.diagnostic.code, "NNRP_TRANSPORT_PROVIDER_METADATA_INVALID");
+
+  const metricsError = assertThrows(
+    () =>
+      createTransportCandidates({
+        local,
+        peer,
+        providers: [transportProvider("tcp")],
+        probeMetricsByProviderId: {
+          "nnrp.transport.tcp.test": { ...DEFAULT_PROBE, successCount: 4 },
+        },
+      }),
+    NnrpTransportError,
+  );
+  assertEquals(metricsError.diagnostic.code, "NNRP_TRANSPORT_PROBE_METRICS_INVALID");
 });
 
 Deno.test("@nnrp/core parses application endpoints without losing URL semantics", () => {
@@ -1421,14 +1587,13 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
     retryable: true,
     transport: "quic" as const,
   };
-  const summary = createTransportSelectionSummary(selectTransport([{
-    kind: "quic",
-    peerSupported: true,
-    localAvailable: true,
-    score: 100,
-    rejectionReason: "probe-failed",
-    diagnostic,
-  }]));
+  const summary = createTransportSelectionSummary(selectTransport([
+    {
+      ...transportCandidate("quic", { probeState: "failed", rejectionReason: "probe-failed" }),
+      diagnostic,
+    },
+    transportCandidate("tcp", { probe: DEFAULT_PROBE }),
+  ]));
   const normalized = normalizeSubmitRequest({
     frameId: 12,
     metadata: { request: "agent" },
@@ -1443,7 +1608,7 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
     },
   });
 
-  assertEquals(summary.selected, null);
+  assertEquals(summary.selected, "tcp");
   assertEquals(summary.rejected[0]?.diagnostic, diagnostic);
   assertEquals(normalized.metadata, { request: "agent" });
   assertEquals(normalized.descriptor?.metadata, { format: "delta" });

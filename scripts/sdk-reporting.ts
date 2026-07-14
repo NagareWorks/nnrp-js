@@ -211,6 +211,17 @@ function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTran
   const candidates = createTransportCandidates({
     local: manifest,
     peer: peerManifest,
+    providers: peerManifest.transports.map((kind) => ({
+      kind,
+      metadata: {
+        id: `nnrp.transport.${kind}.benchmark`,
+        cost: { modelId: 0, units: 0n },
+        preferenceRank: 0,
+        limits: { maxFrameBytes: 67_108_864n },
+        limitations: [],
+      },
+      localAvailable: true,
+    })),
   });
 
   return createTransportSelectionSummary(selectTransport(candidates));
@@ -260,7 +271,7 @@ export function selectBuildModes(mode: SdkCommandMode): readonly NnrpBuildMode[]
 }
 
 export function writeJson(value: unknown): void {
-  console.log(JSON.stringify(value, null, 2));
+  console.log(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString(10) : entry, 2));
 }
 
 function createBuildManifest(buildMode: NnrpBuildMode, options: SdkCommandOptions): SdkBuildManifest {

@@ -1,23 +1,24 @@
 import {
   type NnrpDiagnostic,
-  type NnrpTransportCandidate,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   type NnrpTransportProvider,
+  type NnrpTransportProviderCost,
   type NnrpTransportServer,
 } from "@nnrp/core";
 import { connect as connectSocket, createServer, type Server, type Socket } from "node:net";
 
 export interface NnrpTcpTransportProviderOptions {
   readonly available?: boolean;
-  readonly score?: number;
+  readonly cost?: NnrpTransportProviderCost;
+  readonly preferenceRank?: number;
+  readonly maxFrameBytes?: bigint;
   readonly diagnostic?: NnrpDiagnostic;
 }
 
 export interface NnrpTcpTransportProvider extends NnrpTransportProvider {
   readonly kind: "tcp";
   readonly endpointSchemes: readonly ["tcp"];
-  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
   connect(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportConnection>;
   listen(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportServer>;
 }
@@ -37,14 +38,16 @@ export function createTcpTransportProvider(
 ): NnrpTcpTransportProvider {
   return {
     kind: "tcp",
+    metadata: {
+      id: "nnrp.transport.tcp.native",
+      cost: options.cost ?? { modelId: 0, units: 0n },
+      preferenceRank: options.preferenceRank ?? 2,
+      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+      limitations: ["requires-tcp", "native-host-only"],
+    },
+    localAvailable: options.available ?? true,
+    ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
     endpointSchemes: ["tcp"],
-    probe: () => ({
-      kind: "tcp",
-      peerSupported: true,
-      localAvailable: options.available ?? true,
-      score: options.score ?? 60,
-      ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
-    }),
     connect: (endpoint) => connectTcp(endpoint),
     listen: (endpoint) => listenTcp(endpoint),
   };

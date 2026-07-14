@@ -1,14 +1,15 @@
-import { type NnrpDiagnostic, type NnrpTransportCandidate, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportProvider } from "@nnrp/core";
+import { type NnrpDiagnostic, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportProvider, type NnrpTransportProviderCost } from "@nnrp/core";
 export interface NnrpWebSocketTransportProviderOptions {
     readonly available?: boolean;
-    readonly score?: number;
+    readonly cost?: NnrpTransportProviderCost;
+    readonly preferenceRank?: number;
+    readonly maxFrameBytes?: bigint;
     readonly diagnostic?: NnrpDiagnostic;
     readonly WebSocket?: typeof WebSocket;
 }
 export interface NnrpWebSocketTransportProvider extends NnrpTransportProvider {
     readonly kind: "websocket";
     readonly endpointSchemes: readonly ["ws", "wss"];
-    probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
     connect(options: NnrpTransportEndpoint): Promise<NnrpWebSocketTransportConnection>;
 }
 export interface NnrpWebSocketTransportConnection extends NnrpTransportConnection {

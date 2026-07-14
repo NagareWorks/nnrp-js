@@ -1,10 +1,10 @@
 import {
   type NnrpDiagnostic,
-  type NnrpTransportCandidate,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportProvider,
+  type NnrpTransportProviderCost,
   type NnrpTransportServer,
 } from "@nnrp/core";
 
@@ -15,15 +15,16 @@ export interface NnrpQuicNativeBinding {
 
 export interface NnrpQuicTransportProviderOptions {
   readonly available?: boolean;
-  readonly score?: number;
+  readonly cost?: NnrpTransportProviderCost;
+  readonly preferenceRank?: number;
+  readonly maxFrameBytes?: bigint;
   readonly diagnostic?: NnrpDiagnostic;
-  readonly native?: NnrpQuicNativeBinding;
+  readonly binding?: NnrpQuicNativeBinding;
 }
 
 export interface NnrpQuicTransportProvider extends NnrpTransportProvider {
   readonly kind: "quic";
   readonly endpointSchemes: readonly ["quic"];
-  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
   connect(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
   listen(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }
@@ -32,28 +33,30 @@ export function createQuicTransportProvider(
   options: NnrpQuicTransportProviderOptions = {},
 ): NnrpQuicTransportProvider {
   const diagnostic = options.diagnostic ?? unavailableDiagnostic("NNRP_QUIC_NATIVE_BINDING_MISSING");
-  const hasNative = options.native !== undefined;
+  const hasNative = options.binding !== undefined;
   return {
     kind: "quic",
+    metadata: {
+      id: "nnrp.transport.quic.native",
+      cost: options.cost ?? { modelId: 0, units: 0n },
+      preferenceRank: options.preferenceRank ?? 1,
+      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+      limitations: ["requires-udp", "native-host-only"],
+    },
+    localAvailable: options.available ?? hasNative,
+    ...((options.available ?? hasNative) ? {} : { diagnostic }),
     endpointSchemes: ["quic"],
-    probe: () => ({
-      kind: "quic",
-      peerSupported: true,
-      localAvailable: options.available ?? hasNative,
-      score: options.score ?? 80,
-      ...((options.available ?? hasNative) ? {} : { diagnostic }),
-    }),
     connect: (endpoint) => {
-      if (options.native?.connect === undefined) {
+      if (options.binding?.connect === undefined) {
         throw unavailable("connect");
       }
-      return options.native.connect(endpoint);
+      return options.binding.connect(endpoint);
     },
     listen: (endpoint) => {
-      if (options.native?.listen === undefined) {
+      if (options.binding?.listen === undefined) {
         throw unavailable("listen");
       }
-      return options.native.listen(endpoint);
+      return options.binding.listen(endpoint);
     },
   };
 }
@@ -68,7 +71,7 @@ function unavailable(operation: "connect" | "listen"): NnrpTransportError {
 function unavailableDiagnostic(code: string): NnrpDiagnostic {
   return {
     code,
-    message: "QUIC transport requires an injected native QUIC transport binding.",
+    message: "QUIC transport requires a native QUIC transport binding.",
     source: "transport",
     retryable: false,
     transport: "quic",

@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportProviderCost, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpWasmRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -14,18 +14,20 @@ export interface NnrpBrowserConnectOptions {
 }
 export interface NnrpBrowserTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
-    readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+    readonly providers?: readonly NnrpBrowserTransportProvider[];
+    readonly policy?: NnrpTransportPolicy;
+    readonly requestedMaxFrameBytes?: bigint;
+    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
     readonly kind: NnrpBrowserTransportKind;
-    readonly available?: boolean;
-    readonly score?: number;
-    readonly diagnostic?: NnrpDiagnostic;
 }
 export interface NnrpBrowserTransportProviderOptions {
     readonly available?: boolean;
-    readonly score?: number;
+    readonly cost?: NnrpTransportProviderCost;
+    readonly preferenceRank?: number;
+    readonly maxFrameBytes?: bigint;
     readonly diagnostic?: NnrpDiagnostic;
 }
 export interface NnrpBrowserSessionOptions extends NnrpSessionFlowControlOptions {
@@ -77,17 +79,12 @@ export interface NnrpWasmProtocolVersion {
     readonly wireFormat: number;
     readonly version: string;
 }
-export interface NnrpWasmTransportScoreRequest {
-    readonly candidates: readonly NnrpTransportCandidate[];
-    readonly policy: NnrpTransportPolicy;
-}
 export interface NnrpWasmSubmitValidationRequest {
     readonly sessionOptions: NnrpBrowserSessionOptions;
     readonly submit: NnrpNormalizedSubmitRequest;
 }
 export interface NnrpWasmPrimitiveBinding {
     protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
-    scoreTransportCandidates?(request: NnrpWasmTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
     validateSubmit?(request: NnrpWasmSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
     submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
@@ -128,7 +125,6 @@ export declare class NnrpBrowserRuntime {
     get transportProviders(): readonly NnrpBrowserTransportProvider[];
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
-    selectTransportWithPrimitives(options: NnrpBrowserTransportSelectionOptions): Promise<NnrpTransportSelectionSummary>;
     protocolVersion(): Promise<NnrpWasmProtocolVersion>;
     submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint>;

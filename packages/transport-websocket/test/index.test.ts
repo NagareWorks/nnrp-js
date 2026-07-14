@@ -2,14 +2,13 @@ import { NnrpTransportError } from "@nnrp/core";
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { createWebSocketTransportProvider } from "../src/index.ts";
 
-Deno.test("@nnrp/transport-websocket creates a probeable WebSocket provider", async () => {
+Deno.test("@nnrp/transport-websocket exposes browser WebSocket provider metadata", () => {
   const provider = createWebSocketTransportProvider({ WebSocket: fakeWebSocketConstructor });
-  const candidate = await provider.probe();
 
   assertEquals(provider.endpointSchemes, ["ws", "wss"]);
-  assertEquals(candidate.kind, "websocket");
-  assertEquals(candidate.localAvailable, true);
-  assertEquals(candidate.score, 70);
+  assertEquals(provider.kind, "websocket");
+  assertEquals(provider.localAvailable, true);
+  assertEquals(provider.metadata.id, "nnrp.transport.websocket.browser-wasm");
 });
 
 Deno.test("@nnrp/transport-websocket owns WebSocket connect behavior", async () => {

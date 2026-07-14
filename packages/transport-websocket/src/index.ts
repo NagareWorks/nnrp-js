@@ -1,15 +1,17 @@
 import {
   type NnrpDiagnostic,
-  type NnrpTransportCandidate,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportProvider,
+  type NnrpTransportProviderCost,
 } from "@nnrp/core";
 
 export interface NnrpWebSocketTransportProviderOptions {
   readonly available?: boolean;
-  readonly score?: number;
+  readonly cost?: NnrpTransportProviderCost;
+  readonly preferenceRank?: number;
+  readonly maxFrameBytes?: bigint;
   readonly diagnostic?: NnrpDiagnostic;
   readonly WebSocket?: typeof WebSocket;
 }
@@ -17,7 +19,6 @@ export interface NnrpWebSocketTransportProviderOptions {
 export interface NnrpWebSocketTransportProvider extends NnrpTransportProvider {
   readonly kind: "websocket";
   readonly endpointSchemes: readonly ["ws", "wss"];
-  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
   connect(options: NnrpTransportEndpoint): Promise<NnrpWebSocketTransportConnection>;
 }
 
@@ -33,14 +34,16 @@ export function createWebSocketTransportProvider(
   const available = options.available ?? socketCtor !== undefined;
   return {
     kind: "websocket",
+    metadata: {
+      id: "nnrp.transport.websocket.browser-wasm",
+      cost: options.cost ?? { modelId: 0, units: 0n },
+      preferenceRank: options.preferenceRank ?? 3,
+      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+      limitations: ["requires-tcp", "browser-host-only"],
+    },
+    localAvailable: available,
+    ...(available ? {} : { diagnostic: options.diagnostic ?? unavailableDiagnostic() }),
     endpointSchemes: ["ws", "wss"],
-    probe: () => ({
-      kind: "websocket",
-      peerSupported: true,
-      localAvailable: available,
-      score: options.score ?? 70,
-      ...(available ? {} : { diagnostic: options.diagnostic ?? unavailableDiagnostic() }),
-    }),
     connect: (endpoint) => connectWebSocket(endpoint, socketCtor),
   };
 }

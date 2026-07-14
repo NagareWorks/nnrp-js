@@ -1,14 +1,15 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { createTcpTransportProvider } from "../src/index.ts";
 
-Deno.test("@nnrp/transport-tcp creates a probeable TCP provider", async () => {
-  const provider = createTcpTransportProvider({ score: 75 });
-  const candidate = await provider.probe();
+Deno.test("@nnrp/transport-tcp exposes frozen TCP provider metadata", () => {
+  const provider = createTcpTransportProvider({ preferenceRank: 5, maxFrameBytes: 1024n });
 
   assertEquals(provider.endpointSchemes, ["tcp"]);
-  assertEquals(candidate.kind, "tcp");
-  assertEquals(candidate.localAvailable, true);
-  assertEquals(candidate.score, 75);
+  assertEquals(provider.kind, "tcp");
+  assertEquals(provider.localAvailable, true);
+  assertEquals(provider.metadata.id, "nnrp.transport.tcp.native");
+  assertEquals(provider.metadata.preferenceRank, 5);
+  assertEquals(provider.metadata.limits.maxFrameBytes, 1024n);
 });
 
 Deno.test("@nnrp/transport-tcp owns Node TCP listen and connect behavior", async () => {
@@ -26,8 +27,5 @@ Deno.test("@nnrp/transport-tcp owns Node TCP listen and connect behavior", async
 });
 
 Deno.test("@nnrp/transport-tcp rejects invalid connect endpoints", async () => {
-  const candidate = await createTcpTransportProvider({ score: 75 }).probe();
-
-  assertEquals(candidate.localAvailable, true);
   await assertRejects(() => createTcpTransportProvider().connect({ endpoint: "127.0.0.1:0" }), Error);
 });

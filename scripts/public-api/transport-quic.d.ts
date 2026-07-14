@@ -1,18 +1,19 @@
-import { type NnrpDiagnostic, type NnrpTransportCandidate, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportProvider, type NnrpTransportServer } from "@nnrp/core";
+import { type NnrpDiagnostic, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportProvider, type NnrpTransportProviderCost, type NnrpTransportServer } from "@nnrp/core";
 export interface NnrpQuicNativeBinding {
     connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
     listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }
 export interface NnrpQuicTransportProviderOptions {
     readonly available?: boolean;
-    readonly score?: number;
+    readonly cost?: NnrpTransportProviderCost;
+    readonly preferenceRank?: number;
+    readonly maxFrameBytes?: bigint;
     readonly diagnostic?: NnrpDiagnostic;
-    readonly native?: NnrpQuicNativeBinding;
+    readonly binding?: NnrpQuicNativeBinding;
 }
 export interface NnrpQuicTransportProvider extends NnrpTransportProvider {
     readonly kind: "quic";
     readonly endpointSchemes: readonly ["quic"];
-    probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
     connect(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
     listen(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }

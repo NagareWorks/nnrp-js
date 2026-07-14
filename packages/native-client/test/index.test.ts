@@ -81,13 +81,27 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
     platform: "linux",
     arch: "x64",
     transports: [
-      createTcpTransportProvider({ score: 60 }),
-      createQuicTransportProvider({ score: 90, native: fakeQuicNativeBinding() }),
+      createTcpTransportProvider(),
+      createQuicTransportProvider({ binding: fakeQuicNativeBinding() }),
     ],
   });
 
-  const summary = await client.runtime.selectTransportWithNative({
+  const summary = client.runtime.selectTransport({
     peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
+    probeMetricsByProviderId: {
+      "nnrp.transport.tcp.native": {
+        sampleCount: 3,
+        successCount: 3,
+        medianThroughputBytesPerSecond: 1_000n,
+        medianRttMicroseconds: 100n,
+      },
+      "nnrp.transport.quic.native": {
+        sampleCount: 3,
+        successCount: 3,
+        medianThroughputBytesPerSecond: 2_000n,
+        medianRttMicroseconds: 100n,
+      },
+    },
   });
 
   assertEquals(summary.selected, "quic");

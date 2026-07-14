@@ -27,7 +27,7 @@ Deno.test("sdk reporting creates conformance smoke cases from capabilities", () 
   assertEquals(report.cases.at(-1)?.status, "skipped");
   assertEquals(report.cases.at(-1)?.diagnostic?.code, "NNRP_JS_NATIVE_ARTIFACT_UNAVAILABLE");
   assertEquals(report.transport.selected, "tcp");
-  assertEquals(report.transport.rejected[0]?.kind, "quic");
+  assertEquals(report.transport.rejected, []);
 });
 
 Deno.test("sdk reporting creates benchmark smoke results", () => {
@@ -78,7 +78,7 @@ Deno.test("sdk reporting selects requested build modes", () => {
   assertEquals(selectBuildModes("browser-wasm"), ["browser-wasm"]);
 });
 
-Deno.test("sdk reporting writes JSON to stdout", () => {
+Deno.test("sdk reporting writes JSON with canonical decimal u64 values", () => {
   const original = console.log;
   const lines: string[] = [];
   try {
@@ -86,10 +86,10 @@ Deno.test("sdk reporting writes JSON to stdout", () => {
       lines.push(value);
     };
 
-    writeJson({ sdk: "nnrp-js" });
+    writeJson({ sdk: "nnrp-js", units: 18_446_744_073_709_551_615n });
   } finally {
     console.log = original;
   }
 
-  assertEquals(lines, ['{\n  "sdk": "nnrp-js"\n}']);
+  assertEquals(lines, ['{\n  "sdk": "nnrp-js",\n  "units": "18446744073709551615"\n}']);
 });

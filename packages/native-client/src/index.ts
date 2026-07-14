@@ -40,6 +40,7 @@ import {
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportProbeMetrics,
   type NnrpTransportProvider,
   type NnrpTransportSelectionSummary,
   normalizeSessionMigrationRequest,
@@ -175,17 +176,9 @@ export interface NnrpNativeEventBatchRequest {
   readonly timeoutMillis?: number;
 }
 
-export interface NnrpNativeTransportScoreRequest {
-  readonly candidates: readonly NnrpTransportCandidate[];
-  readonly policy: NnrpTransportPolicy;
-}
-
 export interface NnrpNativeFfiBinding {
   readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
-  scoreTransportCandidates?(
-    request: NnrpNativeTransportScoreRequest,
-  ): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
   validateSubmit?(
     request: NnrpNativeSubmitValidationRequest,
   ): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
@@ -262,14 +255,15 @@ export interface NnrpConnectOptions {
 }
 
 export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
-  readonly kind: Extract<NnrpTransportKind, "tcp" | "quic">;
-  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
+  readonly kind: NnrpTransportKind;
 }
 
 export interface NnrpTransportSelectionOptions {
   readonly peerManifest: NnrpCapabilityManifest;
-  readonly transports?: readonly NnrpNativeTransportProvider[];
-  readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+  readonly providers?: readonly NnrpNativeTransportProvider[];
+  readonly policy?: NnrpTransportPolicy;
+  readonly requestedMaxFrameBytes?: bigint;
+  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
 
 export interface NnrpNativeBindingOptions {
@@ -494,32 +488,7 @@ class NnrpBackendRuntime {
     return createTransportSelectionSummary(
       selectTransport(
         this.#createTransportCandidates(options),
-        this.#transportPolicy,
-      ),
-    );
-  }
-
-  public async selectTransportWithNative(
-    options: NnrpTransportSelectionOptions,
-  ): Promise<NnrpTransportSelectionSummary> {
-    this.#ensureOpen();
-    const candidates = this.#createTransportCandidates(options);
-    const probedCandidates = await applyNativeTransportProbes(
-      candidates,
-      options.transports ?? this.#transportProviders,
-    );
-    const scoreTransportCandidates = this.#binding.ffi?.scoreTransportCandidates;
-    const scoredCandidates = scoreTransportCandidates === undefined
-      ? probedCandidates
-      : await scoreTransportCandidates({
-        candidates: probedCandidates,
-        policy: this.#transportPolicy,
-      });
-
-    return createTransportSelectionSummary(
-      selectTransport(
-        scoredCandidates,
-        this.#transportPolicy,
+        options.policy ?? this.#transportPolicy,
       ),
     );
   }
@@ -574,41 +543,19 @@ class NnrpBackendRuntime {
   }
 
   #createTransportCandidates(options: NnrpTransportSelectionOptions): readonly NnrpTransportCandidate[] {
+    const providers = options.providers ?? this.#transportProviders;
     return createTransportCandidates({
-      local: this.#binding.manifest,
+      local: { ...this.#binding.manifest, transports: providers.map((provider) => provider.kind) },
       peer: options.peerManifest,
-      ...(options.scores === undefined ? {} : { scores: options.scores }),
+      providers,
+      ...(options.requestedMaxFrameBytes === undefined
+        ? {}
+        : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
+      ...(options.probeMetricsByProviderId === undefined
+        ? {}
+        : { probeMetricsByProviderId: options.probeMetricsByProviderId }),
     });
   }
-}
-
-async function applyNativeTransportProbes(
-  candidates: readonly NnrpTransportCandidate[],
-  providers: readonly NnrpNativeTransportProvider[],
-): Promise<readonly NnrpTransportCandidate[]> {
-  const probes = new Map<NnrpTransportKind, NnrpTransportCandidate>();
-  for (const provider of providers) {
-    probes.set(provider.kind, await provider.probe());
-  }
-
-  return candidates.map((candidate) => {
-    const probe = probes.get(candidate.kind);
-    if (probe === undefined) {
-      return {
-        ...candidate,
-        localAvailable: false,
-        rejectionReason: candidate.rejectionReason ?? "local-unavailable",
-      };
-    }
-
-    return {
-      ...candidate,
-      localAvailable: probe.localAvailable,
-      score: probe.score,
-      ...(probe.diagnostic === undefined ? {} : { diagnostic: probe.diagnostic }),
-      ...(probe.rejectionReason === undefined ? {} : { rejectionReason: probe.rejectionReason }),
-    };
-  });
 }
 
 async function discoverNativeTransportProviders(): Promise<readonly NnrpNativeTransportProvider[]> {

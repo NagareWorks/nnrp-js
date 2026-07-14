@@ -22,7 +22,7 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
     platform: "linux",
     arch: "x64",
     transportPolicy: "force-tcp",
-    transports: [createTcpTransportProvider(), createQuicTransportProvider({ native: fakeQuicNativeBinding() })],
+    transports: [createTcpTransportProvider(), createQuicTransportProvider({ binding: fakeQuicNativeBinding() })],
   });
   const server = runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "force-quic" });
 
@@ -39,15 +39,14 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider({ score: 70 })],
+    transports: [createTcpTransportProvider()],
   });
-  const tcpSummary = await tcpRuntime.selectTransportWithNative({
+  const tcpSummary = tcpRuntime.selectTransport({
     peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
   });
 
   assertEquals(tcpSummary.selected, "tcp");
-  assertEquals(tcpSummary.rejected.map((item) => item.kind), ["quic"]);
-  assertEquals(tcpSummary.rejected[0]?.reason, "local-unavailable");
+  assertEquals(tcpSummary.rejected, []);
 
   const noProviderRuntime = await openBackendRuntime({
     env: {},
@@ -55,12 +54,12 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
     arch: "x64",
     transports: [],
   });
-  const noProviderSummary = await noProviderRuntime.selectTransportWithNative({
+  const noProviderSummary = noProviderRuntime.selectTransport({
     peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
   });
 
   assertEquals(noProviderSummary.selected, null);
-  assertEquals(noProviderSummary.rejected.map((item) => item.kind).sort(), ["quic", "tcp"]);
+  assertEquals(noProviderSummary.rejected, []);
 });
 
 Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed providers", async () => {

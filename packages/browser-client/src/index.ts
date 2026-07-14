@@ -35,7 +35,9 @@ import {
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
+  type NnrpTransportProbeMetrics,
   type NnrpTransportProvider,
+  type NnrpTransportProviderCost,
   type NnrpTransportSelectionSummary,
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
@@ -75,21 +77,23 @@ export interface NnrpBrowserConnectOptions {
 
 export interface NnrpBrowserTransportSelectionOptions {
   readonly peerManifest: NnrpCapabilityManifest;
-  readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+  readonly providers?: readonly NnrpBrowserTransportProvider[];
+  readonly policy?: NnrpTransportPolicy;
+  readonly requestedMaxFrameBytes?: bigint;
+  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
 
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 
 export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
   readonly kind: NnrpBrowserTransportKind;
-  readonly available?: boolean;
-  readonly score?: number;
-  readonly diagnostic?: NnrpDiagnostic;
 }
 
 export interface NnrpBrowserTransportProviderOptions {
   readonly available?: boolean;
-  readonly score?: number;
+  readonly cost?: NnrpTransportProviderCost;
+  readonly preferenceRank?: number;
+  readonly maxFrameBytes?: bigint;
   readonly diagnostic?: NnrpDiagnostic;
 }
 
@@ -151,11 +155,6 @@ export interface NnrpWasmProtocolVersion {
   readonly version: string;
 }
 
-export interface NnrpWasmTransportScoreRequest {
-  readonly candidates: readonly NnrpTransportCandidate[];
-  readonly policy: NnrpTransportPolicy;
-}
-
 export interface NnrpWasmSubmitValidationRequest {
   readonly sessionOptions: NnrpBrowserSessionOptions;
   readonly submit: NnrpNormalizedSubmitRequest;
@@ -163,9 +162,6 @@ export interface NnrpWasmSubmitValidationRequest {
 
 export interface NnrpWasmPrimitiveBinding {
   protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
-  scoreTransportCandidates?(
-    request: NnrpWasmTransportScoreRequest,
-  ): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
   validateSubmit?(
     request: NnrpWasmSubmitValidationRequest,
   ): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
@@ -262,26 +258,7 @@ export class NnrpBrowserRuntime {
     return createTransportSelectionSummary(
       selectTransport(
         this.#createTransportCandidates(options),
-        this.#transportPolicy,
-      ),
-    );
-  }
-
-  public async selectTransportWithPrimitives(
-    options: NnrpBrowserTransportSelectionOptions,
-  ): Promise<NnrpTransportSelectionSummary> {
-    this.#ensureOpen();
-    const candidates = this.#createTransportCandidates(options);
-    const scoreTransportCandidates = this.#binding.primitives?.scoreTransportCandidates;
-    const scoredCandidates = scoreTransportCandidates === undefined ? candidates : await scoreTransportCandidates({
-      candidates,
-      policy: this.#transportPolicy,
-    });
-
-    return createTransportSelectionSummary(
-      selectTransport(
-        scoredCandidates,
-        this.#transportPolicy,
+        options.policy ?? this.#transportPolicy,
       ),
     );
   }
@@ -413,14 +390,18 @@ export class NnrpBrowserRuntime {
   }
 
   #createTransportCandidates(options: NnrpBrowserTransportSelectionOptions): readonly NnrpTransportCandidate[] {
-    const providerMap = new Map(this.#binding.transportProviders.map((provider) => [provider.kind, provider]));
+    const providers = options.providers ?? this.#binding.transportProviders;
     return createTransportCandidates({
-      local: this.#binding.manifest,
+      local: { ...this.#binding.manifest, transports: providers.map((provider) => provider.kind) },
       peer: options.peerManifest,
-      ...(options.scores === undefined ? {} : { scores: options.scores }),
-    }).map((candidate: NnrpTransportCandidate) =>
-      withBrowserProvider(candidate, providerMap.get(candidate.kind as NnrpBrowserTransportKind))
-    );
+      providers,
+      ...(options.requestedMaxFrameBytes === undefined
+        ? {}
+        : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
+      ...(options.probeMetricsByProviderId === undefined
+        ? {}
+        : { probeMetricsByProviderId: options.probeMetricsByProviderId }),
+    });
   }
 }
 
@@ -1174,17 +1155,16 @@ export function createBrowserTransportProvider(
 ): NnrpBrowserTransportProvider {
   return {
     kind,
-    endpointSchemes: ["ws", "wss"],
-    probe: () => ({
-      kind,
-      peerSupported: true,
-      localAvailable: options.available ?? true,
-      score: options.score ?? 70,
-      ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
-    }),
-    ...(options.available === undefined ? {} : { available: options.available }),
-    ...(options.score === undefined ? {} : { score: options.score }),
+    metadata: {
+      id: "nnrp.transport.websocket.browser-wasm",
+      cost: options.cost ?? { modelId: 0, units: 0n },
+      preferenceRank: options.preferenceRank ?? 3,
+      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+      limitations: ["requires-tcp", "browser-host-only"],
+    },
+    localAvailable: options.available ?? true,
     ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
+    endpointSchemes: ["ws", "wss"],
   };
 }
 
@@ -1237,30 +1217,10 @@ function requiredWasmExports(requiredExports: readonly string[] | undefined): re
       "nnrp_wasm_protocol_major",
       "nnrp_wasm_wire_format",
       "selectTransportWithProbeJson",
-      "scoreProviderProbeJson",
+      "summarizeProviderProbeJson",
       ...(requiredExports ?? []),
     ]),
   ];
-}
-
-function withBrowserProvider(
-  candidate: NnrpTransportCandidate,
-  provider: NnrpBrowserTransportProvider | undefined,
-): NnrpTransportCandidate {
-  if (provider === undefined) {
-    return {
-      ...candidate,
-      localAvailable: false,
-      rejectionReason: candidate.rejectionReason ?? "local-unavailable",
-    };
-  }
-
-  return {
-    ...candidate,
-    localAvailable: provider.available ?? candidate.localAvailable,
-    score: provider.score ?? candidate.score,
-    ...(provider.diagnostic === undefined ? {} : { diagnostic: provider.diagnostic }),
-  };
 }
 
 function validateBrowserTransportProviders(providers: readonly NnrpBrowserTransportProvider[]): void {
@@ -1282,17 +1242,10 @@ async function discoverBrowserTransportProviders(): Promise<readonly NnrpBrowser
   }
 
   const provider = websocket.createWebSocketTransportProvider();
-  const candidate = await provider.probe();
   if (!isBrowserTransportProvider(provider)) {
     return [];
   }
-
-  return [{
-    ...provider,
-    available: candidate.localAvailable,
-    score: candidate.score,
-    ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
-  }];
+  return [provider];
 }
 
 async function importOptionalTransportModule(specifier: string): Promise<Record<string, unknown> | undefined> {
@@ -1303,9 +1256,7 @@ async function importOptionalTransportModule(specifier: string): Promise<Record<
   }
 }
 
-function isTransportFactory(value: unknown): value is () => {
-  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
-} {
+function isTransportFactory(value: unknown): value is () => NnrpBrowserTransportProvider {
   return typeof value === "function";
 }
 
@@ -1318,7 +1269,8 @@ function isBrowserTransportProvider(value: unknown): value is NnrpBrowserTranspo
   return provider.kind === "websocket" &&
     Array.isArray(provider.endpointSchemes) &&
     provider.endpointSchemes.every((scheme) => scheme === "ws" || scheme === "wss") &&
-    typeof provider.probe === "function";
+    typeof provider.metadata === "object" &&
+    typeof provider.localAvailable === "boolean";
 }
 
 function normalizeEndpoint(endpoint: string | URL): string {

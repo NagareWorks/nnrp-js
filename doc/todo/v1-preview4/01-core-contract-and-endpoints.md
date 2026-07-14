@@ -26,9 +26,9 @@
   - [x] Remove `score`, `tcp-only`, and `quic-only` policy values.
 - [ ] Implement deterministic selection.
   - [x] Select the only installed and compatible provider without probing unrelated packages.
-  - [x] Probe all installed compatible providers for `auto` and `prefer-*`.
+  - [ ] Probe all installed compatible providers for `auto` and `prefer-*`.
   - [x] Reject a missing or incompatible forced provider without fallback.
-  - [ ] Return ordered candidate diagnostics with availability, score, cost, limit, and rejection reason.
+  - [x] Return ordered candidate diagnostics with availability, probe metrics, cost, limit, and rejection reason.
 
 ## Endpoint Model
 
@@ -45,9 +45,9 @@
 
 ## Public Types and Tests
 
-- [ ] Publish exact Preview4 public types from `@nnrp/core`.
+- [x] Publish exact Preview4 public types from `@nnrp/core`.
   - [x] Update capability manifests and provider contracts.
-  - [ ] Update selection options, candidate diagnostics, and endpoint resolution results.
+  - [x] Update selection options, candidate diagnostics, and endpoint resolution results.
   - [x] Update public API snapshots without old-preview aliases.
 - [x] Add contract tests.
   - [x] Cover every transport kind and policy.

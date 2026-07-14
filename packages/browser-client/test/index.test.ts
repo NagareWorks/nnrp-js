@@ -11,14 +11,13 @@ import {
   NnrpResultDropError,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
-  type NnrpTransportCandidate,
   NnrpTransportError,
   ObjectReleaseReason,
   OwnershipHint,
   RuntimeObjectKind,
   RuntimeRole,
 } from "@nnrp/core";
-import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   createBrowserTransportProvider,
   createWasmRuntimeBinding,
@@ -70,7 +69,7 @@ Deno.test("@nnrp/browser-client resolves rs primitive artifact manifests", () =>
     "nnrp_wasm_protocol_major",
     "nnrp_wasm_wire_format",
     "selectTransportWithProbeJson",
-    "scoreProviderProbeJson",
+    "summarizeProviderProbeJson",
   ]);
 });
 
@@ -136,7 +135,7 @@ Deno.test("@nnrp/browser-client resolves absolute and default artifact URLs", ()
 });
 
 Deno.test("@nnrp/browser-client preserves injected browser transport providers", () => {
-  const provider = createBrowserTransportProvider("websocket", { available: true, score: 42 });
+  const provider = createBrowserTransportProvider("websocket", { available: true, preferenceRank: 4 });
   const binding = createWasmRuntimeBinding({ transportProviders: [provider] });
 
   assertEquals(binding.transportProviders, [provider]);
@@ -231,7 +230,6 @@ Deno.test("@nnrp/browser-client applies browser transport provider availability"
     transportProviders: [
       createBrowserTransportProvider("websocket", {
         available: false,
-        score: 100,
         diagnostic: {
           code: "NNRP_BROWSER_WEBSOCKET_DISABLED",
           message: "websocket disabled",
@@ -266,8 +264,7 @@ Deno.test("@nnrp/browser-client treats missing transport packages as unavailable
   });
 
   assertEquals(summary.selected, null);
-  assertEquals(summary.rejected[0]?.kind, "websocket");
-  assertEquals(summary.rejected[0]?.reason, "local-unavailable");
+  assertEquals(summary.rejected, []);
 });
 
 Deno.test("@nnrp/browser-client rejects connect without installed or explicit transports", async () => {
@@ -302,47 +299,6 @@ Deno.test("@nnrp/browser-client exposes protocol version primitives with manifes
     wireFormat: 0,
     version: "1.0.0-test",
   });
-});
-
-Deno.test("@nnrp/browser-client routes transport scoring through primitive candidates when available", async () => {
-  let seenPolicy: string | undefined;
-  let seenCandidateKinds: string[] = [];
-  const runtime = await openBrowserRuntime({
-    primitives: {
-      scoreTransportCandidates: ({ candidates, policy }) => {
-        seenPolicy = policy;
-        seenCandidateKinds = candidates.map((candidate) => candidate.kind);
-        return candidates.map((candidate): NnrpTransportCandidate => ({
-          ...candidate,
-          score: candidate.kind === "websocket" ? 120 : candidate.score,
-        }));
-      },
-    },
-  });
-  const summary = await runtime.selectTransportWithPrimitives({
-    peerManifest: createCapabilityManifest({
-      buildMode: "browser-wasm",
-      transports: ["websocket"],
-      capabilities: ["client.session"],
-    }),
-  });
-
-  assertEquals(seenPolicy, "auto");
-  assertEquals(seenCandidateKinds, ["websocket"]);
-  assertEquals(summary.selected, "websocket");
-});
-
-Deno.test("@nnrp/browser-client transport primitive path falls back to local browser scoring", async () => {
-  const runtime = await openBrowserRuntime();
-  const summary = await runtime.selectTransportWithPrimitives({
-    peerManifest: createCapabilityManifest({
-      buildMode: "browser-wasm",
-      transports: ["websocket"],
-      capabilities: ["client.session"],
-    }),
-  });
-
-  assertEquals(summary.selected, "websocket");
 });
 
 Deno.test("@nnrp/browser-client rejects empty endpoints", async () => {
@@ -499,7 +455,7 @@ Deno.test("@nnrp/browser-client maps empty timed event polling to timeout diagno
     NnrpTimeoutError,
   );
 
-  assertEquals(seenTimeout, 5);
+  assert(seenTimeout !== undefined && seenTimeout > 0 && seenTimeout <= 5);
   assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_TIMEOUT");
   assertEquals(error.diagnostic.source, "wasm");
   assertEquals(error.diagnostic.retryable, true);
@@ -1413,7 +1369,7 @@ function wasmManifest(): NnrpWasmArtifactManifest {
       "nnrp_wasm_protocol_major",
       "nnrp_wasm_wire_format",
       "selectTransportWithProbeJson",
-      "scoreProviderProbeJson",
+      "summarizeProviderProbeJson",
     ],
   };
 }

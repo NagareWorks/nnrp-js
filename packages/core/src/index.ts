@@ -542,6 +542,16 @@ const NNRP_CAPABILITY_TOKENS = new Set<NnrpCapability>([
   "cache.reference",
 ]);
 
+const NNRP_TRANSPORT_PROVIDER_LIMITATIONS: ReadonlySet<NnrpTransportProviderLimitation> = new Set([
+  "requires-udp",
+  "requires-tcp",
+  "local-host-only",
+  "native-host-only",
+  "browser-host-only",
+  "unix-domain-socket",
+  "windows-named-pipe",
+]);
+
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 
 export interface NnrpDiagnostic {
@@ -562,16 +572,64 @@ export interface NnrpCapabilityManifest {
 }
 
 export type NnrpTransportRejectionReason =
-  | "peer-unsupported"
+  | "policy-disallowed"
   | "local-unavailable"
-  | "policy-rejected"
+  | "peer-unsupported"
+  | "limit-exceeded"
+  | "probe-missing"
   | "probe-failed";
+
+export type NnrpTransportProviderLimitation =
+  | "requires-udp"
+  | "requires-tcp"
+  | "local-host-only"
+  | "native-host-only"
+  | "browser-host-only"
+  | "unix-domain-socket"
+  | "windows-named-pipe";
+
+export type NnrpTransportProbeState = "not-run" | "succeeded" | "failed" | "missing";
+
+export interface NnrpTransportProviderCost {
+  readonly modelId: number;
+  readonly units: bigint;
+}
+
+export interface NnrpTransportProviderLimits {
+  readonly maxFrameBytes: bigint;
+}
+
+export interface NnrpTransportProviderMetadata {
+  readonly id: string;
+  readonly cost: NnrpTransportProviderCost;
+  readonly preferenceRank: number;
+  readonly limits: NnrpTransportProviderLimits;
+  readonly limitations: readonly NnrpTransportProviderLimitation[];
+}
+
+export interface NnrpTransportProviderObservation {
+  readonly kind: NnrpTransportKind;
+  readonly metadata: NnrpTransportProviderMetadata;
+  readonly localAvailable: boolean;
+  readonly diagnostic?: NnrpDiagnostic;
+}
+
+export interface NnrpTransportProbeMetrics {
+  readonly sampleCount: number;
+  readonly successCount: number;
+  readonly medianThroughputBytesPerSecond: bigint;
+  readonly medianRttMicroseconds: bigint;
+}
 
 export interface NnrpTransportCandidate {
   readonly kind: NnrpTransportKind;
-  readonly peerSupported: boolean;
+  readonly provider: NnrpTransportProviderMetadata;
   readonly localAvailable: boolean;
-  readonly score: number;
+  readonly peerSupported: boolean;
+  readonly withinLimits: boolean;
+  readonly probeState: NnrpTransportProbeState;
+  readonly probe?: NnrpTransportProbeMetrics;
+  readonly selectionRank?: number;
   readonly rejectionReason?: NnrpTransportRejectionReason;
   readonly diagnostic?: NnrpDiagnostic;
 }
@@ -597,10 +655,8 @@ export interface NnrpTransportServer {
   close(): void | Promise<void>;
 }
 
-export interface NnrpTransportProvider {
-  readonly kind: NnrpTransportKind;
+export interface NnrpTransportProvider extends NnrpTransportProviderObservation {
   readonly endpointSchemes: readonly string[];
-  probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
   connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
   listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }
@@ -614,7 +670,9 @@ export interface NnrpTransportSelection {
 export interface NnrpTransportCandidateOptions {
   readonly local: NnrpCapabilityManifest;
   readonly peer: NnrpCapabilityManifest;
-  readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+  readonly providers: readonly NnrpTransportProviderObservation[];
+  readonly requestedMaxFrameBytes?: bigint;
+  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
 
 export interface NnrpTransportSelectionSummary {
@@ -626,8 +684,8 @@ export interface NnrpTransportSelectionSummary {
 
 export interface NnrpRejectedTransportCandidate {
   readonly kind: NnrpTransportKind;
+  readonly provider: NnrpTransportProviderMetadata;
   readonly reason: NnrpTransportRejectionReason;
-  readonly score: number;
   readonly diagnostic?: NnrpDiagnostic;
 }
 
@@ -1124,13 +1182,31 @@ export function selectTransport(
   candidates: readonly NnrpTransportCandidate[],
   policy: NnrpTransportPolicy = "auto",
 ): NnrpTransportSelection {
-  const annotatedCandidates = candidates
-    .map((candidate) => annotateTransportCandidate(candidate, policy))
-    .sort((left, right) => compareTransportCandidates(left, right, policy));
-  const eligible = annotatedCandidates.filter((candidate) => candidate.rejectionReason === undefined);
+  const evaluated = candidates.map((candidate) => evaluateTransportCandidate(candidate, policy));
+  const eligible = evaluated.filter((candidate) => candidate.rejectionReason === undefined);
+  const ordered = eligible.length <= 1 ? eligible.map(directTransportCandidate) : eligible
+    .filter((candidate) => candidate.probeState === "succeeded" && candidate.probe !== undefined)
+    .sort((left, right) => compareTransportCandidates(left, right, policy))
+    .map((candidate, selectionRank) => ({ ...candidate, selectionRank }));
+  const orderedKeys = new Set(ordered.map(candidateIdentity));
+  const rejected = evaluated
+    .filter((candidate) => !orderedKeys.has(candidateIdentity(candidate)))
+    .map((candidate) => {
+      if (eligible.length > 1 && candidate.rejectionReason === undefined) {
+        const probeState = candidate.probeState === "failed" ? "failed" : "missing";
+        return {
+          ...candidate,
+          probeState,
+          rejectionReason: probeState === "failed" ? "probe-failed" : "probe-missing",
+        } satisfies NnrpTransportCandidate;
+      }
+      return candidate;
+    })
+    .sort(compareRejectedTransportCandidates);
+  const annotatedCandidates = [...ordered, ...rejected];
 
   return {
-    selected: eligible[0] ?? null,
+    selected: ordered[0] ?? null,
     candidates: annotatedCandidates,
     policy,
   };
@@ -1139,14 +1215,44 @@ export function selectTransport(
 export function createTransportCandidates(
   options: NnrpTransportCandidateOptions,
 ): readonly NnrpTransportCandidate[] {
-  const kinds = uniqueTransports([...options.local.transports, ...options.peer.transports]);
+  if (
+    options.requestedMaxFrameBytes !== undefined &&
+    (options.requestedMaxFrameBytes < 0n || options.requestedMaxFrameBytes > 0xffff_ffff_ffff_ffffn)
+  ) {
+    throw transportContractError(
+      "NNRP_TRANSPORT_REQUESTED_FRAME_LIMIT_INVALID",
+      "requestedMaxFrameBytes must fit the frozen u64 wire range.",
+      options.providers[0]?.kind ?? "tcp",
+    );
+  }
+  const providerIds = new Set<string>();
+  return options.providers.map((provider) => {
+    validateTransportProviderObservation(provider);
+    if (providerIds.has(provider.metadata.id)) {
+      throw transportContractError(
+        "NNRP_TRANSPORT_PROVIDER_ID_DUPLICATE",
+        `Transport provider id must be unique: ${provider.metadata.id}.`,
+        provider.kind,
+      );
+    }
+    providerIds.add(provider.metadata.id);
+    const probe = options.probeMetricsByProviderId?.[provider.metadata.id];
+    if (probe !== undefined) {
+      validateTransportProbeMetrics(probe, provider.kind);
+    }
 
-  return kinds.map((kind) => ({
-    kind,
-    peerSupported: options.peer.transports.includes(kind),
-    localAvailable: options.local.transports.includes(kind),
-    score: options.scores?.[kind] ?? defaultTransportScore(kind),
-  }));
+    return {
+      kind: provider.kind,
+      provider: provider.metadata,
+      localAvailable: provider.localAvailable && options.local.transports.includes(provider.kind),
+      peerSupported: options.peer.transports.includes(provider.kind),
+      withinLimits: options.requestedMaxFrameBytes === undefined ||
+        options.requestedMaxFrameBytes <= provider.metadata.limits.maxFrameBytes,
+      probeState: probe === undefined ? "not-run" : "succeeded",
+      ...(probe === undefined ? {} : { probe }),
+      ...(provider.diagnostic === undefined ? {} : { diagnostic: provider.diagnostic }),
+    } satisfies NnrpTransportCandidate;
+  });
 }
 
 export function createTransportSelectionSummary(
@@ -1163,8 +1269,8 @@ export function createTransportSelectionSummary(
       )
       .map((candidate) => ({
         kind: candidate.kind,
+        provider: candidate.provider,
         reason: candidate.rejectionReason,
-        score: candidate.score,
         ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
       })),
     candidates: [...selection.candidates],
@@ -1395,19 +1501,16 @@ export function normalizeSessionPatchRequest(request: NnrpSessionPatchRequest): 
   };
 }
 
-function annotateTransportCandidate(
+function evaluateTransportCandidate(
   candidate: NnrpTransportCandidate,
   policy: NnrpTransportPolicy,
 ): NnrpTransportCandidate {
+  validateTransportCandidate(candidate);
   const rejectionReason = transportRejectionReason(candidate, policy);
-  if (rejectionReason === undefined && candidate.rejectionReason === undefined) {
-    return { ...candidate };
-  }
-
-  const reason = candidate.rejectionReason ?? rejectionReason;
+  const { rejectionReason: _rejectionReason, selectionRank: _selectionRank, ...evaluated } = candidate;
   return {
-    ...candidate,
-    ...(reason === undefined ? {} : { rejectionReason: reason }),
+    ...evaluated,
+    ...(rejectionReason === undefined ? {} : { rejectionReason }),
   };
 }
 
@@ -1415,37 +1518,26 @@ function transportRejectionReason(
   candidate: NnrpTransportCandidate,
   policy: NnrpTransportPolicy,
 ): NnrpTransportRejectionReason | undefined {
-  if (candidate.rejectionReason !== undefined) {
-    return candidate.rejectionReason;
-  }
-
-  if (!candidate.peerSupported || !candidate.localAvailable) {
-    return candidate.peerSupported ? "local-unavailable" : "peer-unsupported";
-  }
-
   const forcedKind = forcedTransportKind(policy);
   if (forcedKind !== undefined && candidate.kind !== forcedKind) {
-    return "policy-rejected";
+    return "policy-disallowed";
+  }
+  if (!candidate.localAvailable) {
+    return "local-unavailable";
+  }
+  if (!candidate.peerSupported) {
+    return "peer-unsupported";
+  }
+  if (!candidate.withinLimits) {
+    return "limit-exceeded";
   }
 
   return undefined;
 }
 
-function uniqueTransports(kinds: readonly NnrpTransportKind[]): readonly NnrpTransportKind[] {
-  return [...new Set(kinds)].sort((left, right) => defaultTransportScore(right) - defaultTransportScore(left));
-}
-
-function defaultTransportScore(kind: NnrpTransportKind): number {
-  switch (kind) {
-    case "ipc":
-      return 100;
-    case "quic":
-      return 90;
-    case "tcp":
-      return 80;
-    case "websocket":
-      return 70;
-  }
+function directTransportCandidate(candidate: NnrpTransportCandidate): NnrpTransportCandidate {
+  const { probe: _probe, rejectionReason: _rejectionReason, selectionRank: _selectionRank, ...direct } = candidate;
+  return { ...direct, probeState: "not-run", selectionRank: 0 };
 }
 
 function compareTransportCandidates(
@@ -1453,34 +1545,144 @@ function compareTransportCandidates(
   right: NnrpTransportCandidate,
   policy: NnrpTransportPolicy,
 ): number {
-  const leftScore = left.score + transportPreferenceBonus(left.kind, policy);
-  const rightScore = right.score + transportPreferenceBonus(right.kind, policy);
-  return rightScore - leftScore ||
-    transportPreferenceRank(left.kind, policy) - transportPreferenceRank(right.kind, policy) ||
-    left.kind.localeCompare(right.kind);
-}
-
-function transportPreferenceBonus(kind: NnrpTransportKind, policy: NnrpTransportPolicy): number {
-  const preferred = preferredTransportKind(policy);
-  return preferred === kind ? 1_000 : 0;
-}
-
-function transportPreferenceRank(kind: NnrpTransportKind, policy: NnrpTransportPolicy): number {
-  const preferred = preferredTransportKind(policy);
-  if (preferred !== undefined) {
-    return kind === preferred ? 0 : 1;
+  const leftProbe = left.probe;
+  const rightProbe = right.probe;
+  if (leftProbe === undefined || rightProbe === undefined) {
+    throw transportContractError(
+      "NNRP_TRANSPORT_PROBE_METRICS_MISSING",
+      "Successful transport candidates require probe metrics before comparison.",
+      leftProbe === undefined ? left.kind : right.kind,
+    );
   }
 
+  return rightProbe.successCount - leftProbe.successCount ||
+    compareBigInt(rightProbe.medianThroughputBytesPerSecond, leftProbe.medianThroughputBytesPerSecond) ||
+    compareBigInt(leftProbe.medianRttMicroseconds, rightProbe.medianRttMicroseconds) ||
+    compareProviderCost(left.provider.cost, right.provider.cost) ||
+    comparePreferredTransport(left.kind, right.kind, policy) ||
+    left.provider.preferenceRank - right.provider.preferenceRank ||
+    transportNumericId(left.kind) - transportNumericId(right.kind) ||
+    compareBytewise(left.provider.id, right.provider.id);
+}
+
+function compareProviderCost(left: NnrpTransportProviderCost, right: NnrpTransportProviderCost): number {
+  return left.modelId !== 0 && left.modelId === right.modelId ? compareBigInt(left.units, right.units) : 0;
+}
+
+function comparePreferredTransport(
+  left: NnrpTransportKind,
+  right: NnrpTransportKind,
+  policy: NnrpTransportPolicy,
+): number {
+  const preferred = preferredTransportKind(policy);
+  if (preferred === undefined) {
+    return 0;
+  }
+  return Number(right === preferred) - Number(left === preferred);
+}
+
+function compareRejectedTransportCandidates(left: NnrpTransportCandidate, right: NnrpTransportCandidate): number {
+  return transportNumericId(left.kind) - transportNumericId(right.kind) ||
+    compareBytewise(left.provider.id, right.provider.id);
+}
+
+function candidateIdentity(candidate: NnrpTransportCandidate): string {
+  return `${transportNumericId(candidate.kind)}\0${candidate.provider.id}`;
+}
+
+function transportNumericId(kind: NnrpTransportKind): number {
   switch (kind) {
-    case "ipc":
-      return 0;
     case "quic":
       return 1;
     case "tcp":
       return 2;
-    case "websocket":
+    case "ipc":
       return 3;
+    case "websocket":
+      return 4;
   }
+}
+
+function compareBigInt(left: bigint, right: bigint): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function compareBytewise(left: string, right: string): number {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  for (let index = 0; index < Math.min(leftBytes.length, rightBytes.length); index += 1) {
+    const difference = (leftBytes[index] ?? 0) - (rightBytes[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return leftBytes.length - rightBytes.length;
+}
+
+function validateTransportCandidate(candidate: NnrpTransportCandidate): void {
+  validateTransportProviderMetadata(candidate.provider, candidate.kind);
+  if (candidate.probeState === "succeeded") {
+    if (candidate.probe === undefined) {
+      throw transportContractError(
+        "NNRP_TRANSPORT_PROBE_METRICS_MISSING",
+        "A succeeded transport probe must include metrics.",
+        candidate.kind,
+      );
+    }
+    validateTransportProbeMetrics(candidate.probe, candidate.kind);
+  } else if (candidate.probe !== undefined) {
+    throw transportContractError(
+      "NNRP_TRANSPORT_PROBE_STATE_INVALID",
+      "Probe metrics are allowed only when probeState is succeeded.",
+      candidate.kind,
+    );
+  }
+}
+
+function validateTransportProviderObservation(provider: NnrpTransportProviderObservation): void {
+  validateTransportProviderMetadata(provider.metadata, provider.kind);
+}
+
+function validateTransportProviderMetadata(
+  metadata: NnrpTransportProviderMetadata,
+  kind: NnrpTransportKind,
+): void {
+  const limitations = metadata.limitations;
+  if (
+    metadata.id.length === 0 || !Number.isInteger(metadata.cost.modelId) || metadata.cost.modelId < 0 ||
+    metadata.cost.modelId > 0xffff || metadata.cost.units < 0n ||
+    metadata.cost.units > 0xffff_ffff_ffff_ffffn || !Number.isInteger(metadata.preferenceRank) ||
+    metadata.preferenceRank < 0 || metadata.preferenceRank > 0xffff || metadata.limits.maxFrameBytes <= 0n ||
+    metadata.limits.maxFrameBytes > 0xffff_ffff_ffff_ffffn || new Set(limitations).size !== limitations.length ||
+    limitations.some((limitation) => !NNRP_TRANSPORT_PROVIDER_LIMITATIONS.has(limitation))
+  ) {
+    throw transportContractError(
+      "NNRP_TRANSPORT_PROVIDER_METADATA_INVALID",
+      `Transport provider metadata is invalid: ${metadata.id || "<empty>"}.`,
+      kind,
+    );
+  }
+}
+
+function validateTransportProbeMetrics(metrics: NnrpTransportProbeMetrics, kind: NnrpTransportKind): void {
+  if (
+    !Number.isInteger(metrics.sampleCount) || !Number.isInteger(metrics.successCount) || metrics.sampleCount <= 0 ||
+    metrics.sampleCount > 0xffff_ffff || metrics.successCount <= 0 || metrics.successCount > metrics.sampleCount ||
+    metrics.medianThroughputBytesPerSecond < 0n ||
+    metrics.medianThroughputBytesPerSecond > 0xffff_ffff_ffff_ffffn || metrics.medianRttMicroseconds < 0n ||
+    metrics.medianRttMicroseconds > 0xffff_ffff_ffff_ffffn
+  ) {
+    throw transportContractError(
+      "NNRP_TRANSPORT_PROBE_METRICS_INVALID",
+      "Transport probe metrics must contain positive bounded sample counts and non-negative medians.",
+      kind,
+    );
+  }
+}
+
+function transportContractError(code: string, message: string, transport: NnrpTransportKind): NnrpTransportError {
+  return new NnrpTransportError({ code, message, source: "transport", retryable: false, transport });
 }
 
 function preferredTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | undefined {

@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidate, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeLibraryOptions {
     readonly path?: string;
     readonly artifactDir?: string;
@@ -50,14 +50,9 @@ export interface NnrpNativeEventBatchRequest {
     readonly maxEvents: number;
     readonly timeoutMillis?: number;
 }
-export interface NnrpNativeTransportScoreRequest {
-    readonly candidates: readonly NnrpTransportCandidate[];
-    readonly policy: NnrpTransportPolicy;
-}
 export interface NnrpNativeFfiBinding {
     readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
-    scoreTransportCandidates?(request: NnrpNativeTransportScoreRequest): readonly NnrpTransportCandidate[] | Promise<readonly NnrpTransportCandidate[]>;
     validateSubmit?(request: NnrpNativeSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
     submitResultCompact?(request: NnrpNativeSubmitResultCompactRequest): NnrpResult | Promise<NnrpResult>;
     submitNoWait?(request: NnrpNativeSubmitNoWaitRequest): bigint | Promise<bigint>;
@@ -112,13 +107,14 @@ export interface NnrpConnectOptions {
     readonly sessionDefaults?: NnrpSessionOptions;
 }
 export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
-    readonly kind: Extract<NnrpTransportKind, "tcp" | "quic">;
-    probe(): NnrpTransportCandidate | Promise<NnrpTransportCandidate>;
+    readonly kind: NnrpTransportKind;
 }
 export interface NnrpTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
-    readonly transports?: readonly NnrpNativeTransportProvider[];
-    readonly scores?: Readonly<Partial<Record<NnrpTransportKind, number>>>;
+    readonly providers?: readonly NnrpNativeTransportProvider[];
+    readonly policy?: NnrpTransportPolicy;
+    readonly requestedMaxFrameBytes?: bigint;
+    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
 export interface NnrpNativeBindingOptions {
     readonly libraryPath?: string;
@@ -172,7 +168,6 @@ declare class NnrpBackendRuntime {
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     connect(options: NnrpConnectOptions): NnrpClient;
     selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
-    selectTransportWithNative(options: NnrpTransportSelectionOptions): Promise<NnrpTransportSelectionSummary>;
     close(): Promise<void>;
     get closed(): boolean;
 }
