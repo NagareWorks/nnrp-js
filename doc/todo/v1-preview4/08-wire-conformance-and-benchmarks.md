@@ -2,11 +2,11 @@
 
 ## Target Manifests
 
-- [ ] Add a JavaScript wire-target manifest generator matching the released schema.
-  - [ ] Emit `protocol_version: nnrp-1-preview4` and the selected suite version.
-  - [ ] Emit only live endpoint entries with `name`, `endpoint`, and `tls`.
-  - [ ] Emit exact capability tokens and positive `max_frame_bytes`/`max_in_flight` limits.
-  - [ ] Validate generated manifests before starting a harness.
+- [x] Add a JavaScript wire-target manifest generator matching the released schema.
+  - [x] Emit `protocol_version: nnrp-1-preview4` and the selected suite version.
+  - [x] Emit only live endpoint entries with `name`, `endpoint`, and `tls`.
+  - [x] Emit exact capability tokens and positive `max_frame_bytes`/`max_in_flight` limits.
+  - [x] Validate generated manifests before starting a harness.
 - [ ] Declare modes by actual role behavior.
   - [ ] Native server harness declares `suite_as_client`.
   - [ ] Native client harness declares `suite_as_server`.
