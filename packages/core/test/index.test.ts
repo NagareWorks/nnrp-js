@@ -12,6 +12,7 @@ import {
   createTransportCandidates,
   createTransportSelectionSummary,
   decodeCacheInvalidateMetadata,
+  type DecodedRuntimeObjectMetadata,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
   encodeCacheInvalidateMetadata,
@@ -21,6 +22,12 @@ import {
   isStandardInputProfile,
   MemoryLocationHint,
   NNRP_PROTOCOL_VERSION,
+  type NnrpCacheInvalidateRequest,
+  type NnrpCacheInvalidateResult,
+  type NnrpCacheKey,
+  type NnrpCacheMetadata,
+  type NnrpCachePutRequest,
+  type NnrpCachePutResult,
   NnrpCapabilityError,
   NnrpMessageType,
   NnrpProtocolError,
@@ -875,6 +882,83 @@ Deno.test("@nnrp/core owns encoded and decoded runtime object tails", () => {
   assertNotStrictEquals(decoded.tail.buffer, encoded.buffer);
   encoded[48] = 0xee;
   assertEquals(decoded.tail, new Uint8Array([0x71, 0x72]));
+});
+
+Deno.test("@nnrp/core keeps public runtime object and cache descriptors structured-clone compatible", () => {
+  const cacheKey: NnrpCacheKey = { kind: "tensor", key: 7n, namespaceId: 3 };
+  const cacheMetadata: NnrpCacheMetadata = {
+    key: cacheKey,
+    version: 8n,
+    leaseMillis: 1_000,
+    dependencies: [{ kind: "schema", key: "image-tile-v1" }],
+  };
+  const cachePutRequest: NnrpCachePutRequest = {
+    key: cacheKey,
+    payload: new Uint8Array([0x81, 0x82]),
+    leaseMillis: 1_000,
+    metadata: { producer: "runtime" },
+  };
+  const cachePutResult: NnrpCachePutResult = {
+    key: cacheKey,
+    status: "stored",
+    version: 9n,
+    metadata: { tier: "device" },
+  };
+  const cacheInvalidateRequest: NnrpCacheInvalidateRequest = {
+    key: cacheKey,
+    version: 9n,
+    recursive: true,
+    metadata: { reason: "superseded" },
+  };
+  const cacheInvalidateResult: NnrpCacheInvalidateResult = {
+    key: cacheKey,
+    status: "invalidated",
+    metadata: { scope: "session" },
+  };
+  const decodedObject: DecodedRuntimeObjectMetadata = {
+    metadata: RUNTIME_OBJECT_CODEC_CASES[0].metadata,
+    tail: RUNTIME_OBJECT_CODEC_CASES[0].tail,
+  };
+  const cacheInvalidate: CacheInvalidateMetadata = {
+    invalidateScope: 1,
+    cacheNamespace: 2,
+    cacheKeyHi: 3,
+    cacheKeyLo: 4,
+    reasonCode: 5,
+  };
+  const publicValues: readonly unknown[] = [
+    ...RUNTIME_OBJECT_CODEC_CASES.map(({ metadata }) => metadata),
+    decodedObject,
+    cacheInvalidate,
+    cacheKey,
+    cacheMetadata,
+    cachePutRequest,
+    cachePutResult,
+    cacheInvalidateRequest,
+    cacheInvalidateResult,
+  ];
+
+  for (const value of publicValues) {
+    assertEquals(structuredClone(value), value);
+  }
+});
+
+Deno.test("@nnrp/core transfers owned runtime object tails without invalidating metadata", () => {
+  const encoded = encodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectDelta,
+    RUNTIME_OBJECT_CODEC_CASES[3].metadata,
+    RUNTIME_OBJECT_CODEC_CASES[3].tail,
+  );
+  const decoded = decodeRuntimeObjectMetadata(NnrpMessageType.ObjectDelta, encoded);
+  const retainedMetadata = structuredClone(decoded.metadata);
+  const expectedTail = decoded.tail.slice();
+  const transferred = structuredClone(decoded, { transfer: [decoded.tail.buffer as ArrayBuffer] });
+
+  assertEquals(decoded.metadata, retainedMetadata);
+  assertEquals(decoded.tail.byteLength, 0);
+  assertEquals(transferred.metadata, retainedMetadata);
+  assertEquals(transferred.tail, expectedTail);
+  assertNotStrictEquals(transferred.tail.buffer, encoded.buffer);
 });
 
 Deno.test("@nnrp/core encodes the frozen baseline cache invalidation metadata", () => {

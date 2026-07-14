@@ -33,18 +33,18 @@
 
 ## Browser and Worker Safety
 
-- [ ] Keep public descriptors structured-clone compatible.
-  - [ ] Use numbers, bigints, strings, plain records, and owned `Uint8Array` values only.
-  - [ ] Expose no native pointer, file descriptor, or borrowed WASM memory view.
-  - [ ] Copy object/cache tail bytes before transferring them to another worker.
-- [ ] Add worker transfer tests.
-  - [ ] Transfer descriptors and references through `structuredClone`.
-  - [ ] Transfer owned payload buffers without invalidating retained metadata.
-  - [ ] Verify native and browser normalized object events are equivalent.
+- [x] Keep public descriptors structured-clone compatible.
+  - [x] Use numbers, bigints, strings, plain records, and owned `Uint8Array` values only.
+  - [x] Expose no native pointer, file descriptor, or borrowed WASM memory view.
+  - [x] Copy object/cache tail bytes before transferring them to another worker.
+- [x] Add worker transfer tests.
+  - [x] Transfer descriptors and references through `structuredClone`.
+  - [x] Transfer owned payload buffers without invalidating retained metadata.
+  - [x] Verify native and browser normalized object events are equivalent.
 
 ## Acceptance Evidence
 
 - [ ] Lifecycle tests cover declare, ref, patch/delta, release, cancellation, and supersession.
 - [ ] Cache tests cover hit-reference, miss, invalidate, lease expiry, and no-implicit-lookup behavior.
-- [ ] Structured-clone tests cover every public object/cache type.
+- [x] Structured-clone tests cover every public object/cache type.
 - [ ] Public API snapshots match the frozen JavaScript client, server, and runtime pages in `nnrp-doc`.
