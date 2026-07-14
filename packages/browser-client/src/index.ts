@@ -28,6 +28,7 @@ import {
   type NnrpSessionMigrationRequest,
   type NnrpSessionPatchRequest,
   type NnrpSessionPatchResult,
+  type NnrpSubmitOptions,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
@@ -45,6 +46,7 @@ import {
   type ObjectReleaseMetadata,
   type RouteHintMetadata,
   type RuntimeControlMetadata,
+  RuntimeRole,
   type SchedulingMetadata,
   selectTransport,
   type SupersedeMetadata,
@@ -529,8 +531,10 @@ export class NnrpBrowserClientSession {
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
   readonly #cancelledOperations = new Set<bigint>();
+  readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
   #availableCredits: number;
+  #nextControlSequence = 1n;
   #nextRuntimeFrameId = 1;
   #closed = false;
 
@@ -547,11 +551,12 @@ export class NnrpBrowserClientSession {
     return this.#state.options.sessionId ?? "";
   }
 
-  public async submit(request: NnrpSubmitRequest): Promise<NnrpResult> {
+  public async submit(request: NnrpSubmitRequest, options: NnrpSubmitOptions = {}): Promise<NnrpResult> {
     let normalized: NnrpNormalizedSubmitRequest;
+    const deadlineMillis = validateSubmitOptions(options, "wasm");
     try {
       this.#ensureOpen();
-      const capacityWait = this.#reserveOrAwaitSubmitCapacity();
+      const capacityWait = this.#reserveOrAwaitSubmitCapacity(options, deadlineMillis);
       if (capacityWait !== undefined) {
         await capacityWait;
       }
@@ -561,14 +566,27 @@ export class NnrpBrowserClientSession {
       return Promise.reject(error);
     }
 
-    return this.#state.client.runtime.submit({
-      sessionOptions: this.#state.options,
-      submit: normalized,
-    }).finally(() => this.#finishFrame(normalized.frameId));
+    try {
+      const preparation = this.#prepareSubmitDispatch(normalized.frameId, options, deadlineMillis);
+      if (preparation !== undefined) {
+        await preparation;
+      }
+      const cancellation = this.#armSubmitCancellation(normalized.frameId, options, deadlineMillis);
+      return await Promise.race([
+        this.#state.client.runtime.submit({
+          sessionOptions: this.#state.options,
+          submit: normalized,
+        }),
+        cancellation.promise,
+      ]).finally(cancellation.cleanup);
+    } finally {
+      this.#finishFrame(normalized.frameId);
+    }
   }
 
-  public submitNoWait(request: NnrpSubmitRequest): Promise<bigint> {
+  public async submitNoWait(request: NnrpSubmitRequest, options: NnrpSubmitOptions = {}): Promise<bigint> {
     let normalized: NnrpNormalizedSubmitRequest;
+    const deadlineMillis = validateSubmitOptions(options, "wasm");
     try {
       this.#ensureOpen();
       this.#reserveImmediateCapacity();
@@ -578,13 +596,20 @@ export class NnrpBrowserClientSession {
       return Promise.reject(error);
     }
 
-    return this.#state.client.runtime.submitNoWait({
-      sessionOptions: this.#state.options,
-      submit: normalized,
-    }).catch((error) => {
+    try {
+      const preparation = this.#prepareSubmitDispatch(normalized.frameId, options, deadlineMillis);
+      if (preparation !== undefined) {
+        await preparation;
+      }
+      this.#armDetachedSubmitCancellation(normalized.frameId, options, deadlineMillis);
+      return await this.#state.client.runtime.submitNoWait({
+        sessionOptions: this.#state.options,
+        submit: normalized,
+      });
+    } catch (error) {
       this.#finishFrame(normalized.frameId);
       throw error;
-    });
+    }
   }
 
   public cancel(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
@@ -646,7 +671,9 @@ export class NnrpBrowserClientSession {
   ): Promise<void> {
     try {
       assertClientRuntimeControlMessage(messageType);
-      return this.#sendRuntimeFrame(messageType, encodeRuntimeControlMetadata(messageType, metadata, tail));
+      const payload = encodeRuntimeControlMetadata(messageType, metadata, tail);
+      this.#observeControlSequence(metadata);
+      return this.#sendRuntimeFrame(messageType, payload);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -799,6 +826,10 @@ export class NnrpBrowserClientSession {
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
     this.#cancelledOperations.clear();
+    for (const cleanup of this.#submitCancellationCleanups.values()) {
+      cleanup();
+    }
+    this.#submitCancellationCleanups.clear();
     this.#drainCapacityWaiters();
     return Promise.resolve();
   }
@@ -827,7 +858,110 @@ export class NnrpBrowserClientSession {
     this.#terminalFrames.delete(frameId);
   }
 
-  #reserveOrAwaitSubmitCapacity(): Promise<void> | undefined {
+  #prepareSubmitDispatch(
+    frameId: number,
+    options: NnrpSubmitOptions,
+    deadlineMillis: number | undefined,
+  ): Promise<void> | undefined {
+    throwIfSubmitCancelledBeforeDispatch(options, "wasm");
+    if (deadlineMillis === undefined) {
+      return undefined;
+    }
+    return this.updateDeadline({
+      operationId: BigInt(frameId),
+      controlSequence: this.#allocateControlSequence(),
+      priorityClass: 0,
+      priorityDelta: 0,
+      deadlineUnixMs: BigInt(Math.ceil(deadlineMillis)),
+      flags: 0,
+    }).then(() => {
+      throwIfSubmitCancelledBeforeDispatch(options, "wasm", deadlineMillis);
+    });
+  }
+
+  #armSubmitCancellation(
+    frameId: number,
+    options: NnrpSubmitOptions,
+    deadlineMillis: number | undefined,
+  ): { readonly promise: Promise<never>; readonly cleanup: () => void } {
+    let rejectCancellation: (error: unknown) => void = () => {};
+    const promise = new Promise<never>((_resolve, reject) => {
+      rejectCancellation = reject;
+    });
+    const cleanup = this.#installSubmitCancellation(
+      frameId,
+      options,
+      deadlineMillis,
+      rejectCancellation,
+    );
+    return { promise, cleanup };
+  }
+
+  #armDetachedSubmitCancellation(
+    frameId: number,
+    options: NnrpSubmitOptions,
+    deadlineMillis: number | undefined,
+  ): void {
+    this.#installSubmitCancellation(frameId, options, deadlineMillis);
+  }
+
+  #installSubmitCancellation(
+    frameId: number,
+    options: NnrpSubmitOptions,
+    deadlineMillis: number | undefined,
+    onCancelled?: (error: unknown) => void,
+  ): () => void {
+    if (options.signal === undefined && deadlineMillis === undefined) {
+      return () => {};
+    }
+
+    let cleaned = false;
+    let triggered = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
+      options.signal?.removeEventListener?.("abort", onAbort);
+    };
+    const trigger = (reasonCode: number, error: NnrpTimeoutError) => {
+      if (triggered || cleaned) {
+        return;
+      }
+      triggered = true;
+      this.#cancelledOperations.add(BigInt(frameId));
+      onCancelled?.(error);
+      cleanup();
+      void this.cancel({
+        operationId: BigInt(frameId),
+        controlSequence: this.#allocateControlSequence(),
+        reasonCode,
+        sourceRole: RuntimeRole.Client,
+        flags: 0,
+        diagnosticBytes: 0,
+      }).catch(() => {});
+    };
+    const onAbort = () => trigger(1, submitCancelledError("wasm", options.signal));
+
+    options.signal?.addEventListener?.("abort", onAbort, { once: true });
+    if (deadlineMillis !== undefined) {
+      timeout = setTimeout(
+        () => trigger(3, submitTimeoutError("wasm")),
+        Math.max(0, deadlineMillis - Date.now()),
+      );
+    }
+    this.#submitCancellationCleanups.set(frameId, cleanup);
+    return cleanup;
+  }
+
+  #reserveOrAwaitSubmitCapacity(
+    options: NnrpSubmitOptions,
+    deadlineMillis: number | undefined,
+  ): Promise<void> | undefined {
     if (this.#state.options.submitCapacityPolicy !== "await-credit") {
       return undefined;
     }
@@ -837,16 +971,57 @@ export class NnrpBrowserClientSession {
       return undefined;
     }
 
-    return this.#awaitSubmitCapacity();
+    return this.#awaitSubmitCapacity(options, deadlineMillis);
   }
 
-  async #awaitSubmitCapacity(): Promise<void> {
+  async #awaitSubmitCapacity(options: NnrpSubmitOptions, deadlineMillis: number | undefined): Promise<void> {
     do {
       this.#ensureOpen();
-      await new Promise<void>((resolve) => this.#capacityWaiters.push(resolve));
+      await this.#waitForSubmitCapacity(options, deadlineMillis);
     } while (this.#availableCredits <= 0);
 
     this.#availableCredits -= 1;
+  }
+
+  #waitForSubmitCapacity(options: NnrpSubmitOptions, deadlineMillis: number | undefined): Promise<void> {
+    throwIfSubmitCancelledBeforeDispatch(options, "wasm", deadlineMillis);
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        const index = this.#capacityWaiters.indexOf(wake);
+        if (index >= 0) {
+          this.#capacityWaiters.splice(index, 1);
+        }
+        if (timeout !== undefined) {
+          clearTimeout(timeout);
+        }
+        options.signal?.removeEventListener?.("abort", onAbort);
+      };
+      const finish = (error?: unknown) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        if (error === undefined) {
+          resolve();
+        } else {
+          reject(error);
+        }
+      };
+      const wake = () => finish();
+      const onAbort = () => finish(submitCancelledError("wasm", options.signal));
+
+      this.#capacityWaiters.push(wake);
+      options.signal?.addEventListener?.("abort", onAbort, { once: true });
+      if (deadlineMillis !== undefined) {
+        timeout = setTimeout(
+          () => finish(submitTimeoutError("wasm")),
+          Math.max(0, deadlineMillis - Date.now()),
+        );
+      }
+    });
   }
 
   #reserveImmediateCapacity(): void {
@@ -868,6 +1043,8 @@ export class NnrpBrowserClientSession {
   }
 
   #finishFrame(frameId: number): void {
+    this.#submitCancellationCleanups.get(frameId)?.();
+    this.#submitCancellationCleanups.delete(frameId);
     this.#inFlightFrames.delete(frameId);
   }
 
@@ -883,6 +1060,21 @@ export class NnrpBrowserClientSession {
 
     this.#terminalFrames.add(frameId);
     this.#finishFrame(frameId);
+  }
+
+  #allocateControlSequence(): bigint {
+    const sequence = this.#nextControlSequence;
+    this.#nextControlSequence = sequence === 0xffff_ffff_ffff_ffffn ? 1n : sequence + 1n;
+    return sequence;
+  }
+
+  #observeControlSequence(metadata: RuntimeControlMetadata): void {
+    if (!("controlSequence" in metadata) || metadata.controlSequence < this.#nextControlSequence) {
+      return;
+    }
+    this.#nextControlSequence = metadata.controlSequence === 0xffff_ffff_ffff_ffffn
+      ? 1n
+      : metadata.controlSequence + 1n;
   }
 
   #shouldSuppressCancelledPayload(event: NnrpRuntimeEvent): boolean {
@@ -1267,6 +1459,54 @@ function eventPollCancelledError(signal: NnrpAbortSignalLike | undefined): NnrpT
     source: "runtime",
     retryable: false,
     cause: signal?.reason,
+  });
+}
+
+function validateSubmitOptions(options: NnrpSubmitOptions, source: "wasm"): number | undefined {
+  if (
+    options.timeoutMillis !== undefined &&
+    (!Number.isFinite(options.timeoutMillis) || options.timeoutMillis < 0)
+  ) {
+    throw new NnrpProtocolError({
+      code: "NNRP_SUBMIT_TIMEOUT_INVALID",
+      message: "Submit timeoutMillis must be a non-negative finite number.",
+      source: "core",
+      retryable: false,
+    });
+  }
+  throwIfSubmitCancelledBeforeDispatch(options, source);
+  return options.timeoutMillis === undefined ? undefined : Date.now() + options.timeoutMillis;
+}
+
+function throwIfSubmitCancelledBeforeDispatch(
+  options: NnrpSubmitOptions,
+  source: "wasm",
+  deadlineMillis?: number,
+): void {
+  if (options.signal?.aborted) {
+    throw submitCancelledError(source, options.signal);
+  }
+  if (deadlineMillis !== undefined && Date.now() >= deadlineMillis) {
+    throw submitTimeoutError(source);
+  }
+}
+
+function submitCancelledError(source: "wasm", signal: NnrpAbortSignalLike | undefined): NnrpTimeoutError {
+  return new NnrpTimeoutError({
+    code: "NNRP_SUBMIT_CANCELLED",
+    message: "Submit was cancelled.",
+    source,
+    retryable: false,
+    cause: signal?.reason,
+  });
+}
+
+function submitTimeoutError(source: "wasm"): NnrpTimeoutError {
+  return new NnrpTimeoutError({
+    code: "NNRP_SUBMIT_TIMEOUT",
+    message: "Submit timed out.",
+    source,
+    retryable: true,
   });
 }
 

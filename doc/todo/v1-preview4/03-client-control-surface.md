@@ -23,16 +23,16 @@
 
 ## Submit Cancellation and Deadlines
 
-- [ ] Add frozen submit options to `submit` and `submitNoWait`.
-  - [ ] Reject an already-aborted signal before dispatch.
-  - [ ] Send `Cancel` when a signal aborts after dispatch.
-  - [ ] Send `Deadline` before dispatch when `timeoutMillis` is present.
-  - [ ] Cancel in-flight work when the local timeout expires.
-  - [ ] Remove abort listeners after terminal completion.
-- [ ] Keep cancellation semantics on the protocol path.
-  - [ ] Do not add an out-of-band provider cancellation message.
-  - [ ] Do not resolve a cancelled operation with a late normal result.
-  - [ ] Deliver result-drop reason and trace events after cancellation.
+- [x] Add frozen submit options to `submit` and `submitNoWait`.
+  - [x] Reject an already-aborted signal before dispatch.
+  - [x] Send `Cancel` when a signal aborts after dispatch.
+  - [x] Send `Deadline` before dispatch when `timeoutMillis` is present.
+  - [x] Cancel in-flight work when the local timeout expires.
+  - [x] Remove abort listeners after terminal completion.
+- [x] Keep cancellation semantics on the protocol path.
+  - [x] Do not add an out-of-band provider cancellation message.
+  - [x] Do not resolve a cancelled operation with a late normal result.
+  - [x] Deliver result-drop reason and trace events after cancellation.
 
 ## Event Consumption
 
@@ -46,6 +46,6 @@
 
 - [x] Native-client tests cover every public control method and failure path.
 - [x] Browser-client tests cover every public control method and failure path.
-- [ ] AbortSignal tests cover pre-dispatch, in-flight, terminal, and listener-cleanup cases.
+- [x] AbortSignal tests cover pre-dispatch, in-flight, terminal, and listener-cleanup cases.
 - [x] Type tests prove native and browser client session method parity.
 - [x] Public API snapshots match the frozen JavaScript client page in `nnrp-doc`.

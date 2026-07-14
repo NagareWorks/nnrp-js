@@ -834,6 +834,11 @@ export interface NnrpEventPollOptions {
   readonly signal?: NnrpAbortSignalLike;
 }
 
+export interface NnrpSubmitOptions {
+  readonly timeoutMillis?: number;
+  readonly signal?: NnrpAbortSignalLike;
+}
+
 export interface NnrpSessionMetadataOptions {
   readonly metadata?: Readonly<Record<string, string>>;
 }

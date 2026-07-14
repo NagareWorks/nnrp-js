@@ -3,9 +3,11 @@ import {
   CacheMissReason,
   CacheReuseScope,
   createBackendNativeManifest,
+  decodeRuntimeControlMetadata,
   MemoryLocationHint,
   NnrpCapabilityError,
   NnrpMessageType,
+  NnrpTimeoutError,
   NnrpTransportError,
   ObjectReleaseReason,
   OwnershipHint,
@@ -222,11 +224,122 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
     ["8:1", "9:1", "8:2"],
   );
 
+  assertEquals((await session.nextEvent()).type, "trace-context");
   const dropEvidence = await session.nextEvent();
   assertEquals(dropEvidence.type, "result-drop-reason");
   if (dropEvidence.type === "result-drop-reason") {
     assertEquals(dropEvidence.metadata.operationId, 7n);
   }
+});
+
+Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation", async () => {
+  const controls: Array<{ messageType: NnrpMessageType; metadata: Record<string, unknown> }> = [];
+  let markDispatched: (() => void) | undefined;
+  const dispatched = new Promise<void>((resolve) => {
+    markDispatched = resolve;
+  });
+  let resolveResult: ((result: { readonly frameId: number }) => void) | undefined;
+  const client = await openNativeClient({
+    endpoint: "127.0.0.1:4433",
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    transports: [createTcpTransportProvider()],
+    ffi: {
+      mode: "test",
+      submitResultCompact: ({ submit }) => {
+        markDispatched?.();
+        return new Promise((resolve) => {
+          resolveResult = () => resolve({ frameId: submit.frameId });
+        });
+      },
+      sendRuntimeFrame: ({ messageType, payload }) => {
+        controls.push({
+          messageType,
+          metadata: decodeRuntimeControlMetadata(messageType, payload).metadata as unknown as Record<string, unknown>,
+        });
+      },
+    },
+  });
+  const session = client.openSession({ sessionId: "submit-cancel" });
+  await session.cancel({
+    operationId: 40n,
+    controlSequence: 10n,
+    reasonCode: 0,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+  const controller = new AbortController();
+  const pending = session.submit({ frameId: 41 }, { signal: controller.signal, timeoutMillis: 10_000 });
+
+  await dispatched;
+  controller.abort("caller-stop");
+  const error = await assertRejects(() => pending, NnrpTimeoutError);
+  assertEquals(error.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
+  assertEquals(controls.map(({ messageType }) => messageType), [
+    NnrpMessageType.Cancel,
+    NnrpMessageType.Deadline,
+    NnrpMessageType.Cancel,
+  ]);
+  assertEquals(controls[1]?.metadata.controlSequence, 11n);
+  assertEquals(controls[1]?.metadata.operationId, 41n);
+  assertEquals(controls[2]?.metadata.controlSequence, 12n);
+  assertEquals(controls[2]?.metadata.reasonCode, 1);
+
+  resolveResult?.({ frameId: 41 });
+});
+
+Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal listeners", async () => {
+  let submitCalls = 0;
+  const controls: Array<{ messageType: NnrpMessageType; metadata: Record<string, unknown> }> = [];
+  const client = await openNativeClient({
+    endpoint: "127.0.0.1:4433",
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    transports: [createTcpTransportProvider()],
+    ffi: {
+      mode: "test",
+      submitResultCompact: ({ submit }) => {
+        submitCalls += 1;
+        return { frameId: submit.frameId };
+      },
+      submitNoWait: ({ submit }) => {
+        submitCalls += 1;
+        return BigInt(submit.frameId);
+      },
+      sendRuntimeFrame: ({ messageType, payload }) => {
+        controls.push({
+          messageType,
+          metadata: decodeRuntimeControlMetadata(messageType, payload).metadata as unknown as Record<string, unknown>,
+        });
+      },
+    },
+  });
+  const session = client.openSession({ sessionId: "submit-listener" });
+  const preAborted = new AbortController();
+  preAborted.abort("before-dispatch");
+
+  const error = await assertRejects(
+    () => session.submit({ frameId: 51 }, { signal: preAborted.signal }),
+    NnrpTimeoutError,
+  );
+  assertEquals(error.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
+  assertEquals(submitCalls, 0);
+
+  const signal = new TrackingAbortSignal();
+  assertEquals(await session.submitNoWait({ frameId: 52 }, { signal }), 52n);
+  assertEquals(signal.addCount, 1);
+  assertEquals(signal.removeCount, 0);
+  session.completeEvent({ type: "result", result: { frameId: 52 } });
+  assertEquals(signal.removeCount, 1);
+
+  assertEquals(await session.submitNoWait({ frameId: 53 }, { timeoutMillis: 5 }), 53n);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
+  assertEquals(controls[1]?.metadata.operationId, 53n);
+  assertEquals(controls[1]?.metadata.reasonCode, 3);
 });
 
 Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime API", async () => {
@@ -496,6 +609,19 @@ function cancelledOperationEvents(sessionId: string) {
     body: new Uint8Array(),
     sessionId,
   }, {
+    type: "trace-context",
+    messageType: NnrpMessageType.TraceContext,
+    metadata: {
+      traceId: 7n,
+      spanId: 8n,
+      parentSpanId: 6n,
+      stageCode: 2,
+      flags: 0,
+      bodyBytes: 1,
+    },
+    body: new Uint8Array([7]),
+    sessionId,
+  }, {
     type: "result-drop-reason",
     messageType: NnrpMessageType.ResultDropReason,
     metadata: {
@@ -509,4 +635,22 @@ function cancelledOperationEvents(sessionId: string) {
     diagnostic: new Uint8Array([3]),
     sessionId,
   }] as const;
+}
+
+class TrackingAbortSignal {
+  public aborted = false;
+  public reason: unknown;
+  public addCount = 0;
+  public removeCount = 0;
+  readonly #listeners = new Set<() => void>();
+
+  public addEventListener(_type: "abort", listener: () => void): void {
+    this.addCount += 1;
+    this.#listeners.add(listener);
+  }
+
+  public removeEventListener(_type: "abort", listener: () => void): void {
+    this.removeCount += 1;
+    this.#listeners.delete(listener);
+  }
 }
