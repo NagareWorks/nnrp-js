@@ -178,6 +178,57 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
   assertEquals(runtimeFrames, [NnrpMessageType.CacheReference]);
 });
 
+Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop evidence", async () => {
+  let polled = false;
+  const sessionId = "cancel-filter";
+  const client = await openNativeClient({
+    endpoint: "127.0.0.1:4433",
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    transports: [createTcpTransportProvider()],
+    ffi: {
+      mode: "test",
+      sendRuntimeFrame: () => {},
+      awaitEvents: () => {
+        if (polled) {
+          return [];
+        }
+        polled = true;
+        return cancelledOperationEvents(sessionId);
+      },
+    },
+  });
+  const session = client.openSession({ sessionId });
+
+  await session.cancel({
+    operationId: 7n,
+    controlSequence: 1n,
+    reasonCode: 2,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+
+  const interleaved = [
+    await session.nextEvent(),
+    await session.nextEvent(),
+    await session.nextEvent(),
+  ];
+  assertEquals(
+    interleaved.map((event) =>
+      event.type === "progress" ? `${event.metadata.operationId}:${event.metadata.progressSequence}` : event.type
+    ),
+    ["8:1", "9:1", "8:2"],
+  );
+
+  const dropEvidence = await session.nextEvent();
+  assertEquals(dropEvidence.type, "result-drop-reason");
+  if (dropEvidence.type === "result-drop-reason") {
+    assertEquals(dropEvidence.metadata.operationId, 7n);
+  }
+});
+
 Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime API", async () => {
   const seen: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number; readonly payload: Uint8Array }> =
     [];
@@ -385,4 +436,77 @@ function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
       close: () => {},
     }),
   };
+}
+
+function cancelledOperationEvents(sessionId: string) {
+  return [{
+    type: "partial-result",
+    messageType: NnrpMessageType.PartialResult,
+    metadata: {
+      operationId: 7n,
+      resultSequence: 1n,
+      objectId: 1n,
+      deltaSequence: 1n,
+      bodyBytes: 1,
+      flags: 0,
+    },
+    body: new Uint8Array([1]),
+    sessionId,
+  }, {
+    type: "result",
+    result: { frameId: 7, payload: new Uint8Array([2]) },
+    sessionId,
+  }, {
+    type: "progress",
+    messageType: NnrpMessageType.Progress,
+    metadata: {
+      operationId: 8n,
+      progressSequence: 1n,
+      stageCode: 2,
+      percentX100: 5000,
+      objectId: 0n,
+      bodyBytes: 0,
+    },
+    body: new Uint8Array(),
+    sessionId,
+  }, {
+    type: "progress",
+    messageType: NnrpMessageType.Progress,
+    metadata: {
+      operationId: 9n,
+      progressSequence: 1n,
+      stageCode: 2,
+      percentX100: 5000,
+      objectId: 0n,
+      bodyBytes: 0,
+    },
+    body: new Uint8Array(),
+    sessionId,
+  }, {
+    type: "progress",
+    messageType: NnrpMessageType.Progress,
+    metadata: {
+      operationId: 8n,
+      progressSequence: 2n,
+      stageCode: 2,
+      percentX100: 7500,
+      objectId: 0n,
+      bodyBytes: 0,
+    },
+    body: new Uint8Array(),
+    sessionId,
+  }, {
+    type: "result-drop-reason",
+    messageType: NnrpMessageType.ResultDropReason,
+    metadata: {
+      operationId: 7n,
+      resultSequence: 1n,
+      dropReasonCode: 3,
+      sourceRole: RuntimeRole.Server,
+      flags: 0,
+      diagnosticBytes: 1,
+    },
+    diagnostic: new Uint8Array([3]),
+    sessionId,
+  }] as const;
 }

@@ -700,13 +700,13 @@ class NnrpClient {
     this.#ensureOpen();
     validateEventPollOptions(options);
 
-    const queued = this.#eventQueues.get(sessionId);
-    const event = queued?.shift();
-    if (event !== undefined) {
-      return event;
-    }
-
     while (true) {
+      const queued = this.#eventQueues.get(sessionId);
+      const event = queued?.shift();
+      if (event !== undefined) {
+        return event;
+      }
+
       const events = await raceEventPoll(
         this.#state.runtime.awaitEvents({
           maxEvents: 16,
@@ -722,11 +722,7 @@ class NnrpClient {
       }
 
       for (const candidate of events) {
-        const candidateSessionId = eventSessionId(candidate);
-        if (candidateSessionId === undefined || candidateSessionId === sessionId) {
-          return candidate;
-        }
-
+        const candidateSessionId = eventSessionId(candidate) ?? sessionId;
         const queue = this.#eventQueues.get(candidateSessionId) ?? [];
         queue.push(candidate);
         this.#eventQueues.set(candidateSessionId, queue);

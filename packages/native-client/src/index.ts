@@ -709,13 +709,13 @@ export class NnrpClient {
     this.#ensureOpen();
     validateEventPollOptions(options);
 
-    const queued = this.#eventQueues.get(sessionId);
-    const event = queued?.shift();
-    if (event !== undefined) {
-      return event;
-    }
-
     while (true) {
+      const queued = this.#eventQueues.get(sessionId);
+      const event = queued?.shift();
+      if (event !== undefined) {
+        return event;
+      }
+
       const events = await raceEventPoll(
         this.#state.runtime.awaitEvents({
           maxEvents: 16,
@@ -731,11 +731,7 @@ export class NnrpClient {
       }
 
       for (const candidate of events) {
-        const candidateSessionId = eventSessionId(candidate);
-        if (candidateSessionId === undefined || candidateSessionId === sessionId) {
-          return candidate;
-        }
-
+        const candidateSessionId = eventSessionId(candidate) ?? sessionId;
         const queue = this.#eventQueues.get(candidateSessionId) ?? [];
         queue.push(candidate);
         this.#eventQueues.set(candidateSessionId, queue);
@@ -776,6 +772,7 @@ export class NnrpClientSession {
   readonly #state: NnrpClientSessionState;
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
+  readonly #cancelledOperations = new Set<bigint>();
   readonly #capacityWaiters: Array<() => void> = [];
   #availableCredits: number;
   #nextRuntimeFrameId = 1;
@@ -836,11 +833,15 @@ export class NnrpClientSession {
   }
 
   public cancel(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Cancel, metadata, diagnostic);
+    return this.sendControl(NnrpMessageType.Cancel, metadata, diagnostic).then(() => {
+      this.#cancelledOperations.add(metadata.operationId);
+    });
   }
 
   public abort(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Abort, metadata, diagnostic);
+    return this.sendControl(NnrpMessageType.Abort, metadata, diagnostic).then(() => {
+      this.#cancelledOperations.add(metadata.operationId);
+    });
   }
 
   public updatePriority(metadata: SchedulingMetadata): Promise<void> {
@@ -937,6 +938,11 @@ export class NnrpClientSession {
   }
 
   public completeEvent(event: NnrpRuntimeEvent): void {
+    if (event.type === "cancel" || event.type === "abort") {
+      this.#cancelledOperations.add(event.metadata.operationId);
+      return;
+    }
+
     if (event.type === "result") {
       this.#finishTerminalFrame(event.result.frameId);
       return;
@@ -956,11 +962,12 @@ export class NnrpClientSession {
     if (event.type === "close") {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
+      this.#cancelledOperations.clear();
       this.#drainCapacityWaiters();
     }
   }
 
-  public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -968,10 +975,18 @@ export class NnrpClientSession {
       return Promise.reject(error);
     }
 
-    return this.#state.client.nextSessionEvent(this.sessionId, options).then((event) => {
+    const deadlineMillis = options.timeoutMillis === undefined ? undefined : Date.now() + options.timeoutMillis;
+    while (true) {
+      const pollOptions = deadlineMillis === undefined
+        ? options
+        : { ...options, timeoutMillis: Math.max(0, deadlineMillis - Date.now()) };
+      const event = await this.#state.client.nextSessionEvent(this.sessionId, pollOptions);
+      if (this.#shouldSuppressCancelledPayload(event)) {
+        continue;
+      }
       this.completeEvent(event);
       return event;
-    });
+    }
   }
 
   public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
@@ -1028,6 +1043,7 @@ export class NnrpClientSession {
     this.#closed = true;
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
+    this.#cancelledOperations.clear();
     this.#drainCapacityWaiters();
     return Promise.resolve();
   }
@@ -1112,6 +1128,20 @@ export class NnrpClientSession {
 
     this.#terminalFrames.add(frameId);
     this.#finishFrame(frameId);
+  }
+
+  #shouldSuppressCancelledPayload(event: NnrpRuntimeEvent): boolean {
+    if (event.type === "partial-result") {
+      return this.#cancelledOperations.has(event.metadata.operationId);
+    }
+
+    if (event.type === "result" && this.#cancelledOperations.has(BigInt(event.result.frameId))) {
+      this.#terminalFrames.add(event.result.frameId);
+      this.#finishFrame(event.result.frameId);
+      return true;
+    }
+
+    return false;
   }
 
   #sendRuntimeObject(

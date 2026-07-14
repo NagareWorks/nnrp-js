@@ -41,11 +41,11 @@
   - [x] Add object/cache-event discriminants.
   - [x] Add recoverable-error and retry events.
   - [x] Keep terminal result, flow, close, and diagnostics typed distinctly.
-- [ ] Implement event ordering rules.
-  - [ ] Preserve wire order within one operation.
-  - [ ] Permit interleaving across operations.
-  - [ ] Suppress late result and partial-result payloads after cancellation.
-  - [ ] Keep the matching result-drop-reason observable.
+- [x] Implement event ordering rules.
+  - [x] Preserve wire order within one operation.
+  - [x] Permit interleaving across operations.
+  - [x] Suppress late result and partial-result payloads after cancellation.
+  - [x] Keep the matching result-drop-reason observable.
 
 ## Runtime Adapter Calls
 
