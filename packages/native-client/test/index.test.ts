@@ -126,6 +126,58 @@ Deno.test("@nnrp/native-client rejects policy mismatches at connect time", async
   assertEquals(error.diagnostic.transport, "quic");
 });
 
+Deno.test("@nnrp/native-client keeps cache references explicit on submit", async () => {
+  let submitCalls = 0;
+  const runtimeFrames: NnrpMessageType[] = [];
+  const client = await openNativeClient({
+    endpoint: "127.0.0.1:4433",
+    env: {},
+    platform: "linux",
+    arch: "x64",
+    transports: [createTcpTransportProvider()],
+    ffi: {
+      mode: "test",
+      submitResultCompact: ({ submit }) => {
+        submitCalls += 1;
+        return { frameId: submit.frameId };
+      },
+      sendRuntimeFrame: ({ messageType }) => {
+        runtimeFrames.push(messageType);
+      },
+    },
+  });
+  const session = client.openSession({ sessionId: "explicit-cache" });
+
+  await session.submit({
+    frameId: 1,
+    descriptor: {
+      profile: "tensor",
+      cache: {
+        key: { kind: "tensor", key: "frame-1" },
+        version: 3n,
+        leaseMillis: 1_000,
+      },
+    },
+  });
+
+  assertEquals(submitCalls, 1);
+  assertEquals(runtimeFrames, []);
+
+  await session.referenceCache({
+    cacheKeyHi: 1n,
+    cacheKeyLo: 2n,
+    profileId: 3,
+    reuseScope: CacheReuseScope.Session,
+    leaseId: 4n,
+    producerTraceId: 5n,
+    expirationHintMs: 6,
+    metadataBytes: 0,
+    flags: 0,
+  });
+
+  assertEquals(runtimeFrames, [NnrpMessageType.CacheReference]);
+});
+
 Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime API", async () => {
   const seen: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number; readonly payload: Uint8Array }> =
     [];

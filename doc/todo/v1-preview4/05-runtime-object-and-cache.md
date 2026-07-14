@@ -19,14 +19,14 @@
 
 ## Cache Semantics
 
-- [ ] Implement explicit cache references only.
-  - [ ] Do not perform an implicit cache lookup on request submission.
-  - [ ] Preserve profile, reuse scope, lease, producer trace, expiration, and flags.
-  - [ ] Report misses with the frozen reason and diagnostic contract.
-- [ ] Implement baseline cache invalidation.
-  - [ ] Encode the existing `CacheInvalidate` NNRP/1 frame.
-  - [ ] Preserve namespace and 128-bit cache key components.
-  - [ ] Apply invalidation scope and reason without inventing a Preview4-only replacement frame.
+- [x] Implement explicit cache references only.
+  - [x] Do not perform an implicit cache lookup on request submission.
+  - [x] Preserve profile, reuse scope, lease, producer trace, expiration, and flags.
+  - [x] Report misses with the frozen reason and diagnostic contract.
+- [x] Implement baseline cache invalidation.
+  - [x] Encode the existing `CacheInvalidate` NNRP/1 frame.
+  - [x] Preserve namespace and 128-bit cache key components.
+  - [x] Apply invalidation scope and reason without inventing a Preview4-only replacement frame.
 - [ ] Implement local cache lease validation.
   - [ ] Validate object/version, lease id, owner scope/id, grant time, and TTL.
   - [ ] Keep lease state local and out of public native pointer representations.
