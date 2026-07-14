@@ -54,17 +54,6 @@ export interface NnrpNativeTransportScoreRequest {
     readonly candidates: readonly NnrpTransportCandidate[];
     readonly policy: NnrpTransportPolicy;
 }
-export interface NnrpNativeAcceptRequest {
-    readonly endpoint: string;
-    readonly transportPolicy: NnrpTransportPolicy;
-}
-export interface NnrpNativeAcceptedSession {
-    readonly sessionOptions?: NnrpSessionOptions;
-}
-export interface NnrpNativeServerReceiveRequest {
-    readonly sessionOptions: NnrpSessionOptions;
-    readonly timeoutMillis?: number;
-}
 export interface NnrpNativeFfiBinding {
     readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
     runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
@@ -75,8 +64,6 @@ export interface NnrpNativeFfiBinding {
     sendRuntimeFrame?(request: NnrpNativeRuntimeFrameSendRequest): void | Promise<void>;
     patchSession?(request: NnrpNativeSessionPatchRequest): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
-    accept?(request: NnrpNativeAcceptRequest): NnrpNativeAcceptedSession | void | Promise<NnrpNativeAcceptedSession | void>;
-    receive?(request: NnrpNativeServerReceiveRequest): NnrpRuntimeEvent | Promise<NnrpRuntimeEvent>;
     close?(): void | Promise<void>;
 }
 export interface NnrpNativeArtifactManifest {
@@ -123,11 +110,6 @@ export interface NnrpConnectOptions {
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
-}
-interface NnrpListenOptions {
-    readonly endpoint: string | URL;
-    readonly transports?: readonly NnrpNativeTransportProvider[];
-    readonly transportPolicy?: NnrpTransportPolicy;
 }
 export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
     readonly kind: Extract<NnrpTransportKind, "tcp" | "quic">;
@@ -188,10 +170,7 @@ declare class NnrpBackendRuntime {
     sendRuntimeFrame(request: NnrpNativeRuntimeFrameSendRequest): Promise<void>;
     patchSession(request: NnrpNativeSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
-    acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession>;
-    receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent>;
     connect(options: NnrpConnectOptions): NnrpClient;
-    listen(options: NnrpListenOptions): NnrpServer;
     selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
     selectTransportWithNative(options: NnrpTransportSelectionOptions): Promise<NnrpTransportSelectionSummary>;
     close(): Promise<void>;
@@ -254,35 +233,6 @@ export declare class NnrpClientSession {
     migrate(request: NnrpSessionMigrationRequest): Promise<void>;
     patch(request: NnrpSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
-    close(): Promise<void>;
-    get closed(): boolean;
-}
-interface NnrpServerState {
-    readonly endpoint: string;
-    readonly runtime: NnrpBackendRuntime;
-    readonly transports: readonly NnrpNativeTransportProvider[];
-    readonly transportPolicy: NnrpTransportPolicy;
-}
-declare class NnrpServer {
-    #private;
-    constructor(state: NnrpServerState);
-    get endpoint(): string;
-    get transportPolicy(): NnrpTransportPolicy;
-    accept(): Promise<NnrpServerSession>;
-    close(): Promise<void>;
-    get closed(): boolean;
-}
-interface NnrpServerSessionState {
-    readonly runtime: NnrpBackendRuntime;
-    readonly options: NnrpSessionOptions;
-}
-declare class NnrpServerSession {
-    #private;
-    constructor(state?: NnrpServerSessionState);
-    get options(): NnrpSessionOptions;
-    get sessionId(): string;
-    receive(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
-    sendResult(_result: NnrpResult): Promise<void>;
     close(): Promise<void>;
     get closed(): boolean;
 }

@@ -74,7 +74,6 @@ const REQUIRED_TRANSPORT_SLOTS = TRANSPORT_SLOT_TCP;
 const NATIVE_RUNTIME_CAPABILITIES = ["cache", "schema", "recovery", "flow.update", "result.hint"] as const;
 const RUNTIME_FEATURE_PROTOCOL_CORE = 0x0000000000000001n;
 const RUNTIME_FEATURE_CLIENT_API = 0x0000000000000002n;
-const RUNTIME_FEATURE_SERVER_API = 0x0000000000000004n;
 const RUNTIME_FEATURE_EVENT_POLLING = 0x0000000000000008n;
 const RUNTIME_FEATURE_CALLBACK_DISPATCH = 0x0000000000000010n;
 const RUNTIME_FEATURE_CACHE_SCHEMA = 0x0000000000000020n;
@@ -99,7 +98,6 @@ const REQUIRED_NATIVE_SYMBOLS = [
 ] as const;
 const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
   RUNTIME_FEATURE_CLIENT_API |
-  RUNTIME_FEATURE_SERVER_API |
   RUNTIME_FEATURE_EVENT_POLLING |
   RUNTIME_FEATURE_CALLBACK_DISPATCH |
   RUNTIME_FEATURE_CACHE_SCHEMA |
@@ -180,20 +178,6 @@ export interface NnrpNativeTransportScoreRequest {
   readonly policy: NnrpTransportPolicy;
 }
 
-export interface NnrpNativeAcceptRequest {
-  readonly endpoint: string;
-  readonly transportPolicy: NnrpTransportPolicy;
-}
-
-export interface NnrpNativeAcceptedSession {
-  readonly sessionOptions?: NnrpSessionOptions;
-}
-
-export interface NnrpNativeServerReceiveRequest {
-  readonly sessionOptions: NnrpSessionOptions;
-  readonly timeoutMillis?: number;
-}
-
 export interface NnrpNativeFfiBinding {
   readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
@@ -212,10 +196,6 @@ export interface NnrpNativeFfiBinding {
   awaitEvents?(
     request: NnrpNativeEventBatchRequest,
   ): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
-  accept?(
-    request: NnrpNativeAcceptRequest,
-  ): NnrpNativeAcceptedSession | void | Promise<NnrpNativeAcceptedSession | void>;
-  receive?(request: NnrpNativeServerReceiveRequest): NnrpRuntimeEvent | Promise<NnrpRuntimeEvent>;
   close?(): void | Promise<void>;
 }
 
@@ -277,12 +257,6 @@ export interface NnrpConnectOptions {
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpSessionOptions;
-}
-
-interface NnrpListenOptions {
-  readonly endpoint: string | URL;
-  readonly transports?: readonly NnrpNativeTransportProvider[];
-  readonly transportPolicy?: NnrpTransportPolicy;
 }
 
 export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
@@ -494,26 +468,6 @@ class NnrpBackendRuntime {
     return await awaitEvents(request);
   }
 
-  public async acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession> {
-    this.#ensureOpen();
-    const accept = this.#binding.ffi?.accept;
-    if (accept === undefined) {
-      throw bindingNotConnectedError("accept");
-    }
-
-    return await accept(request) ?? {};
-  }
-
-  public async receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent> {
-    this.#ensureOpen();
-    const receive = this.#binding.ffi?.receive;
-    if (receive === undefined) {
-      throw bindingNotConnectedError("receive");
-    }
-
-    return await receive(request);
-  }
-
   public connect(options: NnrpConnectOptions): NnrpClient {
     this.#ensureOpen();
     this.#ensureConnectReady("connect");
@@ -529,23 +483,6 @@ class NnrpBackendRuntime {
       transports: options.transports ?? this.#transportProviders,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
       ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
-    });
-  }
-
-  public listen(options: NnrpListenOptions): NnrpServer {
-    this.#ensureOpen();
-    this.#ensureConnectReady("listen");
-    validateEndpoint(options.endpoint);
-    validateTransportProvidersForPolicy(
-      options.transports ?? this.#transportProviders,
-      options.transportPolicy ?? this.#transportPolicy,
-    );
-
-    return new NnrpServer({
-      endpoint: normalizeEndpoint(options.endpoint),
-      runtime: this,
-      transports: options.transports ?? this.#transportProviders,
-      transportPolicy: options.transportPolicy ?? this.#transportPolicy,
     });
   }
 
@@ -600,7 +537,7 @@ class NnrpBackendRuntime {
     }
   }
 
-  #ensureConnectReady(operation: "connect" | "listen"): void {
+  #ensureConnectReady(operation: "connect"): void {
     if (this.#binding.manifest.buildMode !== "backend-native") {
       throw nativeRuntimeReadinessError(
         "NNRP_NATIVE_RUNTIME_MANIFEST_INVALID",
@@ -1208,127 +1145,6 @@ export class NnrpClientSession {
       });
     } catch (error) {
       return Promise.reject(error);
-    }
-  }
-}
-
-interface NnrpServerState {
-  readonly endpoint: string;
-  readonly runtime: NnrpBackendRuntime;
-  readonly transports: readonly NnrpNativeTransportProvider[];
-  readonly transportPolicy: NnrpTransportPolicy;
-}
-
-class NnrpServer {
-  readonly #state: NnrpServerState;
-  #closed = false;
-
-  public constructor(state: NnrpServerState) {
-    this.#state = state;
-  }
-
-  public get endpoint(): string {
-    return this.#state.endpoint;
-  }
-
-  public get transportPolicy(): NnrpTransportPolicy {
-    return this.#state.transportPolicy;
-  }
-
-  public accept(): Promise<NnrpServerSession> {
-    try {
-      this.#ensureOpen();
-    } catch (error) {
-      return Promise.reject(error);
-    }
-
-    return this.#state.runtime.acceptServerSession({
-      endpoint: this.#state.endpoint,
-      transportPolicy: this.#state.transportPolicy,
-    }).then((accepted) =>
-      new NnrpServerSession({
-        runtime: this.#state.runtime,
-        options: accepted.sessionOptions ?? {},
-      })
-    );
-  }
-
-  public close(): Promise<void> {
-    this.#closed = true;
-    return Promise.resolve();
-  }
-
-  public get closed(): boolean {
-    return this.#closed || this.#state.runtime.closed;
-  }
-
-  #ensureOpen(): void {
-    if (this.closed) {
-      throw closedError("server");
-    }
-  }
-}
-
-interface NnrpServerSessionState {
-  readonly runtime: NnrpBackendRuntime;
-  readonly options: NnrpSessionOptions;
-}
-
-class NnrpServerSession {
-  readonly #state: NnrpServerSessionState | undefined;
-  #closed = false;
-
-  public constructor(state?: NnrpServerSessionState) {
-    this.#state = state;
-  }
-
-  public get options(): NnrpSessionOptions {
-    return this.#state?.options ?? {};
-  }
-
-  public get sessionId(): string {
-    return this.options.sessionId ?? "";
-  }
-
-  public receive(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
-    try {
-      this.#ensureOpen();
-      validateEventPollOptions(options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
-
-    const state = this.#state;
-    if (state === undefined) {
-      return Promise.reject(bindingNotConnectedError("receive"));
-    }
-
-    return raceEventPoll(
-      state.runtime.receiveServerEvent({
-        sessionOptions: state.options,
-        ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
-      }),
-      options,
-    );
-  }
-
-  public sendResult(_result: NnrpResult): Promise<void> {
-    this.#ensureOpen();
-    return Promise.reject(bindingNotConnectedError("sendResult"));
-  }
-
-  public close(): Promise<void> {
-    this.#closed = true;
-    return Promise.resolve();
-  }
-
-  public get closed(): boolean {
-    return this.#closed;
-  }
-
-  #ensureOpen(): void {
-    if (this.#closed) {
-      throw closedError("server session");
     }
   }
 }

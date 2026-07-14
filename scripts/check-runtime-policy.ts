@@ -52,6 +52,19 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
       { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
       {
+        label: "server accept binding",
+        pattern: /\bNnrpNativeAccept(?:Request|edSession)\b/,
+      },
+      {
+        label: "server receive binding",
+        pattern: /\bNnrpNativeServerReceiveRequest\b/,
+      },
+      {
+        label: "server role class",
+        pattern: /\bclass\s+NnrpServer(?:Session)?\b/,
+      },
+      { label: "server listener method", pattern: /\bpublic\s+listen\s*\(/ },
+      {
         label: "implicit native finalizer",
         pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
       },

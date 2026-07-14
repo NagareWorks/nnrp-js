@@ -29,6 +29,7 @@ Deno.test("@nnrp/native-client opens a client with explicit transport providers"
   const session = client.openSession({ metadata: { request: "one" } });
 
   assertEquals(client.endpoint, "127.0.0.1:4433");
+  assertEquals("listen" in client.runtime, false);
   assertEquals(session.sessionId, "native-session-1");
   assertEquals(session.options.metadata, { app: "agent", request: "one" });
 });

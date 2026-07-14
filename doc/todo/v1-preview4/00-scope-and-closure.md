@@ -3,7 +3,7 @@
 ## Package Ownership
 
 - [ ] Freeze role-package ownership in repository policy checks.
-  - [ ] `@nnrp/native-client` owns Node/Deno client lifecycle and no server listener API.
+  - [x] `@nnrp/native-client` owns Node/Deno client lifecycle and no server listener API.
   - [ ] `@nnrp/native-server` owns Node/Deno server lifecycle and no client top-level helper.
   - [ ] `@nnrp/browser-client` owns browser client lifecycle and the single `nnrp-wasm-browser` artifact.
   - [ ] `@nnrp/core` owns shared types, validation, codecs, errors, endpoint resolution, and provider contracts.
