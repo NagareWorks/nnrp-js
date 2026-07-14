@@ -49,7 +49,7 @@
   - [x] Update capability manifests and provider contracts.
   - [ ] Update selection options, candidate diagnostics, and endpoint resolution results.
   - [x] Update public API snapshots without old-preview aliases.
-- [ ] Add contract tests.
+- [x] Add contract tests.
   - [x] Cover every transport kind and policy.
   - [x] Cover single-provider, multi-provider, preference, and force behavior.
   - [x] Cover application and provider endpoint validation.

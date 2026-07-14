@@ -16,7 +16,7 @@
   - [ ] Download `nnrp-wasm-browser` into `@nnrp/browser-client`.
   - [ ] Validate the WASM, loader, declarations, manifest, and checksums.
   - [ ] Reject `nnrp-wasm-primitives` and transport-scoped WASM names.
-- [ ] Normalize npm-owned artifact manifests.
+- [x] Normalize npm-owned artifact manifests.
   - [x] Remove C-header-only `header`, `headers`, and `legacy_header` fields while staging.
   - [x] Preserve ABI, feature, target, library, checksum, and capability fields.
   - [x] Keep C headers out of JavaScript package contents and public TypeScript types.
