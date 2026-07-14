@@ -77,6 +77,7 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
       { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
       { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
+      { label: "client top-level helper", pattern: /\bexport\s+(?:async\s+)?function\s+openNativeClient\b/ },
       {
         label: "implicit native finalizer",
         pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
@@ -92,6 +93,11 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/(?:native|native-client|native-server)["']/ },
       { label: "native transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-(?:tcp|quic)["']/ },
       { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
+      {
+        label: "server role class",
+        pattern: /\bclass\s+NnrpServer(?:Session)?\b/,
+      },
+      { label: "server listener method", pattern: /\bpublic\s+listen\s*\(/ },
     ],
   },
   {

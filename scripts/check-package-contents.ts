@@ -76,6 +76,9 @@ for (const policy of packages) {
   checkPackageMetadata(policy, packageJson);
   checkNativeArtifactMetadata(policy, packageJson, declaredFiles);
   checkWasmArtifactMetadata(policy, packageJson, declaredFiles);
+  if (policy.name === "@nnrp/browser-client") {
+    await checkBrowserWasmOwnership(policy);
+  }
 
   for (const required of policy.requiredFiles) {
     if (!declaredFiles.includes(required)) {
@@ -92,6 +95,54 @@ for (const policy of packages) {
         failures.push(`${policy.name}: forbidden package file declaration ${file}`);
       }
     }
+  }
+}
+
+async function checkBrowserWasmOwnership(policy: PackagePolicy): Promise<void> {
+  const wasmDirectory = `${policy.directory}/wasm`;
+  let wasmFiles: string[];
+  try {
+    wasmFiles = [];
+    for await (const entry of Deno.readDir(wasmDirectory)) {
+      if (entry.isFile && entry.name.endsWith(".wasm")) {
+        wasmFiles.push(entry.name);
+      }
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      failures.push(`${policy.name}: missing wasm artifact directory`);
+      return;
+    }
+    throw error;
+  }
+
+  if (wasmFiles.length !== 1 || wasmFiles[0] !== "nnrp_wasm.wasm") {
+    failures.push(
+      `${policy.name}: expected only the nnrp-wasm-browser binary nnrp_wasm.wasm, found ${
+        wasmFiles.sort().join(", ") || "none"
+      }`,
+    );
+  }
+
+  const manifestPath = `${wasmDirectory}/manifest.json`;
+  try {
+    const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as Record<string, unknown>;
+    if (manifest.artifact !== "nnrp-wasm-browser") {
+      failures.push(`${policy.name}: wasm manifest artifact must be nnrp-wasm-browser`);
+    }
+    if (manifest.wasm !== "nnrp_wasm.wasm") {
+      failures.push(`${policy.name}: wasm manifest must reference nnrp_wasm.wasm`);
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      failures.push(`${policy.name}: missing wasm/manifest.json`);
+      return;
+    }
+    if (error instanceof SyntaxError) {
+      failures.push(`${policy.name}: wasm/manifest.json is not valid JSON`);
+      return;
+    }
+    throw error;
   }
 }
 

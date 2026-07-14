@@ -6,8 +6,9 @@
 
 Browser and edge client entrypoint for NNRP.
 
-The package exposes browser client/session APIs and browser transport provider slots. WASM primitives are an
-implementation detail supplied by URL, `WebAssembly.Module`, or a future asset policy.
+The package exposes browser client/session APIs and browser transport provider slots. It owns the single bundled
+`nnrp-wasm-browser` runtime artifact; `moduleUrl` and injected `WebAssembly.Module` values explicitly override that
+default for controlled deployments.
 
 ```ts
 import { openBrowserRuntime } from "@nnrp/browser-client";

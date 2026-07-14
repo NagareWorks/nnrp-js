@@ -2,12 +2,12 @@
 
 ## Package Ownership
 
-- [ ] Freeze role-package ownership in repository policy checks.
+- [x] Freeze role-package ownership in repository policy checks.
   - [x] `@nnrp/native-client` owns Node/Deno client lifecycle and no server listener API.
-  - [ ] `@nnrp/native-server` owns Node/Deno server lifecycle and no client top-level helper.
-  - [ ] `@nnrp/browser-client` owns browser client lifecycle and the single `nnrp-wasm-browser` artifact.
-  - [ ] `@nnrp/core` owns shared types, validation, codecs, errors, endpoint resolution, and provider contracts.
-  - [ ] Role packages contain no native TCP, QUIC, IPC, or WebSocket dynamic libraries.
+  - [x] `@nnrp/native-server` owns Node/Deno server lifecycle and no client top-level helper.
+  - [x] `@nnrp/browser-client` owns browser client lifecycle and the single `nnrp-wasm-browser` artifact.
+  - [x] `@nnrp/core` owns shared types, validation, codecs, errors, endpoint resolution, and provider contracts.
+  - [x] Role packages contain no native TCP, QUIC, IPC, or WebSocket dynamic libraries.
 - [ ] Freeze carrier-package ownership in repository policy checks.
   - [ ] `@nnrp/transport-tcp` owns TCP provider behavior and TCP native artifacts.
   - [ ] `@nnrp/transport-quic` owns QUIC provider behavior and QUIC native artifacts.
