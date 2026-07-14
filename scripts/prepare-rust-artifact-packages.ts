@@ -1,4 +1,4 @@
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.1";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.2";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
