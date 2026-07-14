@@ -7,9 +7,9 @@
   - [ ] Export frozen provider option, probe, connection, listener, and diagnostic types.
   - [ ] Keep Node/Deno and browser exports under the same package boundary.
 - [ ] Implement native-host ownership.
-  - [ ] Load only Rust Preview4 WebSocket artifacts on Node/Deno.
+  - [x] Load only Rust Preview4 WebSocket artifacts on Node/Deno.
   - [ ] Bind native connect/listen/read/write/close behavior.
-  - [ ] Validate artifact scope `websocket`, ABI, platform, library file, and checksum metadata.
+  - [x] Validate artifact scope `websocket`, ABI, platform, library file, and checksum metadata.
   - [ ] Fail explicitly on an unsupported native platform or missing artifact.
 
 ## Browser Ownership
@@ -20,10 +20,10 @@
   - [ ] Feed owned binary bytes into WASM frame/control/object decoding.
   - [ ] Apply buffered-amount backpressure without a JavaScript protocol fallback.
   - [ ] Implement browser client connect and close; expose no browser server listener.
-- [ ] Keep artifact placement correct.
-  - [ ] Keep `nnrp-wasm-browser` in `@nnrp/browser-client` only.
-  - [ ] Keep native WebSocket libraries in `@nnrp/transport-websocket` only.
-  - [ ] Keep TCP, QUIC, and IPC artifacts out of both browser paths.
+- [x] Keep artifact placement correct.
+  - [x] Keep `nnrp-wasm-browser` in `@nnrp/browser-client` only.
+  - [x] Keep native WebSocket libraries in `@nnrp/transport-websocket` only.
+  - [x] Keep TCP, QUIC, and IPC artifacts out of both browser paths.
 
 ## Endpoint, Selection, and Tests
 
@@ -39,6 +39,6 @@
 
 ## Acceptance Evidence
 
-- [ ] Native tarball inspection finds the WebSocket library and no browser WASM.
-- [ ] Browser tarball inspection finds one browser WASM artifact and no native library.
+- [x] Native tarball inspection finds the WebSocket library and no browser WASM.
+- [x] Browser tarball inspection finds one browser WASM artifact and no native library.
 - [ ] Public API snapshot matches the frozen JavaScript transport page in `nnrp-doc`.

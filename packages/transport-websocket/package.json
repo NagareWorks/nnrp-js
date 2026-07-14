@@ -1,7 +1,7 @@
 {
   "name": "@nnrp/transport-websocket",
   "version": "1.0.0-preview.3.5",
-  "description": "WebSocket transport provider for NNRP browser clients.",
+  "description": "WebSocket transport provider with native artifacts and browser host bindings for NNRP runtimes.",
   "keywords": [
     "nnrp",
     "ai",
@@ -35,9 +35,16 @@
     "README.md",
     "dist/index.js",
     "dist/index.d.ts",
-    "dist/index.d.ts.map"
+    "dist/index.d.ts.map",
+    "native/**"
   ],
   "dependencies": {
     "@nnrp/core": "workspace:*"
+  },
+  "nnrp": {
+    "transport": "websocket",
+    "nativeArtifacts": {
+      "enabled": true
+    }
   }
 }

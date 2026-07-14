@@ -12,6 +12,7 @@ packages/transport-tcp/native/
 packages/transport-tcp/wasm/
 packages/transport-quic/native/
 packages/transport-quic/wasm/
+packages/transport-websocket/native/
 
 # Local environment
 .env

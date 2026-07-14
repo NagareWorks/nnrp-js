@@ -54,10 +54,17 @@ const packages: readonly PackagePolicy[] = [
   {
     name: "@nnrp/transport-websocket",
     directory: "packages/transport-websocket",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
+    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**"],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /webtransport/i],
   },
 ];
+
+const NATIVE_TRANSPORT_PACKAGES = new Set([
+  "@nnrp/transport-tcp",
+  "@nnrp/transport-quic",
+  "@nnrp/transport-ipc",
+  "@nnrp/transport-websocket",
+]);
 
 const failures: string[] = [];
 const nativeArtifactManifestPattern = /^native\/[^/]+\/manifest\.json$/;
@@ -97,9 +104,9 @@ function checkNativeArtifactMetadata(
     return;
   }
 
-  if (policy.name !== "@nnrp/transport-tcp" && policy.name !== "@nnrp/transport-quic") {
+  if (!NATIVE_TRANSPORT_PACKAGES.has(policy.name)) {
     failures.push(
-      `${policy.name}: native artifact packaging can only be enabled on native TCP/QUIC transport packages`,
+      `${policy.name}: native artifact packaging can only be enabled on native transport packages`,
     );
     return;
   }

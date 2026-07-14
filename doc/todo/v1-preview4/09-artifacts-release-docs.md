@@ -7,19 +7,19 @@
   - [x] Update local artifact preparation defaults.
   - [ ] Record the resolved Rust release tag and checksums in dry-run evidence.
 - [ ] Stage all transport-scoped native artifacts.
-  - [ ] Download TCP platform archives into `@nnrp/transport-tcp`.
-  - [ ] Download QUIC platform archives into `@nnrp/transport-quic`.
+  - [x] Download TCP platform archives into `@nnrp/transport-tcp`.
+  - [x] Download QUIC platform archives into `@nnrp/transport-quic`.
   - [ ] Download IPC platform archives into `@nnrp/transport-ipc`.
-  - [ ] Download WebSocket platform archives into `@nnrp/transport-websocket`.
-  - [ ] Cover every platform/architecture published by Rust Preview4.
+  - [x] Download WebSocket platform archives into `@nnrp/transport-websocket`.
+  - [x] Cover every platform/architecture published by Rust Preview4.
 - [ ] Stage the browser artifact.
   - [ ] Download `nnrp-wasm-browser` into `@nnrp/browser-client`.
   - [ ] Validate the WASM, loader, declarations, manifest, and checksums.
   - [ ] Reject `nnrp-wasm-primitives` and transport-scoped WASM names.
 - [ ] Normalize npm-owned artifact manifests.
-  - [ ] Remove C-header-only `header`, `headers`, and `legacy_header` fields while staging.
-  - [ ] Preserve ABI, feature, target, library, checksum, and capability fields.
-  - [ ] Keep C headers out of JavaScript package contents and public TypeScript types.
+  - [x] Remove C-header-only `header`, `headers`, and `legacy_header` fields while staging.
+  - [x] Preserve ABI, feature, target, library, checksum, and capability fields.
+  - [x] Keep C headers out of JavaScript package contents and public TypeScript types.
 
 ## Workspace and Package Automation
 
@@ -29,11 +29,11 @@
   - [ ] Update optional peer dependencies for both native role packages.
   - [ ] Preserve browser-client dependency on core and WebSocket provider without native peers.
 - [ ] Enforce tarball ownership.
-  - [ ] Role tarballs contain no native transport libraries.
+  - [x] Role tarballs contain no native transport libraries.
   - [ ] Each transport tarball contains only its own platform libraries.
-  - [ ] Browser-client contains one browser WASM artifact and no native library.
-  - [ ] WebSocket contains no duplicate browser WASM.
-  - [ ] No package exposes a private platform-artifact package as a user install target.
+  - [x] Browser-client contains one browser WASM artifact and no native library.
+  - [x] WebSocket contains no duplicate browser WASM.
+  - [x] No package exposes a private platform-artifact package as a user install target.
 
 ## Release Workflow
 
