@@ -15,7 +15,7 @@
   - [x] `sendRouteHint(metadata, body?)`.
   - [x] `sendExecutionHint(metadata, body?)`.
   - [x] `sendTraceContext(metadata, body?)`.
-  - [x] `sendControl(messageType, metadata, tail?)`.
+  - [x] Public `sendControl(messageType, metadata, tail?)` escape hatch.
 - [x] Route every method through the codec and one coarse runtime submit call.
   - [x] Preserve caller-supplied control sequence values through encoding and dispatch.
   - [x] Validate the message direction before runtime dispatch.

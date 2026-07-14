@@ -161,6 +161,14 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     flags: 0,
     diagnosticBytes: 1,
   }, one);
+  await session.sendControl(NnrpMessageType.Progress, {
+    operationId: 1n,
+    progressSequence: 3n,
+    stageCode: 4,
+    percentX100: 5,
+    objectId: 6n,
+    bodyBytes: 1,
+  }, one);
   await session.declareObject({
     objectId: 1n,
     objectKind: RuntimeObjectKind.Tensor,
@@ -237,6 +245,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpMessageType.TraceContext,
     NnrpMessageType.ErrorRecoverable,
     NnrpMessageType.RetryAfter,
+    NnrpMessageType.Progress,
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
     NnrpMessageType.ObjectRelease,
@@ -246,9 +255,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpMessageType.CacheMiss,
     NnrpMessageType.CacheInvalidate,
   ]);
-  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 16 }, (_, index) => index + 1));
-
-  assertEquals("sendControl" in session, false);
+  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 17 }, (_, index) => index + 1));
 });
 
 function fakeQuicNativeBinding(): NnrpQuicNativeBinding {

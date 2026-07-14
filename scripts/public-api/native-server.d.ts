@@ -260,6 +260,7 @@ export declare class NnrpServerSession {
     referenceCache(metadata: CacheReferenceMetadata, body?: Uint8Array): Promise<void>;
     reportCacheMiss(metadata: CacheMissMetadata, diagnostic?: Uint8Array): Promise<void>;
     invalidateCache(metadata: CacheInvalidateMetadata): Promise<void>;
+    sendControl(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Promise<void>;
     close(): Promise<void>;
     get closed(): boolean;
 }

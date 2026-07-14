@@ -19,7 +19,7 @@
   - [x] `sendTraceContext(metadata, body?)`.
   - [x] `sendRecoverableError(metadata, diagnostic?)`.
   - [x] `sendRetryAfter(metadata, diagnostic?)`.
-  - [x] `sendControl(messageType, metadata, tail?)`.
+  - [x] Public `sendControl(messageType, metadata, tail?)` escape hatch.
 - [ ] Keep final result semantics separate.
   - [ ] Preserve `sendResult(result)` as the terminal result API.
   - [ ] Reject partial-result or progress sends after a terminal result.

@@ -165,6 +165,10 @@ jobs:
         run: deno task content-policy
       - name: Lint
         run: deno lint
+      - name: Preview4 todo contract
+        run: deno task todo:check
+      - name: Public API consistency
+        run: deno task api-consistency
       - name: Typecheck
         run: deno task typecheck
       - name: Test

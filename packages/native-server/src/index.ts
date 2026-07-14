@@ -1131,41 +1131,41 @@ export class NnrpServerSession {
   }
 
   public sendProgress(metadata: ProgressMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.#sendControl(NnrpMessageType.Progress, metadata, body);
+    return this.sendControl(NnrpMessageType.Progress, metadata, body);
   }
 
   public sendPartialResult(metadata: PartialResultMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.#sendControl(NnrpMessageType.PartialResult, metadata, body);
+    return this.sendControl(NnrpMessageType.PartialResult, metadata, body);
   }
 
   public sendBackpressure(metadata: PressureMetadata): Promise<void> {
-    return this.#sendControl(NnrpMessageType.Backpressure, metadata);
+    return this.sendControl(NnrpMessageType.Backpressure, metadata);
   }
 
   public sendCreditUpdate(metadata: PressureMetadata): Promise<void> {
-    return this.#sendControl(NnrpMessageType.CreditUpdate, metadata);
+    return this.sendControl(NnrpMessageType.CreditUpdate, metadata);
   }
 
   public sendResultDropReason(
     metadata: ResultDropReasonMetadata,
     diagnostic: Uint8Array = EMPTY_PAYLOAD,
   ): Promise<void> {
-    return this.#sendControl(NnrpMessageType.ResultDropReason, metadata, diagnostic);
+    return this.sendControl(NnrpMessageType.ResultDropReason, metadata, diagnostic);
   }
 
   public sendTraceContext(metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.#sendControl(NnrpMessageType.TraceContext, metadata, body);
+    return this.sendControl(NnrpMessageType.TraceContext, metadata, body);
   }
 
   public sendRecoverableError(
     metadata: RecoverableErrorMetadata,
     diagnostic: Uint8Array = EMPTY_PAYLOAD,
   ): Promise<void> {
-    return this.#sendControl(NnrpMessageType.ErrorRecoverable, metadata, diagnostic);
+    return this.sendControl(NnrpMessageType.ErrorRecoverable, metadata, diagnostic);
   }
 
   public sendRetryAfter(metadata: RetryAfterMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.#sendControl(NnrpMessageType.RetryAfter, metadata, diagnostic);
+    return this.sendControl(NnrpMessageType.RetryAfter, metadata, diagnostic);
   }
 
   public declareObject(metadata: ObjectDescriptorMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
@@ -1204,7 +1204,7 @@ export class NnrpServerSession {
     }
   }
 
-  #sendControl(
+  public sendControl(
     messageType: NnrpMessageType,
     metadata: RuntimeControlMetadata,
     tail: Uint8Array = EMPTY_PAYLOAD,

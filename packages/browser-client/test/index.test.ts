@@ -764,7 +764,7 @@ Deno.test("@nnrp/browser-client keeps the coarse runtime frame primitive interna
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
-  assertEquals("sendControl" in session, false);
+  assertEquals("sendRuntimeFrame" in session, false);
 });
 
 Deno.test("@nnrp/browser-client rejects duplicate terminal events and clears frames on close", async () => {
@@ -996,6 +996,16 @@ Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime A
     flags: 0,
     bodyBytes: 1,
   }, one);
+  await session.sendControl(NnrpMessageType.RetryAfter, {
+    scopeId: 1n,
+    controlSequence: 2n,
+    retryAfterMs: 3,
+    jitterMs: 4,
+    reasonCode: 5,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 1,
+  }, one);
   await session.declareObject({
     objectId: 1n,
     objectKind: RuntimeObjectKind.Tensor,
@@ -1076,6 +1086,7 @@ Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime A
     NnrpMessageType.RouteHint,
     NnrpMessageType.ExecutionHint,
     NnrpMessageType.TraceContext,
+    NnrpMessageType.RetryAfter,
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
     NnrpMessageType.ObjectRelease,
@@ -1085,7 +1096,7 @@ Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime A
     NnrpMessageType.CacheMiss,
     NnrpMessageType.CacheInvalidate,
   ]);
-  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 20 }, (_, index) => index + 1));
+  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 21 }, (_, index) => index + 1));
   assertEquals(seen.every(({ payload }) => payload.byteLength > 0), true);
 });
 
