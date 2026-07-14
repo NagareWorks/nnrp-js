@@ -2,7 +2,7 @@
 
 ## Rust Preview4 Artifact Adoption
 
-- [ ] Set the default Rust artifact version to `1.0.0-preview.4.2`.
+- [ ] Set the default Rust artifact version to `1.0.0-preview.4.3`.
   - [x] Update release workflow inputs and fallback values.
   - [x] Update local artifact preparation defaults.
   - [ ] Record the resolved Rust release tag and checksums in dry-run evidence.
@@ -12,10 +12,10 @@
   - [ ] Download IPC platform archives into `@nnrp/transport-ipc`.
   - [x] Download WebSocket platform archives into `@nnrp/transport-websocket`.
   - [x] Cover every platform/architecture published by Rust Preview4.
-- [ ] Stage the browser artifact.
-  - [ ] Download `nnrp-wasm-browser` into `@nnrp/browser-client`.
-  - [ ] Validate the WASM, loader, declarations, manifest, and checksums.
-  - [ ] Reject `nnrp-wasm-primitives` and transport-scoped WASM names.
+- [x] Stage the browser artifact.
+  - [x] Download `nnrp-wasm-browser` into `@nnrp/browser-client`.
+  - [x] Validate the WASM, loader, declarations, manifest, and checksums.
+  - [x] Reject `nnrp-wasm-primitives` and transport-scoped WASM names.
 - [x] Normalize npm-owned artifact manifests.
   - [x] Remove C-header-only `header`, `headers`, and `legacy_header` fields while staging.
   - [x] Preserve ABI, feature, target, library, checksum, and capability fields.

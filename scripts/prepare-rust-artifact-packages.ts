@@ -1,12 +1,14 @@
 import {
+  BROWSER_WASM_REQUIRED_EXPORTS,
   NATIVE_ARTIFACTS,
   type NativeArtifactPolicy,
   type NativeTransportScope,
+  normalizeBrowserArtifactManifest,
   normalizeNativeArtifactManifest,
   parseReleaseChecksums,
 } from "./rust-artifact-policy.ts";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.2";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.3";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
@@ -27,7 +29,7 @@ for (const transportPackage of transportPackages) {
   }
 }
 
-await prepareBrowserWasmArtifact(version);
+await prepareBrowserWasmArtifact(version, releaseChecksums);
 
 async function prepareNativeTransportArtifactPackage(
   transportPackage: TransportPackagePolicy,
@@ -112,17 +114,52 @@ async function loadReleaseChecksums(artifactVersion: string): Promise<ReadonlyMa
   return parseReleaseChecksums(await Deno.readTextFile(`${cacheDir}/SHA256SUMS`));
 }
 
-async function prepareBrowserWasmArtifact(artifactVersion: string): Promise<void> {
+async function prepareBrowserWasmArtifact(
+  artifactVersion: string,
+  releaseChecksums: ReadonlyMap<string, string>,
+): Promise<void> {
   const assetName = `nnrp-wasm-browser-${artifactVersion}.zip`;
   const extractDir = `${cacheDir}/browser-wasm`;
-  await downloadReleaseAsset(assetName);
+  const expectedSha256 = releaseChecksums.get(assetName);
+  if (expectedSha256 === undefined) {
+    throw new Error(`SHA256SUMS does not contain ${assetName}`);
+  }
+  await downloadReleaseAsset(assetName, artifactVersion, true);
+  await verifySha256(`${cacheDir}/${assetName}`, expectedSha256);
   await resetDir(extractDir);
   await extractZip(`${cacheDir}/${assetName}`, extractDir);
 
+  const sourceManifest = JSON.parse(await Deno.readTextFile(`${extractDir}/manifest.json`)) as unknown;
+  const manifest = normalizeBrowserArtifactManifest(sourceManifest, {
+    release: `v${artifactVersion}`,
+    archive: assetName,
+    archiveSha256: expectedSha256,
+  });
+  await validateBrowserWasmBinary(`${extractDir}/${manifest.wasm}`, assetName);
+  const declarations = await Deno.readTextFile(`${extractDir}/${manifest.types}`);
+  for (const requiredExport of BROWSER_WASM_REQUIRED_EXPORTS) {
+    if (!declarations.includes(requiredExport)) {
+      throw new Error(`${assetName}: declarations are missing ${requiredExport}`);
+    }
+  }
+
   await resetDir(`${browserWasmPackageDir}/wasm`);
-  await copyFile(`${extractDir}/manifest.json`, `${browserWasmPackageDir}/wasm/manifest.json`);
-  await copyFile(`${extractDir}/nnrp_wasm.wasm`, `${browserWasmPackageDir}/wasm/nnrp_wasm.wasm`);
-  await copyFile(`${extractDir}/nnrp_wasm.d.ts`, `${browserWasmPackageDir}/wasm/nnrp_wasm.d.ts`);
+  await Deno.writeTextFile(
+    `${browserWasmPackageDir}/wasm/manifest.json`,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  await copyFile(`${extractDir}/${manifest.wasm}`, `${browserWasmPackageDir}/wasm/${manifest.wasm}`);
+  await copyFile(`${extractDir}/${manifest.types}`, `${browserWasmPackageDir}/wasm/${manifest.types}`);
+}
+
+async function validateBrowserWasmBinary(path: string, assetName: string): Promise<void> {
+  const binary = await Deno.readFile(path);
+  if (
+    binary.length < 8 || binary[0] !== 0x00 || binary[1] !== 0x61 || binary[2] !== 0x73 || binary[3] !== 0x6d ||
+    binary[4] !== 0x01 || binary[5] !== 0x00 || binary[6] !== 0x00 || binary[7] !== 0x00
+  ) {
+    throw new Error(`${assetName}: nnrp_wasm.wasm is not a WebAssembly binary`);
+  }
 }
 
 async function downloadReleaseAsset(

@@ -1,5 +1,11 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
-import { NATIVE_ARTIFACTS, normalizeNativeArtifactManifest, parseReleaseChecksums } from "./rust-artifact-policy.ts";
+import {
+  BROWSER_WASM_REQUIRED_EXPORTS,
+  NATIVE_ARTIFACTS,
+  normalizeBrowserArtifactManifest,
+  normalizeNativeArtifactManifest,
+  parseReleaseChecksums,
+} from "./rust-artifact-policy.ts";
 
 Deno.test("native artifact policy covers every Rust Preview4 target", () => {
   assertEquals(NATIVE_ARTIFACTS.length, 16);
@@ -42,7 +48,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
     policy,
     "websocket",
     {
-      release: "v1.0.0-preview.4.2",
+      release: "v1.0.0-preview.4.3",
       archive: "websocket.zip",
       archiveSha256: "c".repeat(64),
     },
@@ -53,6 +59,75 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
   assertEquals("header" in manifest, false);
   assertEquals("headers" in manifest, false);
   assertEquals("legacy_header" in manifest, false);
+});
+
+Deno.test("browser artifact manifests enforce the frozen browser-only SDK boundary", () => {
+  const manifest = normalizeBrowserArtifactManifest(
+    {
+      package: "nnrp-wasm",
+      artifact: "nnrp-wasm-browser",
+      transport_name: "browser",
+      transport_scope: "browser",
+      transport_slots: ["websocket"],
+      protocol_version: "NNRP/1",
+      abi_version: "1.0.0",
+      enabled_features: ["transport-websocket", "wasm-provider"],
+      provider: {
+        id: "nnrp.transport.websocket.browser-wasm",
+        cost: { model_id: 0, units: "0" },
+        preference_rank: 3,
+        limits: { max_frame_bytes: "67108864" },
+        limitations: ["requires-tcp", "browser-host-only"],
+      },
+      wasm: "nnrp_wasm.wasm",
+      types: "nnrp_wasm.d.ts",
+      owner: "nnrp-rs",
+      downstream_wrapper: "nnrp-js",
+      exports: [...BROWSER_WASM_REQUIRED_EXPORTS],
+    },
+    {
+      release: "v1.0.0-preview.4.3",
+      archive: "nnrp-wasm-browser-1.0.0-preview.4.3.zip",
+      archiveSha256: "e".repeat(64),
+    },
+  );
+
+  assertEquals(manifest.source_release, "v1.0.0-preview.4.3");
+  assertEquals(manifest.source_archive_sha256, "e".repeat(64));
+  assertEquals(manifest.transport_slots, ["websocket"]);
+});
+
+Deno.test("browser artifact manifests reject stale scoring exports", () => {
+  assertThrows(
+    () =>
+      normalizeBrowserArtifactManifest(
+        {
+          package: "nnrp-wasm",
+          artifact: "nnrp-wasm-browser",
+          transport_name: "browser",
+          transport_scope: "browser",
+          transport_slots: ["websocket"],
+          protocol_version: "NNRP/1",
+          abi_version: "1.0.0",
+          enabled_features: ["transport-websocket", "wasm-provider"],
+          provider: {
+            id: "nnrp.transport.websocket.browser-wasm",
+            cost: { model_id: 0, units: "0" },
+            preference_rank: 3,
+            limits: { max_frame_bytes: "67108864" },
+            limitations: ["requires-tcp", "browser-host-only"],
+          },
+          wasm: "nnrp_wasm.wasm",
+          types: "nnrp_wasm.d.ts",
+          owner: "nnrp-rs",
+          downstream_wrapper: "nnrp-js",
+          exports: ["scoreProviderProbeJson"],
+        },
+        { release: "v1", archive: "stale-browser.zip", archiveSha256: "f".repeat(64) },
+      ),
+    Error,
+    "missing browser WASM exports",
+  );
 });
 
 Deno.test("native artifact manifests reject a mismatched transport scope", () => {
