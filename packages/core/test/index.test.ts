@@ -26,6 +26,7 @@ import {
   NnrpProtocolError,
   NnrpRecoveryError,
   NnrpResultDropError,
+  type NnrpSubmitRequest,
   NnrpTimeoutError,
   NnrpTransportError,
   type NnrpTransportKind,
@@ -132,8 +133,14 @@ const NNRP_MESSAGE_TYPES = [
 const removedTransportKind: NnrpTransportKind = "webtransport";
 // @ts-expect-error Preview3 selection policies are not part of the Preview4 contract.
 const removedTransportPolicy: NnrpTransportPolicy = "score";
+const providerLocalEndpointRequest: NnrpSubmitRequest = {
+  frameId: 1,
+  // @ts-expect-error Provider-local endpoints belong to transport setup, not operation payloads.
+  providerEndpoint: "unix:///tmp/nnrp.sock",
+};
 void removedTransportKind;
 void removedTransportPolicy;
+void providerLocalEndpointRequest;
 
 Deno.test("@nnrp/core exposes the exact NNRP/1 Preview4 message type registry", () => {
   const namedEntries = Object.entries(NnrpMessageType).filter(([name]) => Number.isNaN(Number(name)));
@@ -1173,6 +1180,16 @@ Deno.test("@nnrp/core requires explicit IPC and WebSocket provider endpoints", (
     );
     assertEquals(error.diagnostic.transport, transport);
   }
+});
+
+Deno.test("@nnrp/core keeps provider-local endpoints out of normalized operation payloads", () => {
+  const normalized = normalizeSubmitRequest({
+    frameId: 8,
+    providerEndpoint: "unix:///tmp/nnrp.sock",
+  } as unknown as NnrpSubmitRequest);
+
+  assertEquals(normalized, { frameId: 8 });
+  assertEquals("providerEndpoint" in normalized, false);
 });
 
 Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () => {

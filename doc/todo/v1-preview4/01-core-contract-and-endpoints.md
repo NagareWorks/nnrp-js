@@ -36,12 +36,12 @@
   - [x] Accept `nnrp://` and `nnrps://` application endpoints.
   - [x] Preserve authority, path, query, and security intent in the parsed result.
   - [x] Reject provider-local schemes in the application endpoint field.
-- [ ] Add provider endpoint resolution.
+- [x] Add provider endpoint resolution.
   - [x] Derive TCP and QUIC host/port endpoints from the application endpoint.
   - [x] Resolve IPC `unix://` and `npipe://` endpoints from an explicit `providerEndpoint` override.
   - [x] Resolve WebSocket `ws://` and `wss://` endpoints from an explicit `providerEndpoint` override.
   - [x] Reject a provider override whose scheme does not match the selected provider.
-  - [ ] Keep provider-local endpoint strings out of operation metadata and public request payloads.
+  - [x] Keep provider-local endpoint strings out of operation metadata and public request payloads.
 
 ## Public Types and Tests
 
