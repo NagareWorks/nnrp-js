@@ -254,16 +254,20 @@ async function runTransportLoopback(scenario: BenchmarkScenario): Promise<Benchm
   const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
   const provider = createTcpTransportProvider();
   const server = await provider.listen({ endpoint: "127.0.0.1:0" });
-  server.server.on("connection", (socket) => {
-    socket.setNoDelay(true);
-    socket.on("data", (chunk) => socket.write(chunk));
-  });
+  const accepted = server.accept();
   const client = await provider.connect({ endpoint: server.endpoint });
-  const nextEcho = createTcpEchoReader(client.socket);
+  const peer = await accepted;
+  let echoing = true;
+  const echoLoop = (async () => {
+    while (echoing) {
+      const packets = await peer.receive({ maxPackets: 16, timeoutMillis: 1_000 });
+      await peer.send(packets);
+    }
+  })();
 
   const operation = async () => {
     await client.send(payload);
-    await nextEcho();
+    await client.receive({ maxPackets: 1, timeoutMillis: 1_000 });
   };
 
   for (let index = 0; index < warmupIterations; index += 1) {
@@ -273,8 +277,11 @@ async function runTransportLoopback(scenario: BenchmarkScenario): Promise<Benchm
   try {
     return measuredThroughputResult(scenario.id, await measureAsyncThroughput(operation, durationSeconds));
   } finally {
+    echoing = false;
     client.close();
+    peer.close();
     await server.close();
+    await echoLoop.catch(() => undefined);
   }
 }
 
@@ -327,30 +334,6 @@ function isNativeBenchmarkFfi(value: unknown): value is NnrpNativeFfiBinding {
   return typeof value === "object" &&
     value !== null &&
     typeof (value as NnrpNativeFfiBinding).submitResultCompact === "function";
-}
-
-function createTcpEchoReader(
-  socket: { on(event: "data", listener: (chunk: Uint8Array) => void): void },
-): () => Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  const waiters: Array<(chunk: Uint8Array) => void> = [];
-  socket.on("data", (chunk) => {
-    const waiter = waiters.shift();
-    if (waiter === undefined) {
-      chunks.push(chunk);
-      return;
-    }
-    waiter(chunk);
-  });
-
-  return () => {
-    const chunk = chunks.shift();
-    if (chunk !== undefined) {
-      return Promise.resolve(chunk);
-    }
-
-    return new Promise<Uint8Array>((resolve) => waiters.push(resolve));
-  };
 }
 
 async function measureAsyncThroughput(operation: () => Promise<void>, durationSeconds: number): Promise<Measurement> {

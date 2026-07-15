@@ -3,7 +3,7 @@ import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "../src/index.ts";
 
 Deno.test("@nnrp/transport-quic reports unavailable without a native QUIC binding", async () => {
-  const provider = createQuicTransportProvider();
+  const provider = createQuicTransportProvider({ available: false });
 
   assertEquals(provider.endpointSchemes, ["quic"]);
   assertEquals(provider.kind, "quic");
@@ -22,19 +22,31 @@ Deno.test("@nnrp/transport-quic reports unavailable without a native QUIC bindin
 
 Deno.test("@nnrp/transport-quic delegates connect and listen to its native binding", async () => {
   const binding: NnrpQuicNativeBinding = {
-    connect: ({ endpoint }) => ({
-      kind: "quic",
-      endpoint: String(endpoint),
-      connected: true,
-      send: () => {},
-      close: () => {},
-    }),
-    listen: ({ endpoint }) => ({
-      kind: "quic",
-      endpoint: String(endpoint),
-      listening: true,
-      close: () => {},
-    }),
+    mode: "test",
+    probe: () =>
+      Promise.resolve({
+        sampleCount: 1,
+        successCount: 1,
+        medianRttMicroseconds: 1n,
+        medianThroughputBytesPerSecond: 1n,
+      }),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "quic",
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+      }),
+    listen: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "quic",
+        endpoint: String(endpoint),
+        listening: true,
+        accept: async () => await binding.connect({ endpoint }),
+        close: () => {},
+      }),
   };
   const provider = createQuicTransportProvider({ binding, preferenceRank: 4 });
   const connection = await provider.connect({ endpoint: "quic://127.0.0.1:4433" });

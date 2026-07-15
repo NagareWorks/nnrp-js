@@ -40,14 +40,22 @@
     "@nnrp/core": "workspace:*"
   },
   "peerDependencies": {
+    "@nnrp/transport-ipc": "workspace:*",
     "@nnrp/transport-quic": "workspace:*",
-    "@nnrp/transport-tcp": "workspace:*"
+    "@nnrp/transport-tcp": "workspace:*",
+    "@nnrp/transport-websocket": "workspace:*"
   },
   "peerDependenciesMeta": {
+    "@nnrp/transport-ipc": {
+      "optional": true
+    },
     "@nnrp/transport-quic": {
       "optional": true
     },
     "@nnrp/transport-tcp": {
+      "optional": true
+    },
+    "@nnrp/transport-websocket": {
       "optional": true
     }
   }

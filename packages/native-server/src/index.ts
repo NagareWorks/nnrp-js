@@ -551,12 +551,20 @@ async function discoverNativeTransportProviders(): Promise<readonly NnrpNativeTr
   const providers: NnrpNativeTransportProvider[] = [];
   const tcp = await importOptionalTransportModule("@nnrp/transport-tcp");
   const quic = await importOptionalTransportModule("@nnrp/transport-quic");
+  const ipc = await importOptionalTransportModule("@nnrp/transport-ipc");
+  const websocket = await importOptionalTransportModule("@nnrp/transport-websocket");
 
   if (isTransportFactory(tcp?.createTcpTransportProvider)) {
     providers.push(tcp.createTcpTransportProvider());
   }
   if (isTransportFactory(quic?.createQuicTransportProvider)) {
     providers.push(quic.createQuicTransportProvider());
+  }
+  if (isTransportFactory(ipc?.createIpcTransportProvider)) {
+    providers.push(ipc.createIpcTransportProvider());
+  }
+  if (isTransportFactory(websocket?.createWebSocketTransportProvider)) {
+    providers.push(websocket.createWebSocketTransportProvider());
   }
 
   return providers;

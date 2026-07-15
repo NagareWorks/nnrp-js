@@ -4,6 +4,10 @@ const lineThreshold = parseLineThreshold(Deno.args);
 const excludedSources = new Set([
   "packages/native-client/src/index.ts",
   "packages/native-server/src/index.ts",
+  "packages/transport-ipc/src/native.ts",
+  "packages/transport-quic/src/native.ts",
+  "packages/transport-tcp/src/native.ts",
+  "packages/transport-websocket/src/native.ts",
 ]);
 
 await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
@@ -14,6 +18,7 @@ await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
 
 await run(Deno.execPath(), [
   "test",
+  "--unstable-sloppy-imports",
   "--allow-env",
   "--allow-net=127.0.0.1",
   "--allow-read",
@@ -21,6 +26,16 @@ await run(Deno.execPath(), [
   `--coverage=${coverageDir}`,
   "packages/*/test/*.test.ts",
   "scripts/*.test.ts",
+]);
+
+await run(Deno.execPath(), [
+  "run",
+  "--unstable-sloppy-imports",
+  "--allow-ffi",
+  "--allow-read",
+  "--allow-write",
+  `--coverage=${coverageDir}`,
+  "scripts/check-native-transport-loopback.ts",
 ]);
 
 await run(Deno.execPath(), [
@@ -33,7 +48,11 @@ await run(Deno.execPath(), [
 const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath), excludedSources);
 const linePercent = percentage(coverage.lines.hit, coverage.lines.found);
 
-console.log(`Coverage gate excludes native role facade sources: ${[...excludedSources].join(", ")}.`);
+console.log(
+  `Coverage gate excludes native role facades and platform FFI adapters covered by native loopback smoke: ${
+    [...excludedSources].join(", ")
+  }.`,
+);
 console.log(
   `Coverage line rate ${linePercent.toFixed(1)}% (${coverage.lines.hit}/${coverage.lines.found}), threshold ${
     lineThreshold.toFixed(1)

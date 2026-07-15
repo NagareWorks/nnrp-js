@@ -8,11 +8,12 @@ import {
   parseReleaseChecksums,
 } from "./rust-artifact-policy.ts";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.3";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.4";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
   { transport: "quic", packageDir: "packages/transport-quic" },
+  { transport: "ipc", packageDir: "packages/transport-ipc" },
   { transport: "websocket", packageDir: "packages/transport-websocket" },
 ] as const;
 

@@ -123,6 +123,18 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
     ],
   },
   {
+    packageName: "@nnrp/transport-ipc",
+    prefix: "packages/transport-ipc/src/",
+    bannedPatterns: [
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      {
+        label: "role package import",
+        pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
+      },
+      { label: "other transport import", pattern: /\bfrom\s+["']@nnrp\/transport-(?:tcp|quic|websocket)["']/ },
+    ],
+  },
+  {
     packageName: "@nnrp/transport-websocket",
     prefix: "packages/transport-websocket/src/",
     bannedPatterns: [
@@ -134,7 +146,6 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
         label: "role package import",
         pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
       },
-      { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
     ],
   },
 ];
@@ -248,6 +259,12 @@ function checkPackageBoundaryText(path: string, text: string): void {
     }
 
     for (const { label, pattern } of rule.bannedPatterns) {
+      if (
+        path === "packages/transport-websocket/src/native-node.ts" &&
+        (label === "Node built-in import" || label === "dynamic Node built-in import")
+      ) {
+        continue;
+      }
       if (pattern.test(text)) {
         violations.push(`${path}: ${rule.packageName} boundary violation: ${label}`);
       }

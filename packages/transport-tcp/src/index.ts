@@ -1,12 +1,16 @@
 import {
   type NnrpDiagnostic,
+  type NnrpNativeTransportBinding,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
+  NnrpTransportError,
+  type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportProviderCost,
   type NnrpTransportServer,
 } from "@nnrp/core";
-import { connect as connectSocket, createServer, type Server, type Socket } from "node:net";
+import { loadPackagedTcpBinding } from "./native.js";
 
 export interface NnrpTcpTransportProviderOptions {
   readonly available?: boolean;
@@ -14,28 +18,27 @@ export interface NnrpTcpTransportProviderOptions {
   readonly preferenceRank?: number;
   readonly maxFrameBytes?: bigint;
   readonly diagnostic?: NnrpDiagnostic;
+  readonly binding?: NnrpNativeTransportBinding;
 }
 
 export interface NnrpTcpTransportProvider extends NnrpTransportProvider {
   readonly kind: "tcp";
   readonly endpointSchemes: readonly ["tcp"];
-  connect(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportConnection>;
-  listen(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportServer>;
-}
-
-export interface NnrpTcpTransportConnection extends NnrpTransportConnection {
-  readonly kind: "tcp";
-  readonly socket: Socket;
-}
-
-export interface NnrpTcpTransportServer extends NnrpTransportServer {
-  readonly kind: "tcp";
-  readonly server: Server;
+  probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
+  connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
+  listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer>;
 }
 
 export function createTcpTransportProvider(
   options: NnrpTcpTransportProviderOptions = {},
 ): NnrpTcpTransportProvider {
+  const loaded = options.binding !== undefined
+    ? { binding: options.binding }
+    : options.available === false
+    ? {}
+    : loadPackagedTcpBinding();
+  const available = options.available ?? loaded.binding !== undefined;
+  const diagnostic = options.diagnostic ?? loaded.diagnostic ?? unavailableDiagnostic();
   return {
     kind: "tcp",
     metadata: {
@@ -45,112 +48,35 @@ export function createTcpTransportProvider(
       limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
       limitations: ["requires-tcp", "native-host-only"],
     },
-    localAvailable: options.available ?? true,
-    ...(options.diagnostic === undefined ? {} : { diagnostic: options.diagnostic }),
+    localAvailable: available,
+    ...(available ? {} : { diagnostic }),
     endpointSchemes: ["tcp"],
-    connect: (endpoint) => connectTcp(endpoint),
-    listen: (endpoint) => listenTcp(endpoint),
+    probe: async (endpoint) => await requireBinding(loaded.binding, diagnostic, "probe").probe(endpoint),
+    connect: async (endpoint) => await requireBinding(loaded.binding, diagnostic, "connect").connect(endpoint),
+    listen: async (endpoint) => await requireBinding(loaded.binding, diagnostic, "listen").listen(endpoint),
   };
 }
 
-async function connectTcp(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportConnection> {
-  const endpoint = normalizeTcpEndpoint(options.endpoint, { allowEphemeralPort: false });
-  const socket = connectSocket(endpoint.port, endpoint.host);
-  socket.setNoDelay(true);
+function requireBinding(
+  binding: NnrpNativeTransportBinding | undefined,
+  diagnostic: NnrpDiagnostic,
+  operation: "probe" | "connect" | "listen",
+): NnrpNativeTransportBinding {
+  if (binding === undefined) {
+    throw new NnrpTransportError({
+      ...diagnostic,
+      message: `TCP transport ${operation} requires its package-owned native binding.`,
+    });
+  }
+  return binding;
+}
 
-  await new Promise<void>((resolve, reject) => {
-    socket.once("connect", resolve);
-    socket.once("error", reject);
-  });
-
+function unavailableDiagnostic(): NnrpDiagnostic {
   return {
-    kind: "tcp",
-    endpoint: endpoint.raw,
-    socket,
-    get connected() {
-      return !socket.destroyed;
-    },
-    send: (payload) => writeTcpPayload(socket, payload),
-    close: () => {
-      socket.destroy();
-    },
+    code: "NNRP_TCP_NATIVE_BINDING_MISSING",
+    message: "TCP transport requires its package-owned Rust transport binding.",
+    source: "transport",
+    retryable: false,
+    transport: "tcp",
   };
-}
-
-async function listenTcp(options: NnrpTransportEndpoint): Promise<NnrpTcpTransportServer> {
-  const endpoint = normalizeTcpEndpoint(options.endpoint, { allowEphemeralPort: true });
-  const server = createServer();
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", resolve);
-    server.once("error", reject);
-    server.listen(endpoint.port, endpoint.host);
-  });
-
-  return {
-    kind: "tcp",
-    endpoint: resolveListeningEndpoint(server, endpoint.host),
-    server,
-    get listening() {
-      return server.listening;
-    },
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((error) => error === undefined ? resolve() : reject(error));
-      }),
-  };
-}
-
-function normalizeTcpEndpoint(
-  endpoint: string | URL,
-  options: { readonly allowEphemeralPort: boolean },
-): { readonly host: string; readonly port: number; readonly raw: string } {
-  const url = endpoint instanceof URL ? endpoint : new URL(`tcp://${endpoint}`);
-  if (url.protocol !== "tcp:") {
-    throw new Error(`TCP transport requires a tcp:// endpoint, got ${url.protocol}`);
-  }
-
-  const port = Number(url.port);
-  if (!Number.isInteger(port) || port > 65535 || port < (options.allowEphemeralPort ? 0 : 1)) {
-    throw new Error(`TCP transport endpoint requires a valid port: ${url.toString()}`);
-  }
-
-  return {
-    host: url.hostname || "127.0.0.1",
-    port,
-    raw: `${url.hostname || "127.0.0.1"}:${port}`,
-  };
-}
-
-function resolveListeningEndpoint(server: Server, fallbackHost: string): string {
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    return fallbackHost;
-  }
-
-  return `${address.address}:${address.port}`;
-}
-
-function writeTcpPayload(socket: Socket, payload: Uint8Array): Promise<void> {
-  if (socket.write(payload)) {
-    return Promise.resolve();
-  }
-
-  return new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      socket.off("drain", onDrain);
-      socket.off("error", onError);
-    };
-    const onDrain = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
-
-    socket.once("drain", onDrain);
-    socket.once("error", onError);
-  });
 }

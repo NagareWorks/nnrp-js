@@ -8,13 +8,13 @@
   - [x] `@nnrp/browser-client` owns browser client lifecycle and the single `nnrp-wasm-browser` artifact.
   - [x] `@nnrp/core` owns shared types, validation, codecs, errors, endpoint resolution, and provider contracts.
   - [x] Role packages contain no native TCP, QUIC, IPC, or WebSocket dynamic libraries.
-- [ ] Freeze carrier-package ownership in repository policy checks.
-  - [ ] `@nnrp/transport-tcp` owns TCP provider behavior and TCP native artifacts.
-  - [ ] `@nnrp/transport-quic` owns QUIC provider behavior and QUIC native artifacts.
-  - [ ] `@nnrp/transport-ipc` owns IPC provider behavior and IPC native artifacts.
-  - [ ] `@nnrp/transport-websocket` owns native WebSocket provider behavior and browser host-WebSocket binding.
-  - [ ] TCP, QUIC, and IPC packages contain no browser WASM.
-  - [ ] The WebSocket package does not duplicate `nnrp-wasm-browser`.
+- [x] Freeze carrier-package ownership in repository policy checks.
+  - [x] `@nnrp/transport-tcp` owns TCP provider behavior and TCP native artifacts.
+  - [x] `@nnrp/transport-quic` owns QUIC provider behavior and QUIC native artifacts.
+  - [x] `@nnrp/transport-ipc` owns IPC provider behavior and IPC native artifacts.
+  - [x] `@nnrp/transport-websocket` owns native WebSocket provider behavior and browser host-WebSocket binding.
+  - [x] TCP, QUIC, and IPC packages contain no browser WASM.
+  - [x] The WebSocket package does not duplicate `nnrp-wasm-browser`.
 
 ## Runtime Boundary
 

@@ -35,7 +35,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
       transport_scope: "websocket",
       transport_slots: ["websocket"],
       protocol_version: "NNRP/1",
-      abi_version: "1.12.0",
+      abi_version: "1.12.1",
       enabled_features: ["transport-websocket"],
       os: "windows",
       arch: "x86_64",
@@ -48,7 +48,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
     policy,
     "websocket",
     {
-      release: "v1.0.0-preview.4.3",
+      release: "v1.0.0-preview.4.4",
       archive: "websocket.zip",
       archiveSha256: "c".repeat(64),
     },
@@ -86,13 +86,13 @@ Deno.test("browser artifact manifests enforce the frozen browser-only SDK bounda
       exports: [...BROWSER_WASM_REQUIRED_EXPORTS],
     },
     {
-      release: "v1.0.0-preview.4.3",
-      archive: "nnrp-wasm-browser-1.0.0-preview.4.3.zip",
+      release: "v1.0.0-preview.4.4",
+      archive: "nnrp-wasm-browser-1.0.0-preview.4.4.zip",
       archiveSha256: "e".repeat(64),
     },
   );
 
-  assertEquals(manifest.source_release, "v1.0.0-preview.4.3");
+  assertEquals(manifest.source_release, "v1.0.0-preview.4.4");
   assertEquals(manifest.source_archive_sha256, "e".repeat(64));
   assertEquals(manifest.transport_slots, ["websocket"]);
 });
@@ -140,7 +140,7 @@ Deno.test("native artifact manifests reject a mismatched transport scope", () =>
           transport_name: "tcp",
           transport_scope: "quic",
           transport_slots: ["tcp"],
-          abi_version: "1.12.0",
+          abi_version: "1.12.1",
           os: policy.os,
           arch: policy.arch,
           library: policy.library,

@@ -5,6 +5,7 @@ const packages: readonly PackagePolicy[] = [
   { name: "@nnrp/browser-client", directory: "packages/browser-client" },
   { name: "@nnrp/transport-tcp", directory: "packages/transport-tcp" },
   { name: "@nnrp/transport-quic", directory: "packages/transport-quic" },
+  { name: "@nnrp/transport-ipc", directory: "packages/transport-ipc" },
   { name: "@nnrp/transport-websocket", directory: "packages/transport-websocket" },
 ];
 

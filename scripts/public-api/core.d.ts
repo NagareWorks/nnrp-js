@@ -381,6 +381,15 @@ export interface NnrpTransportProbeMetrics {
     readonly medianThroughputBytesPerSecond: bigint;
     readonly medianRttMicroseconds: bigint;
 }
+export type NnrpTransportSecurity = {
+    readonly mode: "client";
+    readonly serverName: string;
+    readonly trustedCertificateDer: Uint8Array;
+} | {
+    readonly mode: "server";
+    readonly certificateDer: Uint8Array;
+    readonly privateKeyPkcs8Der: Uint8Array;
+};
 export interface NnrpTransportCandidate {
     readonly kind: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
@@ -395,22 +404,46 @@ export interface NnrpTransportCandidate {
 }
 export interface NnrpTransportEndpoint {
     readonly endpoint: string | URL;
+    readonly maxPacketBytes?: bigint;
+    readonly timeoutMillis?: number;
+    readonly security?: NnrpTransportSecurity;
+}
+export interface NnrpTransportProbeOptions extends NnrpTransportEndpoint {
+    readonly sampleCount?: number;
+    readonly payloadBytes?: number;
+}
+export interface NnrpTransportReceiveOptions {
+    readonly maxPackets?: number;
+    readonly maxBytes?: bigint;
+    readonly timeoutMillis?: number;
+}
+export interface NnrpTransportAcceptOptions {
+    readonly timeoutMillis?: number;
 }
 export interface NnrpTransportConnection {
     readonly kind: NnrpTransportKind;
     readonly endpoint: string;
     readonly connected: boolean;
-    send(payload: Uint8Array): void | Promise<void>;
+    send(packets: Uint8Array | readonly Uint8Array[]): Promise<void>;
+    receive(options?: NnrpTransportReceiveOptions): Promise<readonly Uint8Array[]>;
     close(): void | Promise<void>;
 }
 export interface NnrpTransportServer {
     readonly kind: NnrpTransportKind;
     readonly endpoint: string;
     readonly listening: boolean;
+    accept(options?: NnrpTransportAcceptOptions): Promise<NnrpTransportConnection>;
     close(): void | Promise<void>;
+}
+export interface NnrpNativeTransportBinding {
+    readonly mode: "deno-ffi" | "node-addon" | "managed-ffi" | "test";
+    probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
+    connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
+    listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer>;
 }
 export interface NnrpTransportProvider extends NnrpTransportProviderObservation {
     readonly endpointSchemes: readonly string[];
+    probe?(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
     connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
     listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }

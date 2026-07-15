@@ -30,6 +30,11 @@ const snapshots: readonly PublicApiSnapshot[] = [
     snapshotPath: "scripts/public-api/transport-quic.d.ts",
   },
   {
+    packageName: "@nnrp/transport-ipc",
+    actualPath: "packages/transport-ipc/dist/index.d.ts",
+    snapshotPath: "scripts/public-api/transport-ipc.d.ts",
+  },
+  {
     packageName: "@nnrp/transport-websocket",
     actualPath: "packages/transport-websocket/dist/index.d.ts",
     snapshotPath: "scripts/public-api/transport-websocket.d.ts",

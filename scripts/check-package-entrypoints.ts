@@ -85,6 +85,12 @@ const entrypoints: readonly PackageEntrypoint[] = [
     forbiddenExports: ["openNativeClient", "openBackendRuntime", "openBrowserRuntime", "NnrpServer"],
   },
   {
+    name: "@nnrp/transport-ipc",
+    path: "../packages/transport-ipc/dist/index.js",
+    exports: ["createIpcTransportProvider"],
+    forbiddenExports: ["openNativeClient", "openBackendRuntime", "openBrowserRuntime", "NnrpServer"],
+  },
+  {
     name: "@nnrp/transport-websocket",
     path: "../packages/transport-websocket/dist/index.js",
     exports: ["createWebSocketTransportProvider"],

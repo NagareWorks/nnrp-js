@@ -5,6 +5,7 @@ import {
   ErrorScope,
   MemoryLocationHint,
   NnrpMessageType,
+  type NnrpNativeTransportBinding,
   NnrpTransportError,
   ObjectReleaseReason,
   OwnershipHint,
@@ -22,7 +23,10 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
     platform: "linux",
     arch: "x64",
     transportPolicy: "force-tcp",
-    transports: [createTcpTransportProvider(), createQuicTransportProvider({ binding: fakeQuicNativeBinding() })],
+    transports: [
+      createTcpTransportProvider({ binding: fakeTransportBinding("tcp") }),
+      createQuicTransportProvider({ binding: fakeQuicNativeBinding() }),
+    ],
   });
   const server = runtime.listen({ endpoint: "0.0.0.0:4433", transportPolicy: "force-quic" });
 
@@ -34,12 +38,29 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
   assertEquals(server.closed, true);
 });
 
+Deno.test("@nnrp/native-server discovers every installed native transport package", async () => {
+  const policies = ["force-tcp", "force-quic", "force-ipc", "force-websocket"] as const;
+
+  for (const transportPolicy of policies) {
+    const runtime = await openBackendRuntime({
+      env: {},
+      platform: "linux",
+      arch: "x64",
+      transportPolicy,
+    });
+    const server = runtime.listen({ endpoint: "127.0.0.1:4433" });
+
+    assertEquals(server.transportPolicy, transportPolicy);
+    await runtime.close();
+  }
+});
+
 Deno.test("@nnrp/native-server selects only installed transport providers", async () => {
   const tcpRuntime = await openBackendRuntime({
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
   });
   const tcpSummary = tcpRuntime.selectTransport({
     peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
@@ -67,7 +88,7 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
   });
 
   const error = assertThrows(
@@ -85,7 +106,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       accept: () => ({ sessionOptions: { sessionId: "server-runtime" } }),
@@ -258,19 +279,35 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
 });
 
 function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
+  return fakeTransportBinding("quic");
+}
+
+function fakeTransportBinding(kind: "tcp" | "quic"): NnrpNativeTransportBinding {
   return {
-    connect: ({ endpoint }) => ({
-      kind: "quic",
-      endpoint: String(endpoint),
-      connected: true,
-      send: () => {},
-      close: () => {},
-    }),
-    listen: ({ endpoint }) => ({
-      kind: "quic",
-      endpoint: String(endpoint),
-      listening: true,
-      close: () => {},
-    }),
+    mode: "test",
+    probe: () =>
+      Promise.resolve({
+        sampleCount: 1,
+        successCount: 1,
+        medianRttMicroseconds: 1n,
+        medianThroughputBytesPerSecond: 1n,
+      }),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+      }),
+    listen: ({ endpoint }) =>
+      Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        listening: true,
+        accept: async () => await fakeTransportBinding(kind).connect({ endpoint }),
+        close: () => {},
+      }),
   };
 }

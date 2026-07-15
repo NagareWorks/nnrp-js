@@ -1241,7 +1241,7 @@ async function discoverBrowserTransportProviders(): Promise<readonly NnrpBrowser
     return [];
   }
 
-  const provider = websocket.createWebSocketTransportProvider();
+  const provider = websocket.createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket });
   if (!isBrowserTransportProvider(provider)) {
     return [];
   }
@@ -1256,7 +1256,9 @@ async function importOptionalTransportModule(specifier: string): Promise<Record<
   }
 }
 
-function isTransportFactory(value: unknown): value is () => NnrpBrowserTransportProvider {
+function isTransportFactory(
+  value: unknown,
+): value is (options?: { readonly WebSocket?: typeof WebSocket }) => NnrpBrowserTransportProvider {
   return typeof value === "function";
 }
 

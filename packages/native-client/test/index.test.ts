@@ -7,6 +7,7 @@ import {
   MemoryLocationHint,
   NnrpCapabilityError,
   NnrpMessageType,
+  type NnrpNativeTransportBinding,
   NnrpTimeoutError,
   NnrpTransportError,
   ObjectReleaseReason,
@@ -24,7 +25,7 @@ Deno.test("@nnrp/native-client opens a client with explicit transport providers"
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     sessionDefaults: { inputProfile: "tensor", metadata: { app: "agent" } },
   });
 
@@ -34,6 +35,23 @@ Deno.test("@nnrp/native-client opens a client with explicit transport providers"
   assertEquals("listen" in client.runtime, false);
   assertEquals(session.sessionId, "native-session-1");
   assertEquals(session.options.metadata, { app: "agent", request: "one" });
+});
+
+Deno.test("@nnrp/native-client discovers every installed native transport package", async () => {
+  const policies = ["force-tcp", "force-quic", "force-ipc", "force-websocket"] as const;
+
+  for (const transportPolicy of policies) {
+    const client = await openNativeClient({
+      endpoint: "127.0.0.1:4433",
+      env: {},
+      platform: "linux",
+      arch: "x64",
+      transportPolicy,
+    });
+
+    assertEquals(client.transportPolicy, transportPolicy);
+    await client.runtime.close();
+  }
 });
 
 Deno.test("@nnrp/native-client closes runtime when client connect fails", async () => {
@@ -81,7 +99,7 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
     platform: "linux",
     arch: "x64",
     transports: [
-      createTcpTransportProvider(),
+      createTcpTransportProvider({ binding: fakeTransportBinding("tcp") }),
       createQuicTransportProvider({ binding: fakeQuicNativeBinding() }),
     ],
   });
@@ -132,7 +150,7 @@ Deno.test("@nnrp/native-client rejects policy mismatches at connect time", async
         env: {},
         platform: "linux",
         arch: "x64",
-        transports: [createTcpTransportProvider()],
+        transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
         transportPolicy: "force-quic",
       }),
     NnrpTransportError,
@@ -150,7 +168,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       submitResultCompact: ({ submit }) => {
@@ -202,7 +220,7 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       sendRuntimeFrame: () => {},
@@ -258,7 +276,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       submitResultCompact: ({ submit }) => {
@@ -312,7 +330,7 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       submitResultCompact: ({ submit }) => {
@@ -364,7 +382,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     env: {},
     platform: "linux",
     arch: "x64",
-    transports: [createTcpTransportProvider()],
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       sendRuntimeFrame: ({ messageType, frameId, payload }) => {
@@ -548,20 +566,36 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
 });
 
 function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
+  return fakeTransportBinding("quic");
+}
+
+function fakeTransportBinding(kind: "tcp" | "quic"): NnrpNativeTransportBinding {
   return {
-    connect: ({ endpoint }) => ({
-      kind: "quic",
-      endpoint: String(endpoint),
-      connected: true,
-      send: () => {},
-      close: () => {},
-    }),
-    listen: ({ endpoint }) => ({
-      kind: "quic",
-      endpoint: String(endpoint),
-      listening: true,
-      close: () => {},
-    }),
+    mode: "test",
+    probe: () =>
+      Promise.resolve({
+        sampleCount: 1,
+        successCount: 1,
+        medianRttMicroseconds: 1n,
+        medianThroughputBytesPerSecond: 1n,
+      }),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+      }),
+    listen: ({ endpoint }) =>
+      Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        listening: true,
+        accept: async () => await fakeTransportBinding(kind).connect({ endpoint }),
+        close: () => {},
+      }),
   };
 }
 

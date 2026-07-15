@@ -5,6 +5,7 @@ const outputDirectories = [
   "packages/browser-client/dist",
   "packages/transport-tcp/dist",
   "packages/transport-quic/dist",
+  "packages/transport-ipc/dist",
   "packages/transport-websocket/dist",
 ] as const;
 

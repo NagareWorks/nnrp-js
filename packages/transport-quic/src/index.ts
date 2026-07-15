@@ -1,17 +1,18 @@
 import {
   type NnrpDiagnostic,
+  type NnrpNativeTransportBinding,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
+  type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportProviderCost,
   type NnrpTransportServer,
 } from "@nnrp/core";
+import { loadPackagedQuicBinding } from "./native.js";
 
-export interface NnrpQuicNativeBinding {
-  connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
-  listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
-}
+export type NnrpQuicNativeBinding = NnrpNativeTransportBinding;
 
 export interface NnrpQuicTransportProviderOptions {
   readonly available?: boolean;
@@ -19,21 +20,27 @@ export interface NnrpQuicTransportProviderOptions {
   readonly preferenceRank?: number;
   readonly maxFrameBytes?: bigint;
   readonly diagnostic?: NnrpDiagnostic;
-  readonly binding?: NnrpQuicNativeBinding;
+  readonly binding?: NnrpNativeTransportBinding;
 }
 
 export interface NnrpQuicTransportProvider extends NnrpTransportProvider {
   readonly kind: "quic";
   readonly endpointSchemes: readonly ["quic"];
-  connect(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
-  listen(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
+  probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
+  connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
+  listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer>;
 }
 
 export function createQuicTransportProvider(
   options: NnrpQuicTransportProviderOptions = {},
 ): NnrpQuicTransportProvider {
-  const diagnostic = options.diagnostic ?? unavailableDiagnostic("NNRP_QUIC_NATIVE_BINDING_MISSING");
-  const hasNative = options.binding !== undefined;
+  const loaded = options.binding !== undefined
+    ? { binding: options.binding }
+    : options.available === false
+    ? {}
+    : loadPackagedQuicBinding();
+  const available = options.available ?? loaded.binding !== undefined;
+  const diagnostic = options.diagnostic ?? loaded.diagnostic ?? unavailableDiagnostic();
   return {
     kind: "quic",
     metadata: {
@@ -43,35 +50,33 @@ export function createQuicTransportProvider(
       limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
       limitations: ["requires-udp", "native-host-only"],
     },
-    localAvailable: options.available ?? hasNative,
-    ...((options.available ?? hasNative) ? {} : { diagnostic }),
+    localAvailable: available,
+    ...(available ? {} : { diagnostic }),
     endpointSchemes: ["quic"],
-    connect: (endpoint) => {
-      if (options.binding?.connect === undefined) {
-        throw unavailable("connect");
-      }
-      return options.binding.connect(endpoint);
-    },
-    listen: (endpoint) => {
-      if (options.binding?.listen === undefined) {
-        throw unavailable("listen");
-      }
-      return options.binding.listen(endpoint);
-    },
+    probe: async (endpoint) => await requireBinding(loaded.binding, diagnostic, "probe").probe(endpoint),
+    connect: async (endpoint) => await requireBinding(loaded.binding, diagnostic, "connect").connect(endpoint),
+    listen: async (endpoint) => await requireBinding(loaded.binding, diagnostic, "listen").listen(endpoint),
   };
 }
 
-function unavailable(operation: "connect" | "listen"): NnrpTransportError {
-  return new NnrpTransportError({
-    ...unavailableDiagnostic("NNRP_QUIC_NATIVE_BINDING_MISSING"),
-    message: `QUIC transport ${operation} requires an injected native QUIC transport binding.`,
-  });
+function requireBinding(
+  binding: NnrpNativeTransportBinding | undefined,
+  diagnostic: NnrpDiagnostic,
+  operation: "probe" | "connect" | "listen",
+): NnrpNativeTransportBinding {
+  if (binding === undefined) {
+    throw new NnrpTransportError({
+      ...diagnostic,
+      message: `QUIC transport ${operation} requires its package-owned native binding.`,
+    });
+  }
+  return binding;
 }
 
-function unavailableDiagnostic(code: string): NnrpDiagnostic {
+function unavailableDiagnostic(): NnrpDiagnostic {
   return {
-    code,
-    message: "QUIC transport requires a native QUIC transport binding.",
+    code: "NNRP_QUIC_NATIVE_BINDING_MISSING",
+    message: "QUIC transport requires its package-owned Rust transport binding.",
     source: "transport",
     retryable: false,
     transport: "quic",
