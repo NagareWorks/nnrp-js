@@ -673,7 +673,6 @@ async function selectClientProvider(
     if (selected !== undefined) return selected;
   }
   if (available.length === 1) return available[0]!;
-  const preferred = policy.startsWith("prefer-") ? policy.slice("prefer-".length) as NnrpTransportKind : undefined;
   const samples = await Promise.all(available.map(async (provider) => {
     try {
       const metrics = await provider.probe({
@@ -688,24 +687,21 @@ async function selectClientProvider(
       return { provider };
     }
   }));
-  samples.sort((left, right) => {
-    if (preferred !== undefined && left.provider.kind !== right.provider.kind) {
-      if (left.provider.kind === preferred) return -1;
-      if (right.provider.kind === preferred) return 1;
-    }
-    if (left.metrics !== undefined && right.metrics === undefined) return -1;
-    if (left.metrics === undefined && right.metrics !== undefined) return 1;
-    if (left.metrics !== undefined && right.metrics !== undefined) {
-      const rtt = Number(left.metrics.medianRttMicroseconds - right.metrics.medianRttMicroseconds);
-      if (rtt !== 0) return rtt;
-      const throughput = Number(
-        right.metrics.medianThroughputBytesPerSecond - left.metrics.medianThroughputBytesPerSecond,
-      );
-      if (throughput !== 0) return throughput;
-    }
-    return left.provider.metadata.preferenceRank - right.provider.metadata.preferenceRank;
-  });
-  const selected = samples[0]?.provider;
+  const transports = available.map((provider) => provider.kind);
+  const manifest = createCapabilityManifest({ buildMode: "backend-native", transports });
+  const probeMetricsByProviderId = Object.fromEntries(
+    samples.flatMap(({ provider, metrics }) => metrics === undefined ? [] : [[provider.metadata.id, metrics]]),
+  );
+  const selection = selectTransport(
+    createTransportCandidates({
+      local: manifest,
+      peer: manifest,
+      providers: available,
+      probeMetricsByProviderId,
+    }),
+    policy,
+  );
+  const selected = available.find((provider) => provider.metadata.id === selection.selected?.provider.id);
   if (selected === undefined) throw bindingNotConnectedError("transportSelection");
   return selected;
 }

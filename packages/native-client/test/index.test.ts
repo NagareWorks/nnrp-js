@@ -162,6 +162,67 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
   assertEquals(summary.rejected, []);
 });
 
+Deno.test("@nnrp/native-client probes every candidate before applying preference tie-breaks", async () => {
+  const probed: string[] = [];
+  const connected: string[] = [];
+  const binding = (
+    kind: "tcp" | "quic",
+    medianThroughputBytesPerSecond: bigint,
+    medianRttMicroseconds: bigint,
+  ): NnrpNativeTransportBinding => ({
+    mode: "test",
+    probe: () => {
+      probed.push(kind);
+      return Promise.resolve({
+        sampleCount: 3,
+        successCount: 3,
+        medianThroughputBytesPerSecond,
+        medianRttMicroseconds,
+      });
+    },
+    connect: ({ endpoint }) => {
+      connected.push(kind);
+      return Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+        [CLIENT_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            openSession: () => Promise.reject(new Error("session open is outside transport selection")),
+            close: () => Promise.resolve(),
+          }),
+      } as NnrpTransportConnection);
+    },
+    listen: ({ endpoint }) =>
+      Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        listening: true,
+        accept: async () =>
+          await binding(kind, medianThroughputBytesPerSecond, medianRttMicroseconds).connect({
+            endpoint,
+          }),
+        close: () => {},
+      }),
+  });
+
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [
+      createTcpTransportProvider({ binding: binding("tcp", 1_000n, 10n) }),
+      createQuicTransportProvider({ binding: binding("quic", 2_000n, 100n) }),
+    ],
+    transportPolicy: "prefer-tcp",
+  });
+
+  assertEquals(probed.sort(), ["quic", "tcp"]);
+  assertEquals(connected, ["quic"]);
+  await client.close();
+});
+
 Deno.test("@nnrp/native-client passes client security to the selected provider role connection", async () => {
   const security = {
     mode: "client",

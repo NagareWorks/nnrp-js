@@ -24,9 +24,9 @@
   - [x] Add `prefer-quic`, `prefer-tcp`, `prefer-ipc`, and `prefer-websocket`.
   - [x] Add `force-quic`, `force-tcp`, `force-ipc`, and `force-websocket`.
   - [x] Remove `score`, `tcp-only`, and `quic-only` policy values.
-- [ ] Implement deterministic selection.
+- [x] Implement deterministic selection.
   - [x] Select the only installed and compatible provider without probing unrelated packages.
-  - [ ] Probe all installed compatible providers for `auto` and `prefer-*`.
+  - [x] Probe all installed compatible providers for `auto` and `prefer-*`.
   - [x] Reject a missing or incompatible forced provider without fallback.
   - [x] Return ordered candidate diagnostics with availability, probe metrics, cost, limit, and rejection reason.
 
