@@ -129,6 +129,7 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
     type: "cache-reference",
     messageType: NnrpMessageType.CacheReference,
     metadata: {
+      cacheNamespace: 5,
       cacheKeyHi: 6n,
       cacheKeyLo: 7n,
       profileId: 8,
@@ -145,6 +146,7 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
     type: "cache-miss",
     messageType: NnrpMessageType.CacheMiss,
     metadata: {
+      cacheNamespace: 5,
       cacheKeyHi: 6n,
       cacheKeyLo: 7n,
       missReason: CacheMissReason.NotFound,
@@ -159,8 +161,8 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
     metadata: {
       invalidateScope: 1,
       cacheNamespace: 2,
-      cacheKeyHi: 3,
-      cacheKeyLo: 4,
+      cacheKeyHi: 0n,
+      cacheKeyLo: 0n,
       reasonCode: 5,
     },
     sessionId,

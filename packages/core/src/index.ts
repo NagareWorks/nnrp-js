@@ -183,6 +183,7 @@ export interface ObjectDeltaMetadata {
 }
 
 export interface CacheReferenceMetadata {
+  readonly cacheNamespace: number;
   readonly cacheKeyHi: bigint;
   readonly cacheKeyLo: bigint;
   readonly profileId: number;
@@ -195,6 +196,7 @@ export interface CacheReferenceMetadata {
 }
 
 export interface CacheMissMetadata {
+  readonly cacheNamespace: number;
   readonly cacheKeyHi: bigint;
   readonly cacheKeyLo: bigint;
   readonly missReason: CacheMissReason;
@@ -218,8 +220,8 @@ export interface DecodedRuntimeObjectMetadata {
 export interface CacheInvalidateMetadata {
   readonly invalidateScope: number;
   readonly cacheNamespace: number;
-  readonly cacheKeyHi: number;
-  readonly cacheKeyLo: number;
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
   readonly reasonCode: number;
 }
 
@@ -1127,13 +1129,13 @@ export function decodeRuntimeObjectMetadata(
 
 export function encodeCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): Uint8Array {
   validateCacheInvalidateMetadata(metadata);
-  const encoded = new Uint8Array(20);
+  const encoded = new Uint8Array(32);
   const view = new DataView(encoded.buffer);
   view.setUint32(0, metadata.invalidateScope, true);
   view.setUint32(4, metadata.cacheNamespace, true);
-  view.setUint32(8, metadata.cacheKeyHi, true);
-  view.setUint32(12, metadata.cacheKeyLo, true);
-  view.setUint32(16, metadata.reasonCode, true);
+  view.setBigUint64(8, metadata.cacheKeyHi, true);
+  view.setBigUint64(16, metadata.cacheKeyLo, true);
+  view.setUint32(24, metadata.reasonCode, true);
   return encoded;
 }
 
@@ -1144,20 +1146,26 @@ export function decodeCacheInvalidateMetadata(payload: Uint8Array): CacheInvalid
       "Cache invalidate metadata must be a Uint8Array.",
     );
   }
-  if (payload.byteLength !== 20) {
+  if (payload.byteLength !== 32) {
     throw runtimeObjectError(
       "NNRP_CACHE_INVALIDATE_LENGTH_INVALID",
-      `Cache invalidate metadata requires exactly 20 bytes but received ${payload.byteLength}.`,
+      `Cache invalidate metadata requires exactly 32 bytes but received ${payload.byteLength}.`,
     );
   }
 
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  if (view.getUint32(28, true) !== 0) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_RESERVED_NONZERO",
+      "Cache invalidate reserved field must be zero.",
+    );
+  }
   const metadata: CacheInvalidateMetadata = {
     invalidateScope: view.getUint32(0, true),
     cacheNamespace: view.getUint32(4, true),
-    cacheKeyHi: view.getUint32(8, true),
-    cacheKeyLo: view.getUint32(12, true),
-    reasonCode: view.getUint32(16, true),
+    cacheKeyHi: view.getBigUint64(8, true),
+    cacheKeyLo: view.getBigUint64(16, true),
+    reasonCode: view.getUint32(24, true),
   };
   validateCacheInvalidateMetadata(metadata);
   return metadata;
@@ -2265,34 +2273,37 @@ const OBJECT_DELTA_LAYOUT: RuntimeObjectLayout = {
 
 const CACHE_REFERENCE_LAYOUT: RuntimeObjectLayout = {
   name: "CacheReferenceMetadata",
-  length: 48,
+  length: 56,
   fields: [
-    { name: "cacheKeyHi", offset: 0, kind: "u64" },
-    { name: "cacheKeyLo", offset: 8, kind: "u64" },
-    { name: "profileId", offset: 16, kind: "u16" },
-    { name: "reuseScope", offset: 18, kind: "u16", enumField: "cacheReuseScope" },
-    { name: "leaseId", offset: 20, kind: "u64" },
-    { name: "producerTraceId", offset: 28, kind: "u64" },
-    { name: "expirationHintMs", offset: 36, kind: "u32" },
-    { name: "metadataBytes", offset: 40, kind: "u32" },
-    { name: "flags", offset: 44, kind: "u32" },
+    { name: "cacheNamespace", offset: 0, kind: "u32" },
+    { name: "profileId", offset: 4, kind: "u16" },
+    { name: "reuseScope", offset: 6, kind: "u16", enumField: "cacheReuseScope" },
+    { name: "cacheKeyHi", offset: 8, kind: "u64" },
+    { name: "cacheKeyLo", offset: 16, kind: "u64" },
+    { name: "leaseId", offset: 24, kind: "u64" },
+    { name: "producerTraceId", offset: 32, kind: "u64" },
+    { name: "expirationHintMs", offset: 40, kind: "u32" },
+    { name: "metadataBytes", offset: 44, kind: "u32" },
+    { name: "flags", offset: 48, kind: "u32" },
   ],
   flagMask: 0x03,
   tailFields: ["metadataBytes"],
+  reserved: [{ offset: 52, kind: "u32" }],
 };
 
 const CACHE_MISS_LAYOUT: RuntimeObjectLayout = {
   name: "CacheMissMetadata",
   length: 32,
   fields: [
-    { name: "cacheKeyHi", offset: 0, kind: "u64" },
-    { name: "cacheKeyLo", offset: 8, kind: "u64" },
-    { name: "missReason", offset: 16, kind: "u16", enumField: "cacheMissReason" },
-    { name: "profileId", offset: 18, kind: "u16" },
-    { name: "diagnosticBytes", offset: 20, kind: "u32" },
+    { name: "cacheNamespace", offset: 0, kind: "u32" },
+    { name: "profileId", offset: 4, kind: "u16" },
+    { name: "missReason", offset: 6, kind: "u16", enumField: "cacheMissReason" },
+    { name: "cacheKeyHi", offset: 8, kind: "u64" },
+    { name: "cacheKeyLo", offset: 16, kind: "u64" },
+    { name: "diagnosticBytes", offset: 24, kind: "u32" },
   ],
   tailFields: ["diagnosticBytes"],
-  reserved: [{ offset: 24, kind: "u64" }],
+  reserved: [{ offset: 28, kind: "u32" }],
 };
 
 const CONTROL_REQUEST_LAYOUT: RuntimeControlLayout = {
@@ -2681,13 +2692,33 @@ function validateCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): voi
       `CacheInvalidateMetadata requires fields: ${expectedFields.join(", ")}.`,
     );
   }
-  for (const field of expectedFields) {
-    validateRuntimeObjectInteger({ name: field, offset: 0, kind: "u32" }, values[field]);
-  }
+  validateRuntimeObjectInteger({ name: "invalidateScope", offset: 0, kind: "u32" }, values.invalidateScope);
+  validateRuntimeObjectInteger({ name: "cacheNamespace", offset: 4, kind: "u32" }, values.cacheNamespace);
+  validateRuntimeObjectInteger({ name: "cacheKeyHi", offset: 8, kind: "u64" }, values.cacheKeyHi);
+  validateRuntimeObjectInteger({ name: "cacheKeyLo", offset: 16, kind: "u64" }, values.cacheKeyLo);
+  validateRuntimeObjectInteger({ name: "reasonCode", offset: 24, kind: "u32" }, values.reasonCode);
   if ((values.invalidateScope as number) > 3) {
     throw runtimeObjectError(
       "NNRP_CACHE_INVALIDATE_SCOPE_INVALID",
       "invalidateScope must be WholeSession, Namespace, ObjectKind, or ObjectKey.",
+    );
+  }
+
+  const scope = values.invalidateScope as number;
+  const cacheNamespace = values.cacheNamespace as number;
+  const cacheKeyHi = values.cacheKeyHi as bigint;
+  const cacheKeyLo = values.cacheKeyLo as bigint;
+  const identityMatchesScope = scope === 0
+    ? cacheNamespace === 0 && cacheKeyHi === 0n && cacheKeyLo === 0n
+    : scope === 1
+    ? cacheKeyHi === 0n && cacheKeyLo === 0n
+    : scope === 2
+    ? cacheKeyHi <= 0xffff_ffffn && cacheKeyLo === 0n
+    : true;
+  if (!identityMatchesScope) {
+    throw runtimeObjectError(
+      "NNRP_CACHE_INVALIDATE_IDENTITY_INVALID",
+      "Cache invalidate identity fields must match invalidateScope.",
     );
   }
 }

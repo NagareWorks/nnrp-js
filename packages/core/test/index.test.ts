@@ -762,6 +762,7 @@ const RUNTIME_OBJECT_CODEC_CASES: readonly {
   {
     messageTypes: [NnrpMessageType.CacheReference],
     metadata: {
+      cacheNamespace: 16,
       cacheKeyHi: 17n,
       cacheKeyLo: 18n,
       profileId: 19,
@@ -772,12 +773,13 @@ const RUNTIME_OBJECT_CODEC_CASES: readonly {
       metadataBytes: 1,
       flags: 0x03,
     },
-    fixedLength: 48,
+    fixedLength: 56,
     tail: new Uint8Array([0x5b]),
   },
   {
     messageTypes: [NnrpMessageType.CacheMiss],
     metadata: {
+      cacheNamespace: 22,
       cacheKeyHi: 23n,
       cacheKeyLo: 24n,
       missReason: CacheMissReason.NotFound,
@@ -841,9 +843,15 @@ Deno.test("@nnrp/core uses frozen little-endian runtime object offsets", () => {
     RUNTIME_OBJECT_CODEC_CASES[4].tail,
   );
   const cacheView = new DataView(cacheReference.buffer);
-  assertEquals(cacheView.getBigUint64(20, true), 20n);
-  assertEquals(cacheView.getBigUint64(28, true), 21n);
-  assertEquals(cacheView.getUint32(44, true), 0x03);
+  assertEquals(cacheView.getUint32(0, true), 16);
+  assertEquals(cacheView.getUint16(4, true), 19);
+  assertEquals(cacheView.getUint16(6, true), CacheReuseScope.Session);
+  assertEquals(cacheView.getBigUint64(8, true), 17n);
+  assertEquals(cacheView.getBigUint64(16, true), 18n);
+  assertEquals(cacheView.getBigUint64(24, true), 20n);
+  assertEquals(cacheView.getBigUint64(32, true), 21n);
+  assertEquals(cacheView.getUint32(48, true), 0x03);
+  assertEquals(cacheView.getUint32(52, true), 0);
 });
 
 Deno.test("@nnrp/core enforces runtime object metadata and tail contracts", () => {
@@ -979,10 +987,10 @@ Deno.test("@nnrp/core keeps public runtime object and cache descriptors structur
     tail: RUNTIME_OBJECT_CODEC_CASES[0].tail,
   };
   const cacheInvalidate: CacheInvalidateMetadata = {
-    invalidateScope: 1,
+    invalidateScope: 3,
     cacheNamespace: 2,
-    cacheKeyHi: 3,
-    cacheKeyLo: 4,
+    cacheKeyHi: 3n,
+    cacheKeyLo: 4n,
     reasonCode: 5,
   };
   const publicValues: readonly unknown[] = [
@@ -1024,18 +1032,19 @@ Deno.test("@nnrp/core encodes the frozen baseline cache invalidation metadata", 
   const metadata: CacheInvalidateMetadata = {
     invalidateScope: 3,
     cacheNamespace: 0x0102_0304,
-    cacheKeyHi: 0x1112_1314,
-    cacheKeyLo: 0x2122_2324,
+    cacheKeyHi: 0x1112_1314_1516_1718n,
+    cacheKeyLo: 0x2122_2324_2526_2728n,
     reasonCode: 0x3132_3334,
   };
   const encoded = encodeCacheInvalidateMetadata(metadata);
   const view = new DataView(encoded.buffer);
-  assertEquals(encoded.byteLength, 20);
+  assertEquals(encoded.byteLength, 32);
   assertEquals(view.getUint32(0, true), 3);
   assertEquals(view.getUint32(4, true), 0x0102_0304);
-  assertEquals(view.getUint32(8, true), 0x1112_1314);
-  assertEquals(view.getUint32(12, true), 0x2122_2324);
-  assertEquals(view.getUint32(16, true), 0x3132_3334);
+  assertEquals(view.getBigUint64(8, true), 0x1112_1314_1516_1718n);
+  assertEquals(view.getBigUint64(16, true), 0x2122_2324_2526_2728n);
+  assertEquals(view.getUint32(24, true), 0x3132_3334);
+  assertEquals(view.getUint32(28, true), 0);
   assertEquals(decodeCacheInvalidateMetadata(encoded), metadata);
 
   assertRuntimeObjectError(
@@ -1043,8 +1052,26 @@ Deno.test("@nnrp/core encodes the frozen baseline cache invalidation metadata", 
     "NNRP_CACHE_INVALIDATE_SCOPE_INVALID",
   );
   assertRuntimeObjectError(
-    () => decodeCacheInvalidateMetadata(new Uint8Array(19)),
+    () => decodeCacheInvalidateMetadata(new Uint8Array(31)),
     "NNRP_CACHE_INVALIDATE_LENGTH_INVALID",
+  );
+
+  const nonZeroReserved = encoded.slice();
+  nonZeroReserved[28] = 1;
+  assertRuntimeObjectError(
+    () => decodeCacheInvalidateMetadata(nonZeroReserved),
+    "NNRP_CACHE_INVALIDATE_RESERVED_NONZERO",
+  );
+  assertRuntimeObjectError(
+    () =>
+      encodeCacheInvalidateMetadata({
+        invalidateScope: 1,
+        cacheNamespace: 1,
+        cacheKeyHi: 1n,
+        cacheKeyLo: 0n,
+        reasonCode: 0,
+      }),
+    "NNRP_CACHE_INVALIDATE_IDENTITY_INVALID",
   );
 });
 

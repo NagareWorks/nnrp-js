@@ -274,8 +274,8 @@ Deno.test("@nnrp/native-server decodes ordered control, object, and cache role e
       encodeCacheInvalidateMetadata({
         invalidateScope: 1,
         cacheNamespace: 2,
-        cacheKeyHi: 3,
-        cacheKeyLo: 4,
+        cacheKeyHi: 0n,
+        cacheKeyLo: 0n,
         reasonCode: 5,
       }),
     ),
@@ -521,6 +521,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   await session.patchObject(delta, one);
   await session.sendObjectDelta(delta, one);
   await session.referenceCache({
+    cacheNamespace: 0,
     cacheKeyHi: 1n,
     cacheKeyLo: 2n,
     profileId: 3,
@@ -532,6 +533,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     flags: 0,
   }, one);
   await session.reportCacheMiss({
+    cacheNamespace: 0,
     cacheKeyHi: 1n,
     cacheKeyLo: 2n,
     missReason: CacheMissReason.NotFound,
@@ -541,8 +543,8 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   await session.invalidateCache({
     invalidateScope: 1,
     cacheNamespace: 2,
-    cacheKeyHi: 3,
-    cacheKeyLo: 4,
+    cacheKeyHi: 0n,
+    cacheKeyLo: 0n,
     reasonCode: 5,
   });
 

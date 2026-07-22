@@ -1005,6 +1005,7 @@ Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime A
   await session.patchObject(delta, one);
   await session.sendObjectDelta(delta, one);
   await session.referenceCache({
+    cacheNamespace: 0,
     cacheKeyHi: 1n,
     cacheKeyLo: 2n,
     profileId: 3,
@@ -1016,6 +1017,7 @@ Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime A
     flags: 0,
   }, one);
   await session.reportCacheMiss({
+    cacheNamespace: 0,
     cacheKeyHi: 1n,
     cacheKeyLo: 2n,
     missReason: CacheMissReason.NotFound,
@@ -1025,8 +1027,8 @@ Deno.test("@nnrp/browser-client exposes the frozen high-level Preview4 runtime A
   await session.invalidateCache({
     invalidateScope: 1,
     cacheNamespace: 2,
-    cacheKeyHi: 3,
-    cacheKeyLo: 4,
+    cacheKeyHi: 0n,
+    cacheKeyLo: 0n,
     reasonCode: 5,
   });
 

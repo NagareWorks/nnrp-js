@@ -169,6 +169,7 @@ export interface ObjectDeltaMetadata {
     readonly metadataBytes: number;
 }
 export interface CacheReferenceMetadata {
+    readonly cacheNamespace: number;
     readonly cacheKeyHi: bigint;
     readonly cacheKeyLo: bigint;
     readonly profileId: number;
@@ -180,6 +181,7 @@ export interface CacheReferenceMetadata {
     readonly flags: number;
 }
 export interface CacheMissMetadata {
+    readonly cacheNamespace: number;
     readonly cacheKeyHi: bigint;
     readonly cacheKeyLo: bigint;
     readonly missReason: CacheMissReason;
@@ -194,8 +196,8 @@ export interface DecodedRuntimeObjectMetadata {
 export interface CacheInvalidateMetadata {
     readonly invalidateScope: number;
     readonly cacheNamespace: number;
-    readonly cacheKeyHi: number;
-    readonly cacheKeyLo: number;
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
     readonly reasonCode: number;
 }
 interface NnrpRuntimeFrameEventBase<TType extends string, TMessageType extends NnrpMessageType, TMetadata> {
