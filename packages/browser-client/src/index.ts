@@ -184,6 +184,7 @@ export interface NnrpWasmArtifactOptions {
 export interface NnrpWasmArtifactManifest {
   readonly package: "nnrp-wasm";
   readonly wasm: string;
+  readonly glue: string;
   readonly types: string;
   readonly owner?: string;
   readonly downstream_wrapper?: string;
@@ -193,6 +194,7 @@ export interface NnrpWasmArtifactManifest {
 export interface NnrpResolvedWasmArtifact {
   readonly manifest: NnrpWasmArtifactManifest;
   readonly moduleUrl: string;
+  readonly glueUrl: string;
   readonly typesUrl: string;
   readonly requiredExports: readonly string[];
 }
@@ -1112,7 +1114,7 @@ export function createWasmRuntimeBinding(options: NnrpWasmBindingOptions = {}): 
 
   return {
     manifest: createBrowserWasmManifest(["cache", "schema", "flow.update", "result.hint"]),
-    moduleUrl: normalizeModuleUrl(options.moduleUrl ?? artifact?.moduleUrl ?? "./nnrp_wasm.wasm"),
+    moduleUrl: normalizeModuleUrl(options.moduleUrl ?? artifact?.moduleUrl ?? "./wasm/nnrp_wasm_bg.wasm"),
     ...(options.module === undefined ? {} : { module: options.module }),
     ...(artifact === undefined ? {} : { artifact }),
     transportProviders: [...(options.transportProviders ?? [])],
@@ -1127,6 +1129,7 @@ export function resolveWasmArtifact(options: NnrpWasmArtifactOptions): NnrpResol
   return {
     manifest: options.manifest,
     moduleUrl: resolveArtifactUrl(options.manifest.wasm, baseUrl),
+    glueUrl: resolveArtifactUrl(options.manifest.glue, baseUrl),
     typesUrl: resolveArtifactUrl(options.manifest.types, baseUrl),
     requiredExports: requiredWasmExports(options.requiredExports),
   };
@@ -1200,6 +1203,7 @@ function isWasmArtifactManifest(value: unknown): value is NnrpWasmArtifactManife
   const manifest = value as Record<string, unknown>;
   return manifest.package === "nnrp-wasm" &&
     isNonEmptyString(manifest.wasm) &&
+    isNonEmptyString(manifest.glue) &&
     isNonEmptyString(manifest.types) &&
     (manifest.owner === undefined || typeof manifest.owner === "string") &&
     (manifest.downstream_wrapper === undefined || typeof manifest.downstream_wrapper === "string") &&
@@ -1216,6 +1220,7 @@ function requiredWasmExports(requiredExports: readonly string[] | undefined): re
     ...new Set([
       "nnrp_wasm_protocol_major",
       "nnrp_wasm_wire_format",
+      "openBrowserClientRole",
       "selectTransportWithProbeJson",
       "summarizeProviderProbeJson",
       ...(requiredExports ?? []),

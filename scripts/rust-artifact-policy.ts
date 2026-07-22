@@ -29,7 +29,8 @@ export interface NormalizedBrowserArtifactManifest extends Record<string, unknow
   readonly transport_slots: readonly ["websocket"];
   readonly protocol_version: "NNRP/1";
   readonly abi_version: string;
-  readonly wasm: "nnrp_wasm.wasm";
+  readonly wasm: "nnrp_wasm_bg.wasm";
+  readonly glue: "nnrp_wasm.js";
   readonly types: "nnrp_wasm.d.ts";
   readonly exports: readonly string[];
   readonly source_release: string;
@@ -40,6 +41,7 @@ export interface NormalizedBrowserArtifactManifest extends Record<string, unknow
 export const BROWSER_WASM_REQUIRED_EXPORTS = [
   "nnrp_wasm_protocol_major",
   "nnrp_wasm_wire_format",
+  "openBrowserClientRole",
   "selectTransportWithProbeJson",
   "summarizeProviderProbeJson",
   "encodeWebSocketBinaryFrameJson",
@@ -160,7 +162,8 @@ export function normalizeBrowserArtifactManifest(
     source.archive,
     "enabled_features",
   );
-  assertEqual(value.wasm, "nnrp_wasm.wasm", source.archive, "wasm");
+  assertEqual(value.wasm, "nnrp_wasm_bg.wasm", source.archive, "wasm");
+  assertEqual(value.glue, "nnrp_wasm.js", source.archive, "glue");
   assertEqual(value.types, "nnrp_wasm.d.ts", source.archive, "types");
   assertEqual(value.owner, "nnrp-rs", source.archive, "owner");
   assertEqual(value.downstream_wrapper, "nnrp-js", source.archive, "downstream_wrapper");
@@ -189,7 +192,8 @@ export function normalizeBrowserArtifactManifest(
     transport_slots: ["websocket"],
     protocol_version: "NNRP/1",
     abi_version: value.abi_version,
-    wasm: "nnrp_wasm.wasm",
+    wasm: "nnrp_wasm_bg.wasm",
+    glue: "nnrp_wasm.js",
     types: "nnrp_wasm.d.ts",
     exports,
     source_release: source.release,

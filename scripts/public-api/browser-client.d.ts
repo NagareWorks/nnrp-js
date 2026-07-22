@@ -101,6 +101,7 @@ export interface NnrpWasmArtifactOptions {
 export interface NnrpWasmArtifactManifest {
     readonly package: "nnrp-wasm";
     readonly wasm: string;
+    readonly glue: string;
     readonly types: string;
     readonly owner?: string;
     readonly downstream_wrapper?: string;
@@ -109,6 +110,7 @@ export interface NnrpWasmArtifactManifest {
 export interface NnrpResolvedWasmArtifact {
     readonly manifest: NnrpWasmArtifactManifest;
     readonly moduleUrl: string;
+    readonly glueUrl: string;
     readonly typesUrl: string;
     readonly requiredExports: readonly string[];
 }

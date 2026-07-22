@@ -154,9 +154,9 @@ async function checkBrowserWasmOwnership(policy: PackagePolicy): Promise<void> {
     throw error;
   }
 
-  if (wasmFiles.length !== 1 || wasmFiles[0] !== "nnrp_wasm.wasm") {
+  if (wasmFiles.length !== 1 || wasmFiles[0] !== "nnrp_wasm_bg.wasm") {
     failures.push(
-      `${policy.name}: expected only the nnrp-wasm-browser binary nnrp_wasm.wasm, found ${
+      `${policy.name}: expected only the nnrp-wasm-browser binary nnrp_wasm_bg.wasm, found ${
         wasmFiles.sort().join(", ") || "none"
       }`,
     );
@@ -168,8 +168,23 @@ async function checkBrowserWasmOwnership(policy: PackagePolicy): Promise<void> {
     if (manifest.artifact !== "nnrp-wasm-browser") {
       failures.push(`${policy.name}: wasm manifest artifact must be nnrp-wasm-browser`);
     }
-    if (manifest.wasm !== "nnrp_wasm.wasm") {
-      failures.push(`${policy.name}: wasm manifest must reference nnrp_wasm.wasm`);
+    if (manifest.wasm !== "nnrp_wasm_bg.wasm") {
+      failures.push(`${policy.name}: wasm manifest must reference nnrp_wasm_bg.wasm`);
+    }
+    if (manifest.glue !== "nnrp_wasm.js") {
+      failures.push(`${policy.name}: wasm manifest must reference nnrp_wasm.js glue`);
+    }
+    try {
+      const glue = await Deno.stat(`${wasmDirectory}/nnrp_wasm.js`);
+      if (!glue.isFile) {
+        failures.push(`${policy.name}: wasm/nnrp_wasm.js must be a file`);
+      }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        failures.push(`${policy.name}: missing wasm/nnrp_wasm.js`);
+      } else {
+        throw error;
+      }
     }
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {

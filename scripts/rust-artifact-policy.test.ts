@@ -48,7 +48,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
     policy,
     "websocket",
     {
-      release: "v1.0.0-preview.4.9",
+      release: "v1.0.0-preview.4.10",
       archive: "websocket.zip",
       archiveSha256: "c".repeat(64),
     },
@@ -79,20 +79,21 @@ Deno.test("browser artifact manifests enforce the frozen browser-only SDK bounda
         limits: { max_frame_bytes: "67108864" },
         limitations: ["requires-tcp", "browser-host-only"],
       },
-      wasm: "nnrp_wasm.wasm",
+      wasm: "nnrp_wasm_bg.wasm",
+      glue: "nnrp_wasm.js",
       types: "nnrp_wasm.d.ts",
       owner: "nnrp-rs",
       downstream_wrapper: "nnrp-js",
       exports: [...BROWSER_WASM_REQUIRED_EXPORTS],
     },
     {
-      release: "v1.0.0-preview.4.9",
-      archive: "nnrp-wasm-browser-1.0.0-preview.4.9.zip",
+      release: "v1.0.0-preview.4.10",
+      archive: "nnrp-wasm-browser-1.0.0-preview.4.10.zip",
       archiveSha256: "e".repeat(64),
     },
   );
 
-  assertEquals(manifest.source_release, "v1.0.0-preview.4.9");
+  assertEquals(manifest.source_release, "v1.0.0-preview.4.10");
   assertEquals(manifest.source_archive_sha256, "e".repeat(64));
   assertEquals(manifest.transport_slots, ["websocket"]);
 });
@@ -117,7 +118,8 @@ Deno.test("browser artifact manifests reject stale scoring exports", () => {
             limits: { max_frame_bytes: "67108864" },
             limitations: ["requires-tcp", "browser-host-only"],
           },
-          wasm: "nnrp_wasm.wasm",
+          wasm: "nnrp_wasm_bg.wasm",
+          glue: "nnrp_wasm.js",
           types: "nnrp_wasm.d.ts",
           owner: "nnrp-rs",
           downstream_wrapper: "nnrp-js",

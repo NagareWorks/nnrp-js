@@ -8,7 +8,7 @@ import {
   parseReleaseChecksums,
 } from "./rust-artifact-policy.ts";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.9";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.10";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
@@ -138,9 +138,13 @@ async function prepareBrowserWasmArtifact(
   });
   await validateBrowserWasmBinary(`${extractDir}/${manifest.wasm}`, assetName);
   const declarations = await Deno.readTextFile(`${extractDir}/${manifest.types}`);
+  const glue = await Deno.readTextFile(`${extractDir}/${manifest.glue}`);
   for (const requiredExport of BROWSER_WASM_REQUIRED_EXPORTS) {
     if (!declarations.includes(requiredExport)) {
       throw new Error(`${assetName}: declarations are missing ${requiredExport}`);
+    }
+    if (!glue.includes(requiredExport)) {
+      throw new Error(`${assetName}: JavaScript glue is missing ${requiredExport}`);
     }
   }
 
@@ -150,6 +154,7 @@ async function prepareBrowserWasmArtifact(
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
   await copyFile(`${extractDir}/${manifest.wasm}`, `${browserWasmPackageDir}/wasm/${manifest.wasm}`);
+  await copyFile(`${extractDir}/${manifest.glue}`, `${browserWasmPackageDir}/wasm/${manifest.glue}`);
   await copyFile(`${extractDir}/${manifest.types}`, `${browserWasmPackageDir}/wasm/${manifest.types}`);
 }
 
@@ -159,7 +164,7 @@ async function validateBrowserWasmBinary(path: string, assetName: string): Promi
     binary.length < 8 || binary[0] !== 0x00 || binary[1] !== 0x61 || binary[2] !== 0x73 || binary[3] !== 0x6d ||
     binary[4] !== 0x01 || binary[5] !== 0x00 || binary[6] !== 0x00 || binary[7] !== 0x00
   ) {
-    throw new Error(`${assetName}: nnrp_wasm.wasm is not a WebAssembly binary`);
+    throw new Error(`${assetName}: browser WASM payload is not a WebAssembly binary`);
   }
 }
 

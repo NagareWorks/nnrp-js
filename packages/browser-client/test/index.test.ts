@@ -32,7 +32,7 @@ import {
 Deno.test("@nnrp/browser-client creates a default wasm binding descriptor", () => {
   const binding = createWasmRuntimeBinding();
 
-  assertEquals(binding.moduleUrl, "./nnrp_wasm.wasm");
+  assertEquals(binding.moduleUrl, "./wasm/nnrp_wasm_bg.wasm");
   assertEquals(binding.manifest.capabilities, [
     "client.session",
     "wasm.loader",
@@ -63,11 +63,13 @@ Deno.test("@nnrp/browser-client resolves rs primitive artifact manifests", () =>
     baseUrl: "https://cdn.example.test/nnrp",
   });
 
-  assertEquals(artifact.moduleUrl, "https://cdn.example.test/nnrp/nnrp_wasm.wasm");
+  assertEquals(artifact.moduleUrl, "https://cdn.example.test/nnrp/nnrp_wasm_bg.wasm");
+  assertEquals(artifact.glueUrl, "https://cdn.example.test/nnrp/nnrp_wasm.js");
   assertEquals(artifact.typesUrl, "https://cdn.example.test/nnrp/nnrp_wasm.d.ts");
   assertEquals(artifact.requiredExports, [
     "nnrp_wasm_protocol_major",
     "nnrp_wasm_wire_format",
+    "openBrowserClientRole",
     "selectTransportWithProbeJson",
     "summarizeProviderProbeJson",
   ]);
@@ -95,6 +97,11 @@ Deno.test("@nnrp/browser-client rejects missing artifact asset paths", () => {
     "Invalid WASM artifact manifest",
   );
   assertThrows(
+    () => validateWasmArtifactManifest({ ...wasmManifest(), glue: "" }),
+    NnrpCapabilityError,
+    "Invalid WASM artifact manifest",
+  );
+  assertThrows(
     () => createWasmRuntimeBinding({ artifact: { manifest: { ...wasmManifest(), wasm: "" } } }),
     NnrpCapabilityError,
     "Invalid WASM artifact manifest",
@@ -116,7 +123,8 @@ Deno.test("@nnrp/browser-client uses artifact URLs unless a caller injects a mod
     },
   });
 
-  assertEquals(artifactBinding.moduleUrl, "/assets/nnrp/nnrp_wasm.wasm");
+  assertEquals(artifactBinding.moduleUrl, "/assets/nnrp/nnrp_wasm_bg.wasm");
+  assertEquals(artifactBinding.artifact?.glueUrl, "/assets/nnrp/nnrp_wasm.js");
   assertEquals(artifactBinding.artifact?.manifest.package, "nnrp-wasm");
   assertEquals(explicitBinding.moduleUrl, "/custom/nnrp.wasm");
 });
@@ -131,7 +139,7 @@ Deno.test("@nnrp/browser-client resolves absolute and default artifact URLs", ()
   });
 
   assertEquals(absolute.moduleUrl, "https://cdn.example.test/nnrp_wasm.wasm");
-  assertEquals(defaultBase.moduleUrl, "nnrp_wasm.wasm");
+  assertEquals(defaultBase.moduleUrl, "nnrp_wasm_bg.wasm");
 });
 
 Deno.test("@nnrp/browser-client preserves injected browser transport providers", () => {
@@ -199,7 +207,8 @@ Deno.test("@nnrp/browser-client validates runtime readiness before connect", () 
     ...createWasmRuntimeBinding(),
     artifact: {
       manifest: wasmManifest(),
-      moduleUrl: "nnrp_wasm.wasm",
+      moduleUrl: "nnrp_wasm_bg.wasm",
+      glueUrl: "nnrp_wasm.js",
       typesUrl: "nnrp_wasm.d.ts",
       requiredExports: ["missing_export"],
     },
@@ -1367,13 +1376,15 @@ class TrackingAbortSignal {
 function wasmManifest(): NnrpWasmArtifactManifest {
   return {
     package: "nnrp-wasm",
-    wasm: "nnrp_wasm.wasm",
+    wasm: "nnrp_wasm_bg.wasm",
+    glue: "nnrp_wasm.js",
     types: "nnrp_wasm.d.ts",
     owner: "nnrp-rs",
     downstream_wrapper: "nnrp-js",
     exports: [
       "nnrp_wasm_protocol_major",
       "nnrp_wasm_wire_format",
+      "openBrowserClientRole",
       "selectTransportWithProbeJson",
       "summarizeProviderProbeJson",
     ],

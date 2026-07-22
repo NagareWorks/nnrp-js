@@ -15,7 +15,7 @@ import { openBrowserRuntime } from "@nnrp/browser-client";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
 const runtime = await openBrowserRuntime({
-  moduleUrl: "/assets/nnrp_wasm.wasm",
+  moduleUrl: "/assets/nnrp_wasm_bg.wasm",
   transportProviders: [createWebSocketTransportProvider()],
 });
 
