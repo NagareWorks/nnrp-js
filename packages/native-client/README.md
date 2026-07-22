@@ -15,13 +15,13 @@ import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const client = await openNativeClient({
   endpoint: "127.0.0.1:4433",
-  nativeLibrary: { artifactDir: "./native" },
   transports: [createTcpTransportProvider()],
   transportPolicy: "score",
 });
 
 const session = client.openSession({ inputProfile: "tool_delta" });
 await session.submitNoWait({
+  operationId: 1n,
   frameId: 1,
   payload: new TextEncoder().encode("summarize repository status"),
   inputProfile: "tool_delta",

@@ -49,3 +49,21 @@
 - [x] AbortSignal tests cover pre-dispatch, in-flight, terminal, and listener-cleanup cases.
 - [x] Type tests prove native and browser client session method parity.
 - [x] Public API snapshots match the frozen JavaScript client page in `nnrp-doc`.
+
+## Native Carrier-Backed Role Integration
+
+- [ ] Make `openNativeClient` establish a carrier-backed role connection.
+  - [x] Resolve one provider by the frozen forced/auto/probe policy.
+  - [x] Open the provider-local endpoint through the selected provider artifact.
+  - [x] Transfer the native carrier to the role runtime in the same loaded library.
+  - [ ] Perform the real session handshake before returning a usable session.
+  - [x] Keep transfer handles private to provider and role packages.
+- [x] Send and receive every native client operation over the adopted carrier.
+  - [x] Submit encoded metadata/body without local result echo.
+  - [x] Send control/object/cache frames through one coarse Rust call each.
+  - [x] Decode partial, terminal, flow, control, object, and cache events from Rust-owned reads.
+  - [x] Close the carrier exactly once through the role owner.
+- [x] Add real client/server loopback evidence for all native provider packages.
+  - [x] Assert role traffic reaches a peer process or peer runtime instance.
+  - [x] Assert a standalone provider loopback cannot satisfy role E2E by itself.
+  - [x] Assert a provider without role adoption symbols is rejected before connect.

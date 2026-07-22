@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   CacheMissReason,
   CacheReuseScope,
@@ -9,32 +9,56 @@ import {
   NnrpMessageType,
   type NnrpNativeTransportBinding,
   NnrpTimeoutError,
+  type NnrpTransportConnection,
+  type NnrpTransportEndpoint,
   NnrpTransportError,
   ObjectReleaseReason,
   OwnershipHint,
   RuntimeObjectKind,
   RuntimeRole,
 } from "@nnrp/core";
-import { NnrpNativeBindingUnavailableError, openNativeClient } from "../src/index.ts";
+import {
+  NnrpNativeBindingUnavailableError,
+  type NnrpNativeRuntimeCapabilities,
+  openNativeClient,
+  validateNativeRuntimeCapabilities,
+} from "../src/index.ts";
 import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
+const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
+
+Deno.test("@nnrp/native-client requires the exact Preview4 native ABI", () => {
+  const capabilities = preview4RuntimeCapabilities();
+  validateNativeRuntimeCapabilities(capabilities);
+  validateNativeRuntimeCapabilities({ ...capabilities, transportSlots: 0 });
+
+  const error = assertThrows(
+    () => validateNativeRuntimeCapabilities({ ...capabilities, abiMajor: 1, abiMinor: 12, abiPatch: 1 }),
+    NnrpCapabilityError,
+  );
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_ABI_MISMATCH");
+});
+
 Deno.test("@nnrp/native-client opens a client with explicit transport providers", async () => {
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    ffi: { mode: "test" },
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     sessionDefaults: { inputProfile: "tensor", metadata: { app: "agent" } },
   });
 
   const session = client.openSession({ metadata: { request: "one" } });
 
-  assertEquals(client.endpoint, "127.0.0.1:4433");
+  assertEquals(client.endpoint, "nnrp://127.0.0.1:4433/session/default");
+  assertEquals(client.runtime.manifest.transports, ["tcp"]);
+  assertEquals(client.runtime.manifest.capabilities.includes("client.session"), true);
+  assertEquals(client.runtime.manifest.capabilities.includes("server.session"), false);
+  assertEquals(client.runtime.manifest.capabilities.includes("native.loader"), false);
   assertEquals("listen" in client.runtime, false);
   assertEquals(session.sessionId, "native-session-1");
   assertEquals(session.options.metadata, { app: "agent", request: "one" });
+  await client.close();
 });
 
 Deno.test("@nnrp/native-client discovers every installed native transport package", async () => {
@@ -42,10 +66,8 @@ Deno.test("@nnrp/native-client discovers every installed native transport packag
 
   for (const transportPolicy of policies) {
     const client = await openNativeClient({
-      endpoint: "127.0.0.1:4433",
-      env: {},
-      platform: "linux",
-      arch: "x64",
+      endpoint: "nnrp://127.0.0.1:4433/session/default",
+      ffi: { mode: "test" },
       transportPolicy,
     });
 
@@ -61,7 +83,6 @@ Deno.test("@nnrp/native-client closes runtime when client connect fails", async 
     () =>
       openNativeClient({
         endpoint: "",
-        env: {},
         ffi: {
           mode: "test",
           close: () => {
@@ -75,17 +96,34 @@ Deno.test("@nnrp/native-client closes runtime when client connect fails", async 
   assertEquals(closed, true);
 });
 
+Deno.test("@nnrp/native-client close releases its owned runtime", async () => {
+  let closed = false;
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    ffi: {
+      mode: "test",
+      close: () => {
+        closed = true;
+      },
+    },
+  });
+
+  await client.close();
+  await client.close();
+
+  assertEquals(closed, true);
+  assertEquals(client.closed, true);
+});
+
 Deno.test("@nnrp/native-client preserves not-connected diagnostics", async () => {
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    ffi: { mode: "test" },
   });
   const session = client.openSession();
 
   const error = await assertRejects(
-    () => session.submit({ frameId: 1, payload: new Uint8Array([1]) }),
+    () => session.submit({ operationId: 1n, frameId: 1, payload: new Uint8Array([1]) }),
     NnrpNativeBindingUnavailableError,
   );
 
@@ -94,10 +132,8 @@ Deno.test("@nnrp/native-client preserves not-connected diagnostics", async () =>
 
 Deno.test("@nnrp/native-client selects the best installed transport provider", async () => {
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    ffi: { mode: "test" },
     transports: [
       createTcpTransportProvider({ binding: fakeTransportBinding("tcp") }),
       createQuicTransportProvider({ binding: fakeQuicNativeBinding() }),
@@ -126,14 +162,77 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
   assertEquals(summary.rejected, []);
 });
 
+Deno.test("@nnrp/native-client passes client security to the selected provider role connection", async () => {
+  const security = {
+    mode: "client",
+    serverName: "runtime.example",
+    trustedCertificateDer: new Uint8Array([1, 2, 3]),
+  } as const;
+  let connected: NnrpTransportEndpoint | undefined;
+  const binding: NnrpNativeTransportBinding = {
+    ...fakeTransportBinding("quic"),
+    connect: (options) => {
+      connected = options;
+      return Promise.resolve({
+        kind: "quic",
+        endpoint: String(options.endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+        [CLIENT_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            openSession: () => Promise.reject(new Error("session open is outside this propagation test")),
+            close: () => Promise.resolve(),
+          }),
+      } as NnrpTransportConnection);
+    },
+  };
+
+  const client = await openNativeClient({
+    endpoint: "nnrps://runtime.example/session/default",
+    providerEndpoint: "127.0.0.1:45443",
+    security,
+    transports: [createQuicTransportProvider({ binding })],
+    transportPolicy: "force-quic",
+  });
+
+  assertEquals(connected, { endpoint: "127.0.0.1:45443", security });
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client rejects carriers without client role adoption", async () => {
+  const binding: NnrpNativeTransportBinding = {
+    ...fakeTransportBinding("tcp"),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "tcp",
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+      }),
+  };
+
+  const error = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrp://127.0.0.1:4433/session/default",
+        transports: [createTcpTransportProvider({ binding })],
+        transportPolicy: "force-tcp",
+      }),
+    NnrpCapabilityError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_ROLE_ADOPTION_UNAVAILABLE");
+});
+
 Deno.test("@nnrp/native-client rejects missing transport providers at connect time", async () => {
   const error = await assertRejects(
     () =>
       openNativeClient({
-        endpoint: "127.0.0.1:4433",
-        env: {},
-        platform: "linux",
-        arch: "x64",
+        endpoint: "nnrp://127.0.0.1:4433/session/default",
         transports: [],
       }),
     NnrpCapabilityError,
@@ -146,10 +245,7 @@ Deno.test("@nnrp/native-client rejects policy mismatches at connect time", async
   const error = await assertRejects(
     () =>
       openNativeClient({
-        endpoint: "127.0.0.1:4433",
-        env: {},
-        platform: "linux",
-        arch: "x64",
+        endpoint: "nnrp://127.0.0.1:4433/session/default",
         transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
         transportPolicy: "force-quic",
       }),
@@ -164,10 +260,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
   let submitCalls = 0;
   const runtimeFrames: NnrpMessageType[] = [];
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
@@ -183,6 +276,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
   const session = client.openSession({ sessionId: "explicit-cache" });
 
   await session.submit({
+    operationId: 1n,
     frameId: 1,
     descriptor: {
       profile: "tensor",
@@ -216,10 +310,7 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
   let polled = false;
   const sessionId = "cancel-filter";
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
@@ -272,10 +363,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
   });
   let resolveResult: ((result: { readonly frameId: number }) => void) | undefined;
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
@@ -303,7 +391,10 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
     diagnosticBytes: 0,
   });
   const controller = new AbortController();
-  const pending = session.submit({ frameId: 41 }, { signal: controller.signal, timeoutMillis: 10_000 });
+  const pending = session.submit({ operationId: 41n, frameId: 41 }, {
+    signal: controller.signal,
+    timeoutMillis: 10_000,
+  });
 
   await dispatched;
   controller.abort("caller-stop");
@@ -326,10 +417,7 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   let submitCalls = 0;
   const controls: Array<{ messageType: NnrpMessageType; metadata: Record<string, unknown> }> = [];
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
@@ -354,20 +442,20 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   preAborted.abort("before-dispatch");
 
   const error = await assertRejects(
-    () => session.submit({ frameId: 51 }, { signal: preAborted.signal }),
+    () => session.submit({ operationId: 51n, frameId: 51 }, { signal: preAborted.signal }),
     NnrpTimeoutError,
   );
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
   assertEquals(submitCalls, 0);
 
   const signal = new TrackingAbortSignal();
-  assertEquals(await session.submitNoWait({ frameId: 52 }, { signal }), 52n);
+  assertEquals(await session.submitNoWait({ operationId: 52n, frameId: 52 }, { signal }), 52n);
   assertEquals(signal.addCount, 1);
   assertEquals(signal.removeCount, 0);
   session.completeEvent({ type: "result", result: { frameId: 52 } });
   assertEquals(signal.removeCount, 1);
 
-  assertEquals(await session.submitNoWait({ frameId: 53 }, { timeoutMillis: 5 }), 53n);
+  assertEquals(await session.submitNoWait({ operationId: 53n, frameId: 53 }, { timeoutMillis: 5 }), 53n);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
   assertEquals(controls[1]?.metadata.operationId, 53n);
@@ -378,10 +466,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   const seen: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number; readonly payload: Uint8Array }> =
     [];
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
@@ -701,4 +786,21 @@ class TrackingAbortSignal {
     this.removeCount += 1;
     this.#listeners.delete(listener);
   }
+}
+
+function preview4RuntimeCapabilities(): NnrpNativeRuntimeCapabilities {
+  return {
+    abiMajor: 3,
+    abiMinor: 0,
+    abiPatch: 0,
+    protocolMajor: 1,
+    protocolWireFormat: 0,
+    sdkMajor: 1,
+    sdkMinor: 0,
+    sdkPatch: 0,
+    sdkChannel: 4,
+    sdkRevision: 8,
+    transportSlots: 0x00000002,
+    featureFlags: 0xffffffffffffffffn,
+  };
 }

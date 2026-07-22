@@ -19,9 +19,6 @@ Deno.test("native and browser sessions expose equivalent structured-clone-safe r
   const browserEvents = runtimeObjectEvents("worker-session");
   const nativeClient = await openNativeClient({
     endpoint: "127.0.0.1:4433",
-    env: {},
-    platform: "linux",
-    arch: "x64",
     transports: [createTcpTransportProvider()],
     ffi: {
       mode: "test",

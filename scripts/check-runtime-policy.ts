@@ -52,6 +52,11 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
       { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
       {
+        label: "transport artifact loader surface",
+        pattern:
+          /\b(?:nativeLibrary|resolveNativeArtifact|resolveNativeLibraryPath|readNativeArtifactManifest|validateNativeArtifactManifest)\b/,
+      },
+      {
         label: "server accept binding",
         pattern: /\bNnrpNativeAccept(?:Request|edSession)\b/,
       },
@@ -77,7 +82,21 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
       { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
       { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
+      {
+        label: "transport artifact loader surface",
+        pattern:
+          /\b(?:nativeLibrary|resolveNativeArtifact|resolveNativeLibraryPath|readNativeArtifactManifest|validateNativeArtifactManifest)\b/,
+      },
       { label: "client top-level helper", pattern: /\bexport\s+(?:async\s+)?function\s+openNativeClient\b/ },
+      {
+        label: "client submit binding",
+        pattern: /\bNnrpNativeSubmit(?:ResultCompact|NoWait|Validation)Request\b/,
+      },
+      {
+        label: "client role class",
+        pattern: /\bclass\s+NnrpClient(?:Session)?\b/,
+      },
+      { label: "client connect method", pattern: /\bpublic\s+connect\s*\(/ },
       {
         label: "implicit native finalizer",
         pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,

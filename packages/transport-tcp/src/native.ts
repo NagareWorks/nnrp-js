@@ -16,10 +16,13 @@ const HANDLE_KIND_INVALID = 0;
 const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
-const ABI_VERSION = "1.12.1";
+const ABI_VERSION = "3.0.0";
 const HANDLE_SIZE = 24;
 const BUFFER_VIEW_SIZE = 16;
 const STATUS_SIZE = 16;
+const ROLE_EVENT_SIZE = 176;
+const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
+const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 
 const HANDLE_STRUCT = { struct: ["u32", "u64", "u32", "u32"] } as const;
 const BUFFER_VIEW_STRUCT = { struct: ["pointer", "usize"] } as const;
@@ -31,6 +34,20 @@ const ACCEPT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32"] } as const
 const WRITE_BATCH_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "pointer", "u32", "u32"] } as const;
 const READ_BATCH_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32", "u64"] } as const;
 const PROBE_REQUEST_STRUCT = { struct: [OPEN_REQUEST_STRUCT, "u32", "u32"] } as const;
+const CLIENT_CONNECT_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT] } as const;
+const SERVER_BIND_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT] } as const;
+const SESSION_OPEN_REQUEST_STRUCT = {
+  struct: [HANDLE_STRUCT, "u32", "u32", "u16", "u32", "u32"],
+} as const;
+const SUBMIT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u64", "u32", BUFFER_VIEW_STRUCT] } as const;
+const ROLE_EVENT_POLL_REQUEST_STRUCT = {
+  struct: [HANDLE_STRUCT, "u32", "u32", "u32", "u32"],
+} as const;
+const SERVER_ACCEPT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u64", "u32", "u32"] } as const;
+const SERVER_SEND_RESULT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, BUFFER_VIEW_STRUCT] } as const;
+const RUNTIME_FRAME_SEND_REQUEST_STRUCT = {
+  struct: [HANDLE_STRUCT, "u32", "u32", BUFFER_VIEW_STRUCT],
+} as const;
 
 const DENO_TRANSPORT_SYMBOLS = {
   nnrp_transport_probe: {
@@ -70,6 +87,55 @@ const DENO_TRANSPORT_SYMBOLS = {
   },
   nnrp_transport_close: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
   nnrp_buffer_release: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
+  nnrp_client_connect: {
+    parameters: [CLIENT_CONNECT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_client_open_session: {
+    parameters: [SESSION_OPEN_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_client_submit: {
+    parameters: [SUBMIT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_client_await_events: {
+    parameters: [ROLE_EVENT_POLL_REQUEST_STRUCT, "buffer", "usize", "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_client_close: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT, nonblocking: true },
+  nnrp_connection_close: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT, nonblocking: true },
+  nnrp_client_close_connection: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT, nonblocking: true },
+  nnrp_server_bind: {
+    parameters: [SERVER_BIND_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_server_accept: {
+    parameters: [SERVER_ACCEPT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_server_await_events: {
+    parameters: [ROLE_EVENT_POLL_REQUEST_STRUCT, "buffer", "usize", "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_server_send_result: {
+    parameters: [SERVER_SEND_RESULT_REQUEST_STRUCT],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_server_close: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT, nonblocking: true },
+  nnrp_runtime_frame_send: {
+    parameters: [RUNTIME_FRAME_SEND_REQUEST_STRUCT],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
 } as const;
 
 interface DenoTransportSymbols {
@@ -86,6 +152,29 @@ interface DenoTransportSymbols {
   nnrp_transport_read_batch(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_transport_close(handle: Uint8Array): Uint8Array;
   nnrp_buffer_release(handle: Uint8Array): Uint8Array;
+  nnrp_client_connect(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_client_open_session(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_client_submit(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_client_await_events(
+    request: Uint8Array,
+    events: Uint8Array,
+    capacity: number,
+    count: Uint8Array,
+  ): Promise<Uint8Array>;
+  nnrp_client_close(handle: Uint8Array): Promise<Uint8Array>;
+  nnrp_connection_close(handle: Uint8Array): Promise<Uint8Array>;
+  nnrp_client_close_connection(handle: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_bind(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_accept(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_await_events(
+    request: Uint8Array,
+    events: Uint8Array,
+    capacity: number,
+    count: Uint8Array,
+  ): Promise<Uint8Array>;
+  nnrp_server_send_result(request: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_close(handle: Uint8Array): Promise<Uint8Array>;
+  nnrp_runtime_frame_send(request: Uint8Array): Promise<Uint8Array>;
 }
 
 interface DenoTransportLibrary {
@@ -113,6 +202,16 @@ interface FfiHandle {
   readonly id: bigint;
   readonly generation: number;
   readonly flags: number;
+}
+
+interface InternalRoleEvent {
+  readonly kind: number;
+  readonly messageType: number;
+  readonly connection: FfiHandle;
+  readonly session: FfiHandle;
+  readonly operation: FfiHandle;
+  readonly frameId: number;
+  readonly payload: Uint8Array;
 }
 
 interface PackagedBindingResult {
@@ -286,6 +385,19 @@ class DenoTcpConnection implements NnrpTransportConnection {
     }
   }
 
+  async [CLIENT_ROLE_ADOPT](connectionId: bigint, generation: number): Promise<DenoClientRoleConnection> {
+    this.#requireOpen();
+    const output = bytes(HANDLE_SIZE);
+    const request = bytes(40);
+    const view = dataView(request);
+    view.setBigUint64(0, connectionId, true);
+    view.setUint32(8, generation, true);
+    writeHandle(view, 16, this.handle);
+    assertStatus(await this.library.symbols.nnrp_client_connect(request, output), "client role adoption");
+    this.#closed = true;
+    return new DenoClientRoleConnection(this.library, decodeHandle(output));
+  }
+
   close(): void {
     if (this.#closed) return;
     closeHandle(this.library, this.handle, "transport connection close");
@@ -322,10 +434,258 @@ class DenoTcpServer implements NnrpTransportServer {
     return new DenoTcpConnection(this.library, decodeHandle(output, HANDLE_KIND_CONNECTION), this.endpoint);
   }
 
+  async [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<DenoServerRole> {
+    if (this.#closed) throw transportError("NNRP_TCP_LISTENER_CLOSED", "TCP listener is closed.");
+    const output = bytes(HANDLE_SIZE);
+    const request = bytes(40);
+    const view = dataView(request);
+    view.setBigUint64(0, serverId, true);
+    view.setUint32(8, generation, true);
+    writeHandle(view, 16, this.handle);
+    assertStatus(await this.library.symbols.nnrp_server_bind(request, output), "server role adoption");
+    this.#closed = true;
+    return new DenoServerRole(this.library, decodeHandle(output));
+  }
+
   close(): void {
     if (this.#closed) return;
     closeHandle(this.library, this.handle, "transport listener close");
     this.#closed = true;
+  }
+}
+
+class DenoClientRoleConnection {
+  #closed = false;
+
+  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+
+  async openSession(
+    requestedSessionId: number,
+    generation: number,
+    profileId: number,
+    schemaId: number,
+    schemaVersion: number,
+  ): Promise<DenoClientRoleSession> {
+    this.#requireOpen();
+    const output = bytes(HANDLE_SIZE);
+    const request = packSessionOpenRequest(
+      this.handle,
+      requestedSessionId,
+      generation,
+      profileId,
+      schemaId,
+      schemaVersion,
+    );
+    assertStatus(await this.library.symbols.nnrp_client_open_session(request, output), "client session open");
+    return new DenoClientRoleSession(this.library, decodeHandle(output));
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(
+      await this.library.symbols.nnrp_client_close_connection(packHandle(this.handle)),
+      "client connection close",
+    );
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_CLIENT_CONNECTION_CLOSED", "Native client role connection is closed.");
+  }
+}
+
+class DenoClientRoleSession {
+  #closed = false;
+
+  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+
+  async submit(operationId: bigint, frameId: number, payload: Uint8Array): Promise<FfiHandle> {
+    this.#requireOpen();
+    const output = bytes(HANDLE_SIZE);
+    const request = bytes(56);
+    const view = dataView(request);
+    writeHandle(view, 0, this.handle);
+    view.setBigUint64(24, operationId, true);
+    view.setUint32(32, frameId, true);
+    writeBufferView(view, 40, new Uint8Array(payload));
+    assertStatus(await this.library.symbols.nnrp_client_submit(request, output), "client submit");
+    return decodeHandle(output);
+  }
+
+  async poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]> {
+    this.#requireOpen();
+    return await pollRoleEvents(this.library, "client", this.handle, maxEvents, timeoutMillis);
+  }
+
+  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+    this.#requireOpen();
+    assertStatus(
+      await this.library.symbols.nnrp_runtime_frame_send(
+        packRuntimeFrameRequest(this.handle, messageType, frameId, payload),
+      ),
+      "client runtime frame send",
+    );
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(await this.library.symbols.nnrp_client_close(packHandle(this.handle)), "client session close");
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_CLIENT_SESSION_CLOSED", "Native client role session is closed.");
+  }
+}
+
+class DenoServerRole {
+  #closed = false;
+
+  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+
+  async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<DenoServerRoleSession> {
+    this.#requireOpen();
+    const output = bytes(HANDLE_SIZE);
+    const request = bytes(40);
+    const view = dataView(request);
+    writeHandle(view, 0, this.handle);
+    view.setBigUint64(24, sessionHandleId, true);
+    view.setUint32(32, generation, true);
+    view.setUint32(36, timeoutMillis, true);
+    assertStatus(await this.library.symbols.nnrp_server_accept(request, output), "server session accept");
+    return new DenoServerRoleSession(this.library, decodeHandle(output));
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_SERVER_CLOSED", "Native server role is closed.");
+  }
+}
+
+class DenoServerRoleSession {
+  #closed = false;
+
+  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+
+  async poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]> {
+    this.#requireOpen();
+    return await pollRoleEvents(this.library, "server", this.handle, maxEvents, timeoutMillis);
+  }
+
+  async sendResult(operation: FfiHandle, payload: Uint8Array): Promise<void> {
+    this.#requireOpen();
+    const request = bytes(40);
+    const view = dataView(request);
+    writeHandle(view, 0, operation);
+    writeBufferView(view, 24, new Uint8Array(payload));
+    assertStatus(await this.library.symbols.nnrp_server_send_result(request), "server result send");
+  }
+
+  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+    this.#requireOpen();
+    assertStatus(
+      await this.library.symbols.nnrp_runtime_frame_send(
+        packRuntimeFrameRequest(this.handle, messageType, frameId, payload),
+      ),
+      "server runtime frame send",
+    );
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(await this.library.symbols.nnrp_server_close(packHandle(this.handle)), "server session close");
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_SERVER_SESSION_CLOSED", "Native server role session is closed.");
+  }
+}
+
+function packSessionOpenRequest(
+  connection: FfiHandle,
+  requestedSessionId: number,
+  generation: number,
+  profileId: number,
+  schemaId: number,
+  schemaVersion: number,
+): Uint8Array<ArrayBuffer> {
+  const request = bytes(48);
+  const view = dataView(request);
+  writeHandle(view, 0, connection);
+  view.setUint32(24, requestedSessionId, true);
+  view.setUint32(28, generation, true);
+  view.setUint16(32, profileId, true);
+  view.setUint32(36, schemaId, true);
+  view.setUint32(40, schemaVersion, true);
+  return request;
+}
+
+function packRuntimeFrameRequest(
+  handle: FfiHandle,
+  messageType: number,
+  frameId: number,
+  payload: Uint8Array,
+): Uint8Array<ArrayBuffer> {
+  const request = bytes(48);
+  const view = dataView(request);
+  writeHandle(view, 0, handle);
+  view.setUint32(24, messageType, true);
+  view.setUint32(28, frameId, true);
+  writeBufferView(view, 32, new Uint8Array(payload));
+  return request;
+}
+
+async function pollRoleEvents(
+  library: DenoTransportLibrary,
+  role: "client" | "server",
+  scope: FfiHandle,
+  maxEvents: number,
+  timeoutMillis: number,
+): Promise<readonly InternalRoleEvent[]> {
+  if (maxEvents === 0) return [];
+  const request = bytes(40);
+  const view = dataView(request);
+  writeHandle(view, 0, scope);
+  view.setUint32(24, maxEvents, true);
+  view.setUint32(28, timeoutMillis, true);
+  const output = bytes(ROLE_EVENT_SIZE * maxEvents);
+  const count = bytes(8);
+  const status = role === "client"
+    ? await library.symbols.nnrp_client_await_events(request, output, maxEvents, count)
+    : await library.symbols.nnrp_server_await_events(request, output, maxEvents, count);
+  const statusCode = dataView(status).getUint32(0, true);
+  if (statusCode === 5) return [];
+  assertStatus(status, `${role} event poll`);
+  const eventCount = Number(dataView(count).getBigUint64(0, true));
+  const events: InternalRoleEvent[] = [];
+  for (let index = 0; index < eventCount; index += 1) {
+    const event = output.subarray(index * ROLE_EVENT_SIZE, (index + 1) * ROLE_EVENT_SIZE);
+    events.push(copyRoleEvent(library, event));
+  }
+  return events;
+}
+
+function copyRoleEvent(library: DenoTransportLibrary, source: Uint8Array): InternalRoleEvent {
+  const view = dataView(source);
+  const owner = decodeHandle(source.subarray(88, 112));
+  try {
+    return {
+      kind: view.getUint32(0, true),
+      messageType: view.getUint32(4, true),
+      connection: decodeHandle(source.subarray(8, 32)),
+      session: decodeHandle(source.subarray(32, 56)),
+      operation: decodeHandle(source.subarray(56, 80)),
+      frameId: view.getUint32(80, true),
+      payload: copyNativeBytes(view.getBigUint64(112, true), view.getBigUint64(120, true)),
+    };
+  } finally {
+    if (owner.kind === HANDLE_KIND_BUFFER) releaseBuffer(library, owner);
   }
 }
 
@@ -372,9 +732,14 @@ function packProbeRequest(
 }
 
 function endpointBytes(endpoint: string | URL, operation: string): Uint8Array<ArrayBuffer> {
-  const value = String(endpoint);
+  const value = nativeEndpoint(endpoint);
   if (value.length === 0) throw transportError("NNRP_TCP_ENDPOINT_INVALID", `TCP ${operation} endpoint is empty.`);
   return new TextEncoder().encode(value) as Uint8Array<ArrayBuffer>;
+}
+
+function nativeEndpoint(endpoint: string | URL): string {
+  const value = String(endpoint).trim();
+  return value.length > 0 && !value.includes("://") ? `tcp://${value}` : value;
 }
 
 function assertNoSecurity(options: NnrpTransportEndpoint): void {

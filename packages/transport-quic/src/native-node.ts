@@ -21,7 +21,9 @@ const TRANSPORT_LABEL = "QUIC";
 const PACKAGE_NAME = "nnrp-ffi-transport-quic";
 const TRANSPORT_SCOPE = "quic";
 const SECURITY_MODE: "none" | "required" | "websocket" = "required";
-const ABI_VERSION = "1.12.1";
+const ABI_VERSION = "3.0.0";
+const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
+const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const HANDLE_KIND_INVALID = 0;
 const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
@@ -59,6 +61,27 @@ interface NativeFrameBatch {
   payload: NativeBufferView;
   frame_count: number;
   reserved0: number;
+}
+
+interface NativeEvent {
+  kind: number;
+  message_type: number;
+  connection: NativeHandle;
+  session: NativeHandle;
+  operation: NativeHandle;
+  frame_id: number;
+  payload_owner: NativeHandle;
+  payload: NativeBufferView;
+}
+
+interface InternalRoleEvent {
+  readonly kind: number;
+  readonly messageType: number;
+  readonly connection: NativeHandle;
+  readonly session: NativeHandle;
+  readonly operation: NativeHandle;
+  readonly frameId: number;
+  readonly payload: Uint8Array;
 }
 
 type NativeFunction = ReturnType<LibraryHandle["func"]>;
@@ -121,6 +144,71 @@ const SecurityConfigRequestType = koffi.struct({
   first: BufferViewType,
   second: BufferViewType,
 });
+const ClientConnectRequestType = koffi.struct({
+  connection_id: "uint64_t",
+  generation: "uint32_t",
+  reserved0: "uint32_t",
+  transport_connection: HandleType,
+});
+const ServerBindRequestType = koffi.struct({
+  server_id: "uint64_t",
+  generation: "uint32_t",
+  reserved0: "uint32_t",
+  transport_listener: HandleType,
+});
+const SessionOpenRequestType = koffi.struct({
+  connection: HandleType,
+  requested_session_id: "uint32_t",
+  generation: "uint32_t",
+  profile_id: "uint16_t",
+  schema_id: "uint32_t",
+  schema_version: "uint32_t",
+});
+const SubmitRequestType = koffi.struct({
+  session: HandleType,
+  operation_id: "uint64_t",
+  frame_id: "uint32_t",
+  payload: BufferViewType,
+});
+const RoleEventPollRequestType = koffi.struct({
+  scope: HandleType,
+  max_events: "uint32_t",
+  timeout_ms: "uint32_t",
+  flags: "uint32_t",
+  reserved0: "uint32_t",
+});
+const ServerAcceptRequestType = koffi.struct({
+  server: HandleType,
+  session_handle_id: "uint64_t",
+  generation: "uint32_t",
+  timeout_ms: "uint32_t",
+});
+const ServerSendResultRequestType = koffi.struct({ operation: HandleType, payload: BufferViewType });
+const RuntimeFrameSendRequestType = koffi.struct({
+  handle: HandleType,
+  message_type: "uint32_t",
+  frame_id: "uint32_t",
+  payload: BufferViewType,
+});
+const DiagnosticType = koffi.struct({
+  status: StatusType,
+  related_connection_id: "uint64_t",
+  related_session_id: "uint32_t",
+  related_frame_id: "uint32_t",
+  related_operation_id: "uint64_t",
+  message: BufferViewType,
+});
+const EventType = koffi.struct({
+  kind: "uint32_t",
+  message_type: "uint32_t",
+  connection: HandleType,
+  session: HandleType,
+  operation: HandleType,
+  frame_id: "uint32_t",
+  payload_owner: HandleType,
+  payload: BufferViewType,
+  diagnostic: DiagnosticType,
+});
 
 interface NodeSymbols {
   readonly probe: NativeFunction;
@@ -134,6 +222,19 @@ interface NodeSymbols {
   readonly releaseBuffer: NativeFunction;
   readonly createClientSecurity: NativeFunction;
   readonly createServerSecurity: NativeFunction;
+  readonly clientConnect: NativeFunction;
+  readonly clientOpenSession: NativeFunction;
+  readonly clientSubmit: NativeFunction;
+  readonly clientAwaitEvents: NativeFunction;
+  readonly clientClose: NativeFunction;
+  readonly connectionClose: NativeFunction;
+  readonly clientCloseConnection: NativeFunction;
+  readonly serverBind: NativeFunction;
+  readonly serverAccept: NativeFunction;
+  readonly serverAwaitEvents: NativeFunction;
+  readonly serverSendResult: NativeFunction;
+  readonly serverClose: NativeFunction;
+  readonly runtimeFrameSend: NativeFunction;
 }
 
 export function loadNodeQuicBinding(): NnrpNativeTransportBinding {
@@ -259,6 +360,22 @@ class NodeTransportConnection implements NnrpTransportConnection {
     }
   }
 
+  async [CLIENT_ROLE_ADOPT](connectionId: bigint, generation: number): Promise<NodeClientRoleConnection> {
+    this.#requireOpen();
+    const output: Partial<NativeHandle> = {};
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.clientConnect, [{
+        connection_id: connectionId,
+        generation,
+        reserved0: 0,
+        transport_connection: this.handle,
+      }, output]),
+      "client role adoption",
+    );
+    this.#closed = true;
+    return new NodeClientRoleConnection(this.symbols, requiredHandle(output));
+  }
+
   close(): void {
     if (this.#closed) return;
     closeHandle(this.symbols, this.handle, "transport connection close");
@@ -294,10 +411,251 @@ class NodeTransportServer implements NnrpTransportServer {
     return new NodeTransportConnection(this.symbols, requiredHandle(output, HANDLE_KIND_CONNECTION), this.endpoint);
   }
 
+  async [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<NodeServerRole> {
+    if (this.#closed) throw transportError("NNRP_LISTENER_CLOSED", `${TRANSPORT_LABEL} listener is closed.`);
+    const output: Partial<NativeHandle> = {};
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.serverBind, [{
+        server_id: serverId,
+        generation,
+        reserved0: 0,
+        transport_listener: this.handle,
+      }, output]),
+      "server role adoption",
+    );
+    this.#closed = true;
+    return new NodeServerRole(this.symbols, requiredHandle(output));
+  }
+
   close(): void {
     if (this.#closed) return;
     closeHandle(this.symbols, this.handle, "transport listener close");
     this.#closed = true;
+  }
+}
+
+class NodeClientRoleConnection {
+  #closed = false;
+
+  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+
+  async openSession(
+    requestedSessionId: number,
+    generation: number,
+    profileId: number,
+    schemaId: number,
+    schemaVersion: number,
+  ): Promise<NodeClientRoleSession> {
+    this.#requireOpen();
+    const output: Partial<NativeHandle> = {};
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.clientOpenSession, [{
+        connection: this.handle,
+        requested_session_id: requestedSessionId,
+        generation,
+        profile_id: profileId,
+        schema_id: schemaId,
+        schema_version: schemaVersion,
+      }, output]),
+      "client session open",
+    );
+    return new NodeClientRoleSession(this.symbols, requiredHandle(output));
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.clientCloseConnection, [this.handle]),
+      "client connection close",
+    );
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_CLIENT_CONNECTION_CLOSED", "Native client role connection is closed.");
+  }
+}
+
+class NodeClientRoleSession {
+  #closed = false;
+
+  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+
+  async submit(operationId: bigint, frameId: number, payload: Uint8Array): Promise<NativeHandle> {
+    this.#requireOpen();
+    const body = Buffer.from(payload);
+    const output: Partial<NativeHandle> = {};
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.clientSubmit, [{
+        session: this.handle,
+        operation_id: operationId,
+        frame_id: frameId,
+        payload: { ptr: body, len: body.byteLength },
+      }, output]),
+      "client submit",
+    );
+    return requiredHandle(output);
+  }
+
+  async poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]> {
+    this.#requireOpen();
+    return await pollRoleEvents(this.symbols, "client", this.handle, maxEvents, timeoutMillis);
+  }
+
+  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+    this.#requireOpen();
+    const body = Buffer.from(payload);
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.runtimeFrameSend, [{
+        handle: this.handle,
+        message_type: messageType,
+        frame_id: frameId,
+        payload: { ptr: body, len: body.byteLength },
+      }]),
+      "client runtime frame send",
+    );
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(await invoke<NativeStatus>(this.symbols.clientClose, [this.handle]), "client session close");
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_CLIENT_SESSION_CLOSED", "Native client role session is closed.");
+  }
+}
+
+class NodeServerRole {
+  #closed = false;
+
+  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+
+  async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<NodeServerRoleSession> {
+    this.#requireOpen();
+    const output: Partial<NativeHandle> = {};
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.serverAccept, [{
+        server: this.handle,
+        session_handle_id: sessionHandleId,
+        generation,
+        timeout_ms: timeoutMillis,
+      }, output]),
+      "server session accept",
+    );
+    return new NodeServerRoleSession(this.symbols, requiredHandle(output));
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(await invoke<NativeStatus>(this.symbols.connectionClose, [this.handle]), "server close");
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_SERVER_CLOSED", "Native server role is closed.");
+  }
+}
+
+class NodeServerRoleSession {
+  #closed = false;
+
+  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+
+  async poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]> {
+    this.#requireOpen();
+    return await pollRoleEvents(this.symbols, "server", this.handle, maxEvents, timeoutMillis);
+  }
+
+  async sendResult(operation: NativeHandle, payload: Uint8Array): Promise<void> {
+    this.#requireOpen();
+    const body = Buffer.from(payload);
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.serverSendResult, [{
+        operation,
+        payload: { ptr: body, len: body.byteLength },
+      }]),
+      "server result send",
+    );
+  }
+
+  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+    this.#requireOpen();
+    const body = Buffer.from(payload);
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.runtimeFrameSend, [{
+        handle: this.handle,
+        message_type: messageType,
+        frame_id: frameId,
+        payload: { ptr: body, len: body.byteLength },
+      }]),
+      "server runtime frame send",
+    );
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    assertStatus(await invoke<NativeStatus>(this.symbols.serverClose, [this.handle]), "server session close");
+    this.#closed = true;
+  }
+
+  #requireOpen(): void {
+    if (this.#closed) throw transportError("NNRP_SERVER_SESSION_CLOSED", "Native server role session is closed.");
+  }
+}
+
+async function pollRoleEvents(
+  symbols: NodeSymbols,
+  role: "client" | "server",
+  scope: NativeHandle,
+  maxEvents: number,
+  timeoutMillis: number,
+): Promise<readonly InternalRoleEvent[]> {
+  if (maxEvents === 0) return [];
+  const nativeEvents = koffi.alloc(EventType, maxEvents);
+  const nativeCount = koffi.alloc("size_t", 1);
+  try {
+    const status = await invoke<NativeStatus>(
+      role === "client" ? symbols.clientAwaitEvents : symbols.serverAwaitEvents,
+      [
+        {
+          scope,
+          max_events: maxEvents,
+          timeout_ms: timeoutMillis,
+          flags: 0,
+          reserved0: 0,
+        },
+        nativeEvents,
+        maxEvents,
+        nativeCount,
+      ],
+    );
+    if (status.status_code === 5) return [];
+    assertStatus(status, `${role} event poll`);
+    const count = requiredNumber(koffi.decode(nativeCount, "size_t"), "event count");
+    const decoded = koffi.decode(nativeEvents, EventType, count) as NativeEvent[];
+    return decoded.map((event) => copyRoleEvent(symbols, event));
+  } finally {
+    koffi.free(nativeCount);
+    koffi.free(nativeEvents);
+  }
+}
+
+function copyRoleEvent(symbols: NodeSymbols, event: NativeEvent): InternalRoleEvent {
+  const owner = requiredHandle(event.payload_owner);
+  try {
+    return {
+      kind: event.kind,
+      messageType: event.message_type,
+      connection: requiredHandle(event.connection),
+      session: requiredHandle(event.session),
+      operation: requiredHandle(event.operation),
+      frameId: event.frame_id,
+      payload: copyNativeBytes(event.payload),
+    };
+  } finally {
+    if (owner.kind === HANDLE_KIND_BUFFER) releaseBuffer(symbols, owner);
   }
 }
 
@@ -331,11 +689,34 @@ function bindSymbols(library: LibraryHandle): NodeSymbols {
       SecurityConfigRequestType,
       outHandle,
     ]),
+    clientConnect: library.func("nnrp_client_connect", StatusType, [ClientConnectRequestType, outHandle]),
+    clientOpenSession: library.func("nnrp_client_open_session", StatusType, [SessionOpenRequestType, outHandle]),
+    clientSubmit: library.func("nnrp_client_submit", StatusType, [SubmitRequestType, outHandle]),
+    clientAwaitEvents: library.func("nnrp_client_await_events", StatusType, [
+      RoleEventPollRequestType,
+      koffi.pointer(EventType),
+      "size_t",
+      koffi.out(koffi.pointer("size_t")),
+    ]),
+    clientClose: library.func("nnrp_client_close", StatusType, [HandleType]),
+    connectionClose: library.func("nnrp_connection_close", StatusType, [HandleType]),
+    clientCloseConnection: library.func("nnrp_client_close_connection", StatusType, [HandleType]),
+    serverBind: library.func("nnrp_server_bind", StatusType, [ServerBindRequestType, outHandle]),
+    serverAccept: library.func("nnrp_server_accept", StatusType, [ServerAcceptRequestType, outHandle]),
+    serverAwaitEvents: library.func("nnrp_server_await_events", StatusType, [
+      RoleEventPollRequestType,
+      koffi.pointer(EventType),
+      "size_t",
+      koffi.out(koffi.pointer("size_t")),
+    ]),
+    serverSendResult: library.func("nnrp_server_send_result", StatusType, [ServerSendResultRequestType]),
+    serverClose: library.func("nnrp_server_close", StatusType, [HandleType]),
+    runtimeFrameSend: library.func("nnrp_runtime_frame_send", StatusType, [RuntimeFrameSendRequestType]),
   };
 }
 
 function openRequest(options: NnrpTransportEndpoint, config: NativeHandle): Record<string, unknown> {
-  const endpoint = Buffer.from(String(options.endpoint));
+  const endpoint = Buffer.from(nativeEndpoint(options.endpoint));
   if (endpoint.byteLength === 0) throw transportError("NNRP_ENDPOINT_INVALID", `${TRANSPORT_LABEL} endpoint is empty.`);
   return {
     transport_id: TRANSPORT_ID,
@@ -346,6 +727,11 @@ function openRequest(options: NnrpTransportEndpoint, config: NativeHandle): Reco
     timeout_ms: boundedU32("timeoutMillis", options.timeoutMillis ?? 0),
     reserved0: 0,
   };
+}
+
+function nativeEndpoint(endpoint: string | URL): string {
+  const value = String(endpoint).trim();
+  return value.length > 0 && !value.includes("://") ? `quic://${value}` : value;
 }
 
 async function readListenerEndpoint(symbols: NodeSymbols, listener: NativeHandle): Promise<string> {

@@ -1,14 +1,9 @@
 import { createCapabilityManifest, type NnrpTransportKind } from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
-import {
-  createDenoNativeCompactSubmitter,
-  createDenoNativeFfiBinding,
-  type NnrpNativeFfiBinding,
-  openNativeClient,
-} from "@nnrp/native-client";
+import { openNativeClient } from "@nnrp/native-client";
+import { openBackendRuntime } from "@nnrp/native-server";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
-import { pathToFileURL } from "node:url";
 import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson } from "./sdk-reporting.ts";
 
 const RESULT_SCHEMA_URL =
@@ -17,7 +12,6 @@ const DEFAULT_DURATION_SECONDS = 10;
 const DEFAULT_ITERATIONS = 100_000;
 const DEFAULT_WARMUP_ITERATIONS = 1_000;
 const INLINE_PAYLOAD_BYTES = 1024;
-const DEFAULT_NATIVE_BATCH_SIZE = 1024;
 
 interface BenchmarkExecutionPlan {
   readonly protocol_version: string;
@@ -90,12 +84,16 @@ interface Measurement {
 
 async function buildConformanceBenchmarkResults(planPath: string): Promise<BenchmarkResultReport> {
   const plan = JSON.parse(await Deno.readTextFile(planPath)) as BenchmarkExecutionPlan;
+  const results: BenchmarkScenarioResult[] = [];
+  for (const scenario of plan.scenarios) {
+    results.push(await runScenario(scenario));
+  }
   return {
     $schema: RESULT_SCHEMA_URL,
     protocol_version: plan.protocol_version,
     implementation_name: plan.implementation_name,
     environment: buildEnvironment(),
-    results: await Promise.all(plan.scenarios.map((scenario) => runScenario(scenario))),
+    results,
   };
 }
 
@@ -171,34 +169,58 @@ async function runSessionLifecycle(scenario: BenchmarkScenario): Promise<Benchma
 }
 
 async function runSubmitResultLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
-  const nativeLibraryPath = nativeBenchmarkLibraryPath();
-  if (nativeLibraryPath !== undefined) {
-    return runDenoNativeSubmitResultLoop(scenario, nativeLibraryPath);
-  }
-
-  const ffi = await loadNativeBenchmarkFfi();
-  if (ffi === undefined) {
+  const provider = createTcpTransportProvider();
+  if (!provider.localAvailable) {
     return skipResult(
       scenario.id,
-      "Native submit/result benchmark requires NNRP_JS_BENCHMARK_NATIVE_LIBRARY, NNRP_NATIVE_LIBRARY, or NNRP_JS_BENCHMARK_FFI_MODULE with a real Rust-backed FFI binding.",
+      `Native submit/result benchmark requires the packaged TCP provider: ${provider.diagnostic?.message ?? "unknown"}`,
     );
   }
-
   const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
   const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
   const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
+  const reservation = await provider.listen({ endpoint: "127.0.0.1:0", timeoutMillis: 5_000 });
+  const providerEndpoint = stripTcpScheme(reservation.endpoint);
+  await reservation.close();
+  const endpoint = `nnrp://${providerEndpoint}/session/default`;
+  const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: "force-tcp" });
+  const server = serverRuntime.listen({ endpoint, providerEndpoint, transportPolicy: "force-tcp" });
+  const accepting = server.accept();
+  await new Promise((resolve) => setTimeout(resolve, 50));
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    env: {},
-    ffi,
-    transports: [createTcpTransportProvider()],
+    endpoint,
+    providerEndpoint,
+    transports: [provider],
+    transportPolicy: "force-tcp",
   });
-  const session = client.openSession({ sessionId: "benchmark-submit-result" });
-  let frameId = 0;
+  const clientSession = client.openSession({ sessionId: "benchmark-submit-result", inputProfile: "token" });
+  const bootstrapResult = clientSession.submit({
+    operationId: 1n,
+    frameId: 1,
+    payload,
+    inputProfile: "token",
+  });
+  const serverSession = await accepting;
+  const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+  if (bootstrapEvent.type !== "submit") {
+    throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.type}`);
+  }
+  await serverSession.sendResult({ frameId: bootstrapEvent.submit.frameId, payload });
+  await bootstrapResult;
+  let frameId = 1;
 
   const operation = async () => {
     frameId += 1;
-    await session.submit({ frameId, payload });
+    const resultPending = clientSession.submit({
+      operationId: BigInt(frameId),
+      frameId,
+      payload,
+      inputProfile: "token",
+    });
+    const event = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (event.type !== "submit") throw new Error(`expected submit event, got ${event.type}`);
+    await serverSession.sendResult({ frameId: event.submit.frameId, payload });
+    await resultPending;
   };
 
   for (let index = 0; index < warmupIterations; index += 1) {
@@ -208,32 +230,12 @@ async function runSubmitResultLoop(scenario: BenchmarkScenario): Promise<Benchma
   try {
     return measuredThroughputResult(scenario.id, await measureAsyncThroughput(operation, durationSeconds));
   } finally {
-    await client.runtime.close();
-  }
-}
-
-function runDenoNativeSubmitResultLoop(scenario: BenchmarkScenario, libraryPath: string): BenchmarkScenarioResult {
-  const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
-  const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
-  const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
-  const submitter = createDenoNativeCompactSubmitter({ libraryPath });
-  let frameId = 0;
-
-  const operation = () => {
-    const start = frameId + 1;
-    const completed = submitter.submitBatch(start, DEFAULT_NATIVE_BATCH_SIZE, payload);
-    frameId += completed;
-    return completed;
-  };
-
-  for (let index = 0; index < Math.ceil(warmupIterations / DEFAULT_NATIVE_BATCH_SIZE); index += 1) {
-    operation();
-  }
-
-  try {
-    return measuredThroughputResult(scenario.id, measureCountedSyncThroughput(operation, durationSeconds));
-  } finally {
-    submitter.close();
+    await serverSession.close().catch(() => undefined);
+    await clientSession.close().catch(() => undefined);
+    await client.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    await client.runtime.close().catch(() => undefined);
+    await serverRuntime.close().catch(() => undefined);
   }
 }
 
@@ -251,7 +253,6 @@ async function runTransportLoopback(scenario: BenchmarkScenario): Promise<Benchm
 
   const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
   const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
-  const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
   const provider = createTcpTransportProvider();
   const server = await provider.listen({ endpoint: "127.0.0.1:0" });
   const accepted = server.accept();
@@ -260,14 +261,25 @@ async function runTransportLoopback(scenario: BenchmarkScenario): Promise<Benchm
   let echoing = true;
   const echoLoop = (async () => {
     while (echoing) {
-      const packets = await peer.receive({ maxPackets: 16, timeoutMillis: 1_000 });
-      await peer.send(packets);
+      try {
+        const packets = await peer.receive({ maxPackets: 16, timeoutMillis: 1_000 });
+        await peer.send(packets);
+      } catch (error) {
+        if (!echoing) return;
+        throw error;
+      }
     }
   })();
+  let frameId = 0;
 
   const operation = async () => {
-    await client.send(payload);
-    await client.receive({ maxPackets: 1, timeoutMillis: 1_000 });
+    frameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+    const packet = benchmarkPacket(frameId);
+    await client.send(packet);
+    const echoed = await client.receive({ maxPackets: 1, timeoutMillis: 1_000 });
+    if (echoed.length !== 1 || new DataView(echoed[0]!.buffer, echoed[0]!.byteOffset).getUint32(24, true) !== frameId) {
+      throw new Error("TCP loopback returned an unexpected packet");
+    }
   };
 
   for (let index = 0; index < warmupIterations; index += 1) {
@@ -285,55 +297,11 @@ async function runTransportLoopback(scenario: BenchmarkScenario): Promise<Benchm
   }
 }
 
-async function loadNativeBenchmarkFfi(): Promise<NnrpNativeFfiBinding | undefined> {
-  const nativeLibraryPath = nativeBenchmarkLibraryPath();
-  if (nativeLibraryPath !== undefined && nativeLibraryPath.trim().length > 0) {
-    return createDenoNativeFfiBinding({ libraryPath: nativeLibraryPath });
-  }
-
-  const modulePath = Deno.env.get("NNRP_JS_BENCHMARK_FFI_MODULE");
-  if (modulePath === undefined || modulePath.trim().length === 0) {
-    return undefined;
-  }
-
-  const imported = await import(normalizeImportSpecifier(modulePath));
-  const bindingFactory = imported.createNativeFfiBinding ?? imported.createFfiBinding;
-  const binding = typeof bindingFactory === "function"
-    ? await bindingFactory()
-    : imported.default ?? imported.ffi ?? imported.nativeFfiBinding;
-
-  if (!isNativeBenchmarkFfi(binding)) {
-    throw new Error(
-      "NNRP_JS_BENCHMARK_FFI_MODULE must export default, ffi, nativeFfiBinding, or createNativeFfiBinding() with submitResultCompact().",
-    );
-  }
-  if (binding.mode === "test") {
-    throw new Error("Conformance benchmark cannot use a test/fake FFI binding.");
-  }
-
-  return binding;
-}
-
-function nativeBenchmarkLibraryPath(): string | undefined {
-  return Deno.env.get("NNRP_JS_BENCHMARK_NATIVE_LIBRARY") ?? Deno.env.get("NNRP_NATIVE_LIBRARY");
-}
-
-function normalizeImportSpecifier(value: string): string {
-  if (/^(?:file|https?|npm|jsr):/.test(value)) {
-    return value;
-  }
-
-  if (value.startsWith(".") || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) {
-    return pathToFileURL(value).href;
-  }
-
-  return value;
-}
-
-function isNativeBenchmarkFfi(value: unknown): value is NnrpNativeFfiBinding {
-  return typeof value === "object" &&
-    value !== null &&
-    typeof (value as NnrpNativeFfiBinding).submitResultCompact === "function";
+function benchmarkPacket(frameId: number): Uint8Array {
+  const packet = new Uint8Array(40);
+  packet.set([0x4e, 0x4e, 0x52, 0x50, 1, 0, 0x20, 40]);
+  new DataView(packet.buffer).setUint32(24, frameId, true);
+  return packet;
 }
 
 async function measureAsyncThroughput(operation: () => Promise<void>, durationSeconds: number): Promise<Measurement> {
@@ -346,26 +314,6 @@ async function measureAsyncThroughput(operation: () => Promise<void>, durationSe
     await operation();
     samplesUs.push((performance.now() - before) * 1000);
     iterations += 1;
-  }
-
-  return {
-    iterations,
-    seconds: (performance.now() - started) / 1000,
-    samplesUs,
-  };
-}
-
-function measureCountedSyncThroughput(operation: () => number, durationSeconds: number): Measurement {
-  const samplesUs: number[] = [];
-  let iterations = 0;
-  const started = performance.now();
-  const deadline = started + durationSeconds * 1000;
-  while (performance.now() < deadline) {
-    const before = performance.now();
-    const completed = operation();
-    const elapsedUs = (performance.now() - before) * 1000;
-    samplesUs.push(completed === 0 ? elapsedUs : elapsedUs / completed);
-    iterations += completed;
   }
 
   return {
@@ -420,6 +368,12 @@ function percentileMetrics(samplesUs: readonly number[]): BenchmarkMetrics {
   };
 }
 
+function stripTcpScheme(endpoint: string): string {
+  const url = new URL(endpoint.includes("://") ? endpoint : `tcp://${endpoint}`);
+  if (url.port.length === 0) throw new Error(`TCP endpoint does not include a port: ${endpoint}`);
+  return `${url.hostname}:${url.port}`;
+}
+
 function skipResult(id: string, message: string): BenchmarkScenarioResult {
   return {
     id,
@@ -435,7 +389,7 @@ function buildEnvironment(): BenchmarkEnvironment {
     os: Deno.build.os,
     arch: Deno.build.arch,
     notes:
-      "JS benchmark results use the conformance benchmark-results schema; native throughput scenarios require a real Rust-backed FFI module.",
+      "JS benchmark results use the conformance benchmark-results schema; native throughput scenarios use package-owned Rust transport artifacts and real role sessions.",
   };
 }
 

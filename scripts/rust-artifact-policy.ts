@@ -110,8 +110,8 @@ export function normalizeNativeArtifactManifest(
   ) {
     throw new Error(`${source.archive}: transport_slots must contain only ${transport}`);
   }
-  if (typeof value.abi_version !== "string" || !/^1\.12\.\d+$/u.test(value.abi_version)) {
-    throw new Error(`${source.archive}: expected Rust ABI 1.12.x`);
+  if (value.abi_version !== "3.0.0") {
+    throw new Error(`${source.archive}: expected Rust ABI 3.0.0`);
   }
   if (typeof value.package !== "string" || value.package !== `nnrp-ffi-transport-${transport}`) {
     throw new Error(`${source.archive}: package does not match ${transport} transport scope`);

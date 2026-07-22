@@ -1,13 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
-export interface NnrpNativeLibraryOptions {
-    readonly path?: string;
-    readonly artifactDir?: string;
-    readonly manifestPath?: string;
-    readonly packageName?: string;
-    readonly requiredSymbols?: readonly string[];
-    readonly systemPolicy?: boolean;
-    readonly systemLibraryDir?: string;
-}
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportClientSecurity, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -61,27 +52,6 @@ export interface NnrpNativeFfiBinding {
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     close?(): void | Promise<void>;
 }
-export interface NnrpNativeArtifactManifest {
-    readonly package: "nnrp-ffi";
-    readonly profile: "debug" | "release";
-    readonly os: string;
-    readonly arch: string;
-    readonly target?: string | null;
-    readonly library_kind: "dynamic" | "static";
-    readonly library: string;
-    readonly libraries: readonly string[];
-    readonly header: string;
-    readonly headers: readonly string[];
-    readonly legacy_header?: string;
-    readonly exports: readonly string[];
-}
-export interface NnrpResolvedNativeArtifact {
-    readonly packageName: string;
-    readonly packageDir: string;
-    readonly manifestPath: string;
-    readonly libraryPath: string;
-    readonly manifest: NnrpNativeArtifactManifest;
-}
 export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
     readonly sessionId?: string;
     readonly inputProfile?: NnrpInputProfile;
@@ -91,23 +61,25 @@ export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
 }
 export interface NnrpNativeClientOptions {
     readonly endpoint: string | URL;
-    readonly nativeLibrary?: NnrpNativeLibraryOptions;
+    readonly providerEndpoint?: string | URL;
+    readonly security?: NnrpTransportClientSecurity;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
-    readonly env?: Record<string, string | undefined>;
-    readonly platform?: NodePlatform;
-    readonly arch?: NodeArchitecture;
     readonly ffi?: NnrpNativeFfiBinding;
 }
 export interface NnrpConnectOptions {
     readonly endpoint: string | URL;
+    readonly providerEndpoint?: string | URL;
+    readonly security?: NnrpTransportClientSecurity;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
 }
 export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
     readonly kind: NnrpTransportKind;
+    probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
+    connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
 }
 export interface NnrpTransportSelectionOptions {
     readonly peerManifest: NnrpCapabilityManifest;
@@ -116,36 +88,8 @@ export interface NnrpTransportSelectionOptions {
     readonly requestedMaxFrameBytes?: bigint;
     readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
 }
-export interface NnrpNativeBindingOptions {
-    readonly libraryPath?: string;
-    readonly nativeLibrary?: NnrpNativeLibraryOptions;
-    readonly env?: Record<string, string | undefined>;
-    readonly platform?: NodePlatform;
-    readonly arch?: NodeArchitecture;
-    readonly ffi?: NnrpNativeFfiBinding;
-}
-export interface NnrpDenoNativeFfiBindingOptions {
-    readonly libraryPath?: string;
-    readonly nativeLibrary?: NnrpNativeLibraryOptions;
-    readonly env?: Record<string, string | undefined>;
-    readonly platform?: NodePlatform;
-    readonly arch?: NodeArchitecture;
-}
-export interface NnrpDenoNativeCompactSubmitterOptions extends NnrpDenoNativeFfiBindingOptions {
-    readonly sessionId?: number;
-}
-export interface NnrpDenoNativeCompactSubmitter {
-    readonly mode: "deno-ffi";
-    runtimeCapabilities(): NnrpNativeRuntimeCapabilities;
-    submit(frameId: number, payload: Uint8Array, resultPayload?: Uint8Array): void;
-    submitBatch(frameIdStart: number, iterations: number, payload: Uint8Array, resultPayload?: Uint8Array): number;
-    close(): void;
-}
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
-    readonly libraryPath: string;
-    readonly requiredSymbols: readonly string[];
-    readonly artifact?: NnrpResolvedNativeArtifact;
     readonly ffi?: NnrpNativeFfiBinding;
     readonly runtimeCapabilities?: NnrpNativeRuntimeCapabilities;
 }
@@ -157,16 +101,14 @@ declare class NnrpBackendRuntime {
     #private;
     constructor(binding: NnrpNativeRuntimeBinding, transportPolicy?: NnrpTransportPolicy, transportProviders?: readonly NnrpNativeTransportProvider[]);
     get manifest(): NnrpCapabilityManifest;
-    get libraryPath(): string;
     get runtimeCapabilities(): NnrpNativeRuntimeCapabilities | undefined;
-    get artifact(): NnrpResolvedNativeArtifact | undefined;
     get bindingMode(): string;
     submitResultCompact(request: NnrpNativeSubmitResultCompactRequest): Promise<NnrpResult>;
     submitNoWait(request: NnrpNativeSubmitNoWaitRequest): Promise<bigint>;
     sendRuntimeFrame(request: NnrpNativeRuntimeFrameSendRequest): Promise<void>;
     patchSession(request: NnrpNativeSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
-    connect(options: NnrpConnectOptions): NnrpClient;
+    connect(options: NnrpConnectOptions): Promise<NnrpClient>;
     selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
     close(): Promise<void>;
     get closed(): boolean;
@@ -231,15 +173,6 @@ export declare class NnrpClientSession {
     close(): Promise<void>;
     get closed(): boolean;
 }
-export declare function resolveNativeLibraryPath(options?: NnrpNativeBindingOptions): string;
-export declare function createNativeRuntimeBinding(options?: NnrpNativeBindingOptions): NnrpNativeRuntimeBinding;
-export declare function createDenoNativeFfiBinding(options?: NnrpDenoNativeFfiBindingOptions): NnrpNativeFfiBinding;
-export declare function createDenoNativeCompactSubmitter(options?: NnrpDenoNativeCompactSubmitterOptions): NnrpDenoNativeCompactSubmitter;
 export declare function validateNativeRuntimeCapabilities(capabilities: NnrpNativeRuntimeCapabilities): void;
-export declare function resolveNativeArtifact(options: NnrpNativeBindingOptions): NnrpResolvedNativeArtifact | null;
-export declare function readNativeArtifactManifest(manifestPath: string): NnrpNativeArtifactManifest;
-export declare function validateNativeArtifactManifest(manifest: NnrpNativeArtifactManifest, options?: Pick<NnrpNativeBindingOptions, "platform" | "arch" | "nativeLibrary">): void;
-type NodePlatform = NodeJS.Platform;
-type NodeArchitecture = NodeJS.Architecture;
 export {};
 //# sourceMappingURL=index.d.ts.map

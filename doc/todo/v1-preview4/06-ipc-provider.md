@@ -19,9 +19,9 @@
   - [x] Accept `npipe://` provider endpoints on Windows hosts.
   - [x] Reject platform-incompatible IPC schemes.
   - [x] Reject IPC as a browser provider.
-- [ ] Implement client and server lifecycle.
+- [x] Implement client and server lifecycle.
   - [x] Connect, write, read, close, and propagate diagnostics.
-  - [ ] Listen, accept, close listener, and reject accept after close.
+  - [x] Listen, accept, close listener, and reject accept after close.
   - [x] Preserve frame boundaries and backpressure through the Rust provider.
   - [x] Do not route IPC through TCP loopback or a config-only provider.
 
@@ -35,7 +35,7 @@
   - [ ] Unix-domain loopback fixture.
   - [x] Windows named-pipe loopback fixture.
   - [ ] Invalid endpoint, missing artifact, close, timeout, and backpressure cases.
-  - [ ] Native client/server session integration over IPC.
+  - [x] Native client/server session integration over IPC.
 
 ## Acceptance Evidence
 

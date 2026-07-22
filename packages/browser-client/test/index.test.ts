@@ -334,7 +334,7 @@ Deno.test("@nnrp/browser-client rejects client and session operations after clos
 
   assertEquals(session.closed, true);
   await assertRejects(
-    () => session.submit({ frameId: 1 }),
+    () => session.submit({ operationId: 1n, frameId: 1 }),
     NnrpCapabilityError,
   );
 });
@@ -345,14 +345,14 @@ Deno.test("@nnrp/browser-client session methods preserve not-instantiated diagno
   const session = client.openSession();
 
   const error = await assertRejects(
-    () => session.submit({ frameId: 1, payload: new Uint8Array([1]) }),
+    () => session.submit({ operationId: 1n, frameId: 1, payload: new Uint8Array([1]) }),
     NnrpWasmBindingUnavailableError,
   );
 
   assertEquals(error.diagnostic.code, "NNRP_WASM_BINDING_NOT_INSTANTIATED");
 
   const noWaitError = await assertRejects(
-    () => session.submitNoWait({ frameId: 2, payload: new Uint8Array([2]) }),
+    () => session.submitNoWait({ operationId: 2n, frameId: 2, payload: new Uint8Array([2]) }),
     NnrpWasmBindingUnavailableError,
   );
 
@@ -403,6 +403,7 @@ Deno.test("@nnrp/browser-client routes submit, runtime controls, and event polli
 
   assertEquals(
     await session.submit({
+      operationId: 11n,
       frameId: 11,
       descriptor: {
         profile: "tensor",
@@ -422,7 +423,7 @@ Deno.test("@nnrp/browser-client routes submit, runtime controls, and event polli
     flags: 0,
     diagnosticBytes: 4,
   }, new Uint8Array([100, 111, 110, 101]));
-  assertEquals(await session.submitNoWait({ frameId: 12 }), 12n);
+  assertEquals(await session.submitNoWait({ operationId: 12n, frameId: 12 }), 12n);
   const event = await session.nextEvent();
 
   assertEquals(seen, [
@@ -627,11 +628,11 @@ Deno.test("@nnrp/browser-client rejects duplicate in-flight frames and releases 
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
-  const pending = session.submit({ frameId: 5 });
+  const pending = session.submit({ operationId: 5n, frameId: 5 });
 
   assertEquals(session.inFlightFrames(), [5]);
   const duplicate = await assertRejects(
-    () => session.submit({ frameId: 5 }),
+    () => session.submit({ operationId: 5n, frameId: 5 }),
     NnrpProtocolError,
   );
 
@@ -639,7 +640,7 @@ Deno.test("@nnrp/browser-client rejects duplicate in-flight frames and releases 
   resolveSubmit?.({ frameId: 5 });
   assertEquals(await pending, { frameId: 5 });
   assertEquals(session.inFlightFrames(), []);
-  assertEquals(await session.submit({ frameId: 5 }), { frameId: 5 });
+  assertEquals(await session.submit({ operationId: 6n, frameId: 5 }), { frameId: 5 });
 });
 
 Deno.test("@nnrp/browser-client tracks no-wait frames until terminal events", async () => {
@@ -650,11 +651,11 @@ Deno.test("@nnrp/browser-client tracks no-wait frames until terminal events", as
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
-  assertEquals(await session.submitNoWait({ frameId: 21 }), 21n);
+  assertEquals(await session.submitNoWait({ operationId: 21n, frameId: 21 }), 21n);
   assertEquals(session.inFlightFrames(), [21]);
 
   const duplicate = await assertRejects(
-    () => session.submitNoWait({ frameId: 21 }),
+    () => session.submitNoWait({ operationId: 21n, frameId: 21 }),
     NnrpProtocolError,
   );
   assertEquals(duplicate.diagnostic.code, "NNRP_FRAME_IN_FLIGHT");
@@ -662,15 +663,15 @@ Deno.test("@nnrp/browser-client tracks no-wait frames until terminal events", as
   session.completeEvent({ type: "result", result: { frameId: 21, metadata: {} } });
   assertEquals(session.inFlightFrames(), []);
 
-  await session.submitNoWait({ frameId: 22 });
+  await session.submitNoWait({ operationId: 22n, frameId: 22 });
   session.completeEvent({ type: "result", result: { frameId: 22, metadata: {} } });
   assertEquals(session.inFlightFrames(), []);
 
-  await session.submitNoWait({ frameId: 23 });
+  await session.submitNoWait({ operationId: 23n, frameId: 23 });
   session.completeEvent({ type: "drop", frameId: 23, diagnostic: diagnostic("NNRP_WASM_DROP") });
   assertEquals(session.inFlightFrames(), []);
 
-  await session.submitNoWait({ frameId: 24 });
+  await session.submitNoWait({ operationId: 24n, frameId: 24 });
   session.completeEvent({ type: "close", diagnostic: diagnostic("NNRP_WASM_CLOSE") });
   assertEquals(session.inFlightFrames(), []);
 });
@@ -691,12 +692,12 @@ Deno.test("@nnrp/browser-client awaits submit capacity and rejects no-wait when 
     initialCredits: 0,
   });
 
-  const pending = session.submit({ frameId: 41 });
+  const pending = session.submit({ operationId: 41n, frameId: 41 });
   await Promise.resolve();
   assertEquals(submitted, []);
 
   const noWaitError = await assertRejects(
-    () => session.submitNoWait({ frameId: 42 }),
+    () => session.submitNoWait({ operationId: 42n, frameId: 42 }),
     NnrpTransportError,
   );
   assertEquals(noWaitError.diagnostic.code, "NNRP_BACKPRESSURE_CREDIT_EXHAUSTED");
@@ -739,9 +740,9 @@ Deno.test("@nnrp/browser-client rejects duplicate terminal events and clears fra
   });
   const session = runtime.connect({ endpoint: "wss://example.test/nnrp" }).openSession();
 
-  await session.submitNoWait({ frameId: 4 });
-  await session.submitNoWait({ frameId: 2 });
-  await session.submitNoWait({ frameId: 3 });
+  await session.submitNoWait({ operationId: 4n, frameId: 4 });
+  await session.submitNoWait({ operationId: 2n, frameId: 2 });
+  await session.submitNoWait({ operationId: 3n, frameId: 3 });
   assertEquals(session.inFlightFrames(), [2, 3, 4]);
 
   session.completeEvent({ type: "drop", frameId: 3, diagnostic: diagnostic("NNRP_WASM_DROP") });
@@ -753,7 +754,7 @@ Deno.test("@nnrp/browser-client rejects duplicate terminal events and clears fra
   assertEquals(duplicateTerminal.diagnostic.code, "NNRP_FRAME_TERMINAL_DUPLICATE");
   assertEquals(session.inFlightFrames(), [2, 4]);
 
-  const pending = session.submit({ frameId: 30 });
+  const pending = session.submit({ operationId: 30n, frameId: 30 });
   assertEquals(session.inFlightFrames(), [2, 4, 30]);
   await session.close();
   assertEquals(session.inFlightFrames(), []);
@@ -781,11 +782,11 @@ Deno.test("@nnrp/browser-client preserves not-instantiated diagnostics for direc
   const runtime = await openBrowserRuntime();
 
   await assertRejects(
-    () => runtime.submit({ sessionOptions: {}, submit: { frameId: 1 } }),
+    () => runtime.submit({ sessionOptions: {}, submit: { operationId: 1n, frameId: 1 } }),
     NnrpWasmBindingUnavailableError,
   );
   await assertRejects(
-    () => runtime.submitNoWait({ sessionOptions: {}, submit: { frameId: 1 } }),
+    () => runtime.submitNoWait({ sessionOptions: {}, submit: { operationId: 1n, frameId: 1 } }),
     NnrpWasmBindingUnavailableError,
   );
   await assertRejects(
@@ -825,7 +826,7 @@ Deno.test("@nnrp/browser-client validates submit requests before WASM dispatch",
   const session = client.openSession();
 
   const error = await assertRejects(
-    () => session.submit({ frameId: -1 }),
+    () => session.submit({ operationId: 1n, frameId: -1 }),
     NnrpProtocolError,
   );
 
@@ -1187,7 +1188,10 @@ Deno.test("@nnrp/browser-client sends submit deadlines and protocol cancellation
     diagnosticBytes: 0,
   });
   const controller = new AbortController();
-  const pending = session.submit({ frameId: 41 }, { signal: controller.signal, timeoutMillis: 10_000 });
+  const pending = session.submit({ operationId: 41n, frameId: 41 }, {
+    signal: controller.signal,
+    timeoutMillis: 10_000,
+  });
 
   await dispatched;
   controller.abort("caller-stop");
@@ -1234,20 +1238,20 @@ Deno.test("@nnrp/browser-client rejects pre-dispatch aborts and cleans terminal 
   preAborted.abort("before-dispatch");
 
   const error = await assertRejects(
-    () => session.submit({ frameId: 51 }, { signal: preAborted.signal }),
+    () => session.submit({ operationId: 51n, frameId: 51 }, { signal: preAborted.signal }),
     NnrpTimeoutError,
   );
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
   assertEquals(submitCalls, 0);
 
   const signal = new TrackingAbortSignal();
-  assertEquals(await session.submitNoWait({ frameId: 52 }, { signal }), 52n);
+  assertEquals(await session.submitNoWait({ operationId: 52n, frameId: 52 }, { signal }), 52n);
   assertEquals(signal.addCount, 1);
   assertEquals(signal.removeCount, 0);
   session.completeEvent({ type: "result", result: { frameId: 52 } });
   assertEquals(signal.removeCount, 1);
 
-  assertEquals(await session.submitNoWait({ frameId: 53 }, { timeoutMillis: 5 }), 53n);
+  assertEquals(await session.submitNoWait({ operationId: 53n, frameId: 53 }, { timeoutMillis: 5 }), 53n);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
   assertEquals(controls[1]?.metadata.operationId, 53n);

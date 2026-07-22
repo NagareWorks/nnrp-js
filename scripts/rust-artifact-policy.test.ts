@@ -35,7 +35,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
       transport_scope: "websocket",
       transport_slots: ["websocket"],
       protocol_version: "NNRP/1",
-      abi_version: "1.12.1",
+      abi_version: "3.0.0",
       enabled_features: ["transport-websocket"],
       os: "windows",
       arch: "x86_64",
@@ -48,7 +48,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
     policy,
     "websocket",
     {
-      release: "v1.0.0-preview.4.4",
+      release: "v1.0.0-preview.4.9",
       archive: "websocket.zip",
       archiveSha256: "c".repeat(64),
     },
@@ -86,13 +86,13 @@ Deno.test("browser artifact manifests enforce the frozen browser-only SDK bounda
       exports: [...BROWSER_WASM_REQUIRED_EXPORTS],
     },
     {
-      release: "v1.0.0-preview.4.4",
-      archive: "nnrp-wasm-browser-1.0.0-preview.4.4.zip",
+      release: "v1.0.0-preview.4.9",
+      archive: "nnrp-wasm-browser-1.0.0-preview.4.9.zip",
       archiveSha256: "e".repeat(64),
     },
   );
 
-  assertEquals(manifest.source_release, "v1.0.0-preview.4.4");
+  assertEquals(manifest.source_release, "v1.0.0-preview.4.9");
   assertEquals(manifest.source_archive_sha256, "e".repeat(64));
   assertEquals(manifest.transport_slots, ["websocket"]);
 });
@@ -140,7 +140,7 @@ Deno.test("native artifact manifests reject a mismatched transport scope", () =>
           transport_name: "tcp",
           transport_scope: "quic",
           transport_slots: ["tcp"],
-          abi_version: "1.12.1",
+          abi_version: "3.0.0",
           os: policy.os,
           arch: policy.arch,
           library: policy.library,
@@ -151,5 +151,29 @@ Deno.test("native artifact manifests reject a mismatched transport scope", () =>
       ),
     Error,
     "transport_scope must be tcp",
+  );
+});
+
+Deno.test("native artifact manifests reject the superseded Preview4 ABI", () => {
+  const policy = NATIVE_ARTIFACTS[0]!;
+  assertThrows(
+    () =>
+      normalizeNativeArtifactManifest(
+        {
+          package: "nnrp-ffi-transport-tcp",
+          transport_name: "tcp",
+          transport_scope: "tcp",
+          transport_slots: ["tcp"],
+          abi_version: "1.12.1",
+          os: policy.os,
+          arch: policy.arch,
+          library: policy.library,
+        },
+        policy,
+        "tcp",
+        { release: "v1", archive: "tcp-old-abi.zip", archiveSha256: "a".repeat(64) },
+      ),
+    Error,
+    "expected Rust ABI 3.0.0",
   );
 });

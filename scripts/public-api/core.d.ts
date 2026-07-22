@@ -381,15 +381,17 @@ export interface NnrpTransportProbeMetrics {
     readonly medianThroughputBytesPerSecond: bigint;
     readonly medianRttMicroseconds: bigint;
 }
-export type NnrpTransportSecurity = {
+export interface NnrpTransportClientSecurity {
     readonly mode: "client";
     readonly serverName: string;
     readonly trustedCertificateDer: Uint8Array;
-} | {
+}
+export interface NnrpTransportServerSecurity {
     readonly mode: "server";
     readonly certificateDer: Uint8Array;
     readonly privateKeyPkcs8Der: Uint8Array;
-};
+}
+export type NnrpTransportSecurity = NnrpTransportClientSecurity | NnrpTransportServerSecurity;
 export interface NnrpTransportCandidate {
     readonly kind: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
@@ -534,6 +536,7 @@ export interface NnrpPayloadDescriptor {
     readonly metadata?: Readonly<Record<string, string>>;
 }
 export interface NnrpSubmitRequest {
+    readonly operationId: bigint;
     readonly frameId: number;
     readonly payload?: NnrpBinaryPayload;
     readonly tensors?: readonly NnrpTensorSection[];
@@ -548,6 +551,7 @@ export interface NnrpNormalizedTensorSection {
     readonly codecId?: number;
 }
 export interface NnrpNormalizedSubmitRequest {
+    readonly operationId: bigint;
     readonly frameId: number;
     readonly payload?: Uint8Array;
     readonly tensors?: readonly NnrpNormalizedTensorSection[];

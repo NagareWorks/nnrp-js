@@ -13,7 +13,6 @@ import { openBackendRuntime } from "@nnrp/native-server";
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 
 const runtime = await openBackendRuntime({
-  nativeLibrary: { artifactDir: "./native" },
   transports: [createQuicTransportProvider()],
   transportPolicy: "score",
 });

@@ -621,17 +621,19 @@ export interface NnrpTransportProbeMetrics {
   readonly medianRttMicroseconds: bigint;
 }
 
-export type NnrpTransportSecurity =
-  | {
-    readonly mode: "client";
-    readonly serverName: string;
-    readonly trustedCertificateDer: Uint8Array;
-  }
-  | {
-    readonly mode: "server";
-    readonly certificateDer: Uint8Array;
-    readonly privateKeyPkcs8Der: Uint8Array;
-  };
+export interface NnrpTransportClientSecurity {
+  readonly mode: "client";
+  readonly serverName: string;
+  readonly trustedCertificateDer: Uint8Array;
+}
+
+export interface NnrpTransportServerSecurity {
+  readonly mode: "server";
+  readonly certificateDer: Uint8Array;
+  readonly privateKeyPkcs8Der: Uint8Array;
+}
+
+export type NnrpTransportSecurity = NnrpTransportClientSecurity | NnrpTransportServerSecurity;
 
 export interface NnrpTransportCandidate {
   readonly kind: NnrpTransportKind;
@@ -809,6 +811,7 @@ export interface NnrpPayloadDescriptor {
 }
 
 export interface NnrpSubmitRequest {
+  readonly operationId: bigint;
   readonly frameId: number;
   readonly payload?: NnrpBinaryPayload;
   readonly tensors?: readonly NnrpTensorSection[];
@@ -825,6 +828,7 @@ export interface NnrpNormalizedTensorSection {
 }
 
 export interface NnrpNormalizedSubmitRequest {
+  readonly operationId: bigint;
   readonly frameId: number;
   readonly payload?: Uint8Array;
   readonly tensors?: readonly NnrpNormalizedTensorSection[];
@@ -1419,6 +1423,7 @@ export function normalizeSubmitRequest(
 
   const copyPayloads = options.copyPayloads ?? true;
   return {
+    operationId: request.operationId,
     frameId: request.frameId,
     ...(request.payload === undefined ? {} : { payload: normalizeBinaryPayload(request.payload, copyPayloads) }),
     ...(request.tensors === undefined ? {} : {
@@ -1896,6 +1901,15 @@ function validateSubmitRequestShape(
   request: NnrpSubmitRequest,
   options: NormalizeSubmitRequestOptions,
 ): void {
+  if (request.operationId <= 0n || request.operationId > 0xffff_ffff_ffff_ffffn) {
+    throw new NnrpProtocolError({
+      code: "NNRP_SUBMIT_OPERATION_ID_INVALID",
+      message: "Submit request operationId must be between 1 and 2^64-1.",
+      source: "core",
+      retryable: false,
+    });
+  }
+
   if (!Number.isSafeInteger(request.frameId) || request.frameId < 0) {
     throw new NnrpProtocolError({
       code: "NNRP_SUBMIT_FRAME_ID_INVALID",

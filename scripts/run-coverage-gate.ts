@@ -32,6 +32,7 @@ await run(Deno.execPath(), [
   "run",
   "--unstable-sloppy-imports",
   "--allow-ffi",
+  "--allow-net=127.0.0.1",
   "--allow-read",
   "--allow-write",
   `--coverage=${coverageDir}`,

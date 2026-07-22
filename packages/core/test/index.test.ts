@@ -1434,17 +1434,19 @@ Deno.test("@nnrp/core requires explicit IPC and WebSocket provider endpoints", (
 
 Deno.test("@nnrp/core keeps provider-local endpoints out of normalized operation payloads", () => {
   const normalized = normalizeSubmitRequest({
+    operationId: 8n,
     frameId: 8,
     providerEndpoint: "unix:///tmp/nnrp.sock",
   } as unknown as NnrpSubmitRequest);
 
-  assertEquals(normalized, { frameId: 8 });
+  assertEquals(normalized, { operationId: 8n, frameId: 8 });
   assertEquals("providerEndpoint" in normalized, false);
 });
 
 Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () => {
   const source = new Uint8Array([1, 2, 3, 4]);
   const normalized = normalizeSubmitRequest({
+    operationId: 7n,
     frameId: 7,
     payload: source.subarray(1, 3),
     tensors: [{ payload: new DataView(source.buffer, 2, 2), codecId: 4 }],
@@ -1474,7 +1476,7 @@ Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () =>
 
 Deno.test("@nnrp/core can skip payload copies when ownership is explicit", () => {
   const payload = new Uint8Array([5, 6]);
-  const normalized = normalizeSubmitRequest({ frameId: 1, payload }, { copyPayloads: false });
+  const normalized = normalizeSubmitRequest({ operationId: 1n, frameId: 1, payload }, { copyPayloads: false });
 
   assertEquals(normalized.payload, payload);
 });
@@ -1491,12 +1493,12 @@ Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () =>
     "Schema id must be non-empty",
   );
   assertThrows(
-    () => normalizeSubmitRequest({ frameId: -1 }),
+    () => normalizeSubmitRequest({ operationId: 1n, frameId: -1 }),
     NnrpProtocolError,
     "frameId must be a non-negative",
   );
   assertThrows(
-    () => normalizeSubmitRequest({ frameId: 1, inputProfile: "custom" as never }),
+    () => normalizeSubmitRequest({ operationId: 1n, frameId: 1, inputProfile: "custom" as never }),
     NnrpProtocolError,
     "Unknown NNRP input profile",
   );
@@ -1595,6 +1597,7 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
     transportCandidate("tcp", { probe: DEFAULT_PROBE }),
   ]));
   const normalized = normalizeSubmitRequest({
+    operationId: 12n,
     frameId: 12,
     metadata: { request: "agent" },
     descriptor: {

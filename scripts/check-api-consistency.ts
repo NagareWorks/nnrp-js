@@ -99,7 +99,7 @@ function checkServerControlSurface(): void {
 
 function checkBinaryPayloadOwnership(): void {
   const retained = new Uint8Array([1, 2, 3]);
-  const retainedSubmit = normalizeSubmitRequest({ frameId: 1, payload: retained });
+  const retainedSubmit = normalizeSubmitRequest({ operationId: 1n, frameId: 1, payload: retained });
   retained[0] = 99;
   if (retainedSubmit.payload === retained || retainedSubmit.payload?.[0] !== 1) {
     failures.push("retained submit payloads must be copied by default");
@@ -108,7 +108,7 @@ function checkBinaryPayloadOwnership(): void {
   const buffer = new ArrayBuffer(4);
   const view = new DataView(buffer, 1, 2);
   view.setUint8(0, 7);
-  const viewSubmit = normalizeSubmitRequest({ frameId: 2, payload: view });
+  const viewSubmit = normalizeSubmitRequest({ operationId: 2n, frameId: 2, payload: view });
   view.setUint8(0, 8);
   if (viewSubmit.payload?.[0] !== 7) {
     failures.push("ArrayBufferView submit payloads must be normalized and copied by default");
@@ -116,7 +116,7 @@ function checkBinaryPayloadOwnership(): void {
 
   const transferred = new Uint8Array([4, 5, 6]);
   const transferredSubmit = normalizeSubmitRequest(
-    { frameId: 3, payload: transferred },
+    { operationId: 3n, frameId: 3, payload: transferred },
     { copyPayloads: false },
   );
   if (transferredSubmit.payload !== transferred) {
