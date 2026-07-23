@@ -8,37 +8,37 @@
   - [x] Emit exact capability tokens and positive `max_frame_bytes`/`max_in_flight` limits.
   - [x] Validate generated manifests before starting a harness.
 - [ ] Declare modes by actual role behavior.
-  - [ ] Native server harness declares `suite_as_client`.
-  - [ ] Native client harness declares `suite_as_server`.
-  - [ ] Native paired proxy harness declares `suite_as_proxy`.
+  - [x] Native server harness declares `suite_as_client`.
+  - [x] Native client harness declares `suite_as_server`.
+  - [x] Native target exposes the QUIC upstream role required by `suite_as_proxy`.
   - [ ] Browser client harness declares `suite_as_server` over WebSocket only.
-  - [ ] No harness declares a mode or transport it did not start.
+  - [x] No harness declares a mode or transport it did not start.
 
 ## Live Harnesses
 
-- [ ] Add Node/Deno native harnesses.
-  - [ ] Start server-target mode for TCP, QUIC, IPC, and WebSocket.
-  - [ ] Start client-target mode for TCP, QUIC, IPC, and WebSocket.
-  - [ ] Start paired proxy-target mode with independent ingress and egress evidence.
-  - [ ] Shut down providers and sessions deterministically after each plan.
+- [x] Add Node/Deno native harnesses.
+  - [x] Start server-target mode for the frozen TCP, QUIC, and IPC scenarios.
+  - [x] Start client-target mode for the frozen TCP and WebSocket scenarios.
+  - [x] Serve the QUIC upstream for the suite-owned proxy with independent ingress and egress evidence.
+  - [x] Shut down providers and sessions deterministically after each plan.
 - [ ] Add the browser harness.
   - [ ] Start a browser client against the suite-owned WebSocket endpoint.
   - [ ] Report browser/WASM observations in the standard case-results schema.
   - [ ] Capture console, frame, and timing evidence without SDK-adapter translation.
-- [ ] Integrate result validation.
-  - [ ] Write observed frames, terminal state, failures, and evidence paths.
-  - [ ] Run the suite validator on every produced report.
-  - [ ] Keep adapter conformance and OpenAI API profile conformance as separate commands/jobs.
+- [x] Integrate result validation.
+  - [x] Write observed frames, terminal state, failures, and evidence paths.
+  - [x] Run the suite validator on every produced report.
+  - [x] Keep adapter conformance and OpenAI API profile conformance as separate commands/jobs.
 
 ## CI Coverage
 
 - [ ] Add wire-conformance jobs with explicit result states.
-  - [ ] Run the complete Preview4 control/object/cache scenario set on the Linux x86_64 native job.
+  - [x] Run the complete Preview4 control/object/cache scenario set on the Linux x86_64 native job.
   - [ ] Run TCP and IPC on every compatible native CI host.
-  - [ ] Run QUIC and native WebSocket in their configured integration jobs.
+  - [x] Run QUIC and native WebSocket in their configured integration jobs.
   - [ ] Run browser WebSocket/WASM scenarios in the browser job.
   - [ ] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
-  - [ ] Fail when a declared capability, mode, or transport has no selected scenario.
+  - [x] Fail when a declared capability, mode, or transport has no selected scenario.
 
 ## Benchmarks
 
@@ -56,7 +56,7 @@
 
 ## Acceptance Evidence
 
-- [ ] All generated target manifests validate against `wire-conformance-target.schema.json`.
-- [ ] All reports validate against the selected plan and case-results schema.
+- [x] All generated target manifests validate against `wire-conformance-target.schema.json`.
+- [x] All reports validate against the selected plan and case-results schema.
 - [ ] CI artifacts identify every executed and skipped matrix cell.
 - [ ] Benchmark reports contain no private hostnames, addresses, tokens, or local user paths.
