@@ -6,14 +6,22 @@ export const NNRP_WIRE_TARGET_SCHEMA =
 
 export type WireConformanceMode = "suite_as_client" | "suite_as_server" | "suite_as_proxy";
 
+export interface WireConformanceTransportSecurity {
+  readonly server_name: string;
+  readonly trusted_certificate_der_path: string;
+  readonly certificate_der_path: string;
+  readonly private_key_pkcs8_der_path: string;
+}
+
 export interface WireConformanceTransportEndpoint {
   readonly name: NnrpTransportKind;
   readonly endpoint: string;
   readonly tls: boolean;
+  readonly security?: WireConformanceTransportSecurity;
 }
 
 export interface WireConformanceTargetManifest {
-  readonly $schema: typeof NNRP_WIRE_TARGET_SCHEMA;
+  readonly $schema?: typeof NNRP_WIRE_TARGET_SCHEMA;
   readonly target_name: string;
   readonly protocol_version: typeof NNRP_WIRE_PROTOCOL_VERSION;
   readonly suite_version: string;
@@ -65,14 +73,17 @@ export function createWireConformanceTargetManifest(
 }
 
 export function validateWireConformanceTargetManifest(value: unknown): asserts value is WireConformanceTargetManifest {
-  const manifest = exactRecord(value, [
-    "$schema",
-    "target_name",
-    "protocol_version",
-    "suite_version",
-    "wire_conformance",
-  ], "wire target manifest");
-  requireEqual(manifest.$schema, NNRP_WIRE_TARGET_SCHEMA, "$schema");
+  const candidate = recordValue(value, "wire target manifest");
+  const manifest = exactRecord(
+    candidate,
+    Object.hasOwn(candidate, "$schema")
+      ? ["$schema", "target_name", "protocol_version", "suite_version", "wire_conformance"]
+      : ["target_name", "protocol_version", "suite_version", "wire_conformance"],
+    "wire target manifest",
+  );
+  if (Object.hasOwn(manifest, "$schema")) {
+    requireEqual(manifest.$schema, NNRP_WIRE_TARGET_SCHEMA, "$schema");
+  }
   requireNonEmptyString(manifest.target_name, "target_name");
   requireEqual(manifest.protocol_version, NNRP_WIRE_PROTOCOL_VERSION, "protocol_version");
   requireNonEmptyString(manifest.suite_version, "suite_version");
@@ -93,7 +104,12 @@ export function validateWireConformanceTargetManifest(value: unknown): asserts v
   const transports = nonEmptyArray(wire.transports, "wire_conformance.transports");
   for (const [index, transportValue] of transports.entries()) {
     const path = `wire_conformance.transports[${index}]`;
-    const transport = exactRecord(transportValue, ["name", "endpoint", "tls"], path);
+    const candidate = recordValue(transportValue, path);
+    const transport = exactRecord(
+      candidate,
+      Object.hasOwn(candidate, "security") ? ["name", "endpoint", "tls", "security"] : ["name", "endpoint", "tls"],
+      path,
+    );
     if (typeof transport.name !== "string" || !TRANSPORT_KINDS.has(transport.name as NnrpTransportKind)) {
       throw new Error(`${path}.name contains unsupported transport: ${String(transport.name)}`);
     }
@@ -101,6 +117,7 @@ export function validateWireConformanceTargetManifest(value: unknown): asserts v
     if (typeof transport.tls !== "boolean") {
       throw new Error(`${path}.tls must be a boolean.`);
     }
+    validateTransportSecurity(transport, path);
   }
 
   const capabilities = nonEmptyArray(wire.capabilities, "wire_conformance.capabilities");
@@ -120,11 +137,60 @@ export function validateWireConformanceTargetManifest(value: unknown): asserts v
   requirePositiveInteger(limits.max_in_flight, "wire_conformance.limits.max_in_flight");
 }
 
-function exactRecord(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
+function validateTransportSecurity(transport: Record<string, unknown>, path: string): void {
+  const name = transport.name as NnrpTransportKind;
+  const endpoint = transport.endpoint as string;
+  const tls = transport.tls as boolean;
+  const hasSecurity = Object.hasOwn(transport, "security");
+  const security = transport.security;
+
+  if (tls && !hasSecurity) {
+    throw new Error(`${path}.security is required when tls is true.`);
+  }
+  if (!tls && hasSecurity) {
+    throw new Error(`${path}.security is forbidden when tls is false.`);
+  }
+  if (name === "quic" && !tls) {
+    throw new Error(`${path}.tls must be true for QUIC.`);
+  }
+  if ((name === "tcp" || name === "ipc") && tls) {
+    throw new Error(`${path}.tls must be false for ${name}.`);
+  }
+  if (name === "websocket") {
+    if (!endpoint.startsWith("ws://") && !endpoint.startsWith("wss://")) {
+      throw new Error(`${path}.endpoint must use ws:// or wss:// for WebSocket.`);
+    }
+    if (endpoint.startsWith("wss://") !== tls) {
+      throw new Error(`${path}.tls must match the WebSocket endpoint scheme.`);
+    }
+  }
+
+  if (hasSecurity) {
+    const fields = exactRecord(
+      security,
+      [
+        "server_name",
+        "trusted_certificate_der_path",
+        "certificate_der_path",
+        "private_key_pkcs8_der_path",
+      ],
+      `${path}.security`,
+    );
+    for (const field of Object.keys(fields)) {
+      requireNonEmptyString(fields[field], `${path}.security.${field}`);
+    }
+  }
+}
+
+function recordValue(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${path} must be an object.`);
   }
-  const record = value as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+function exactRecord(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
+  const record = recordValue(value, path);
   const actualKeys = Object.keys(record).sort();
   const expectedKeys = [...keys].sort();
   if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {

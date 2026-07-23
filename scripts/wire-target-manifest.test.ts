@@ -20,6 +20,13 @@ const TARGET_OPTIONS: WireConformanceTargetOptions = {
   maxInFlight: 64,
 };
 
+const TEST_SECURITY = {
+  server_name: "localhost",
+  trusted_certificate_der_path: "certs/server.der",
+  certificate_der_path: "certs/server.der",
+  private_key_pkcs8_der_path: "certs/server-key.der",
+} as const;
+
 Deno.test("wire target generator emits the frozen Preview4 schema shape", () => {
   const manifest = createWireConformanceTargetManifest(TARGET_OPTIONS);
 
@@ -42,6 +49,9 @@ Deno.test("wire target generator emits the frozen Preview4 schema shape", () => 
     },
   });
   validateWireConformanceTargetManifest(structuredClone(manifest));
+
+  const { $schema: _, ...withoutSchema } = structuredClone(manifest);
+  validateWireConformanceTargetManifest(withoutSchema);
 });
 
 Deno.test("wire target generator emits only caller-started live endpoints", () => {
@@ -49,12 +59,37 @@ Deno.test("wire target generator emits only caller-started live endpoints", () =
     ...TARGET_OPTIONS,
     targetName: "nnrp-js-browser-client",
     modes: ["suite_as_server"],
-    transports: [{ name: "websocket", endpoint: "wss://suite.example/nnrp", tls: true }],
+    transports: [{
+      name: "websocket",
+      endpoint: "wss://suite.example/nnrp",
+      tls: true,
+      security: TEST_SECURITY,
+    }],
     capabilities: ["client.session", "wasm.loader", "transport.websocket"],
   });
 
   assertEquals(manifest.wire_conformance.transports, [
-    { name: "websocket", endpoint: "wss://suite.example/nnrp", tls: true },
+    {
+      name: "websocket",
+      endpoint: "wss://suite.example/nnrp",
+      tls: true,
+      security: TEST_SECURITY,
+    },
+  ]);
+});
+
+Deno.test("wire target generator preserves released transport security metadata", () => {
+  const manifest = createWireConformanceTargetManifest({
+    ...TARGET_OPTIONS,
+    transports: [
+      { name: "quic", endpoint: "127.0.0.1:4433", tls: true, security: TEST_SECURITY },
+      { name: "websocket", endpoint: "wss://localhost:4434/nnrp", tls: true, security: TEST_SECURITY },
+    ],
+  });
+
+  assertEquals(manifest.wire_conformance.transports, [
+    { name: "quic", endpoint: "127.0.0.1:4433", tls: true, security: TEST_SECURITY },
+    { name: "websocket", endpoint: "wss://localhost:4434/nnrp", tls: true, security: TEST_SECURITY },
   ]);
 });
 
@@ -87,6 +122,58 @@ Deno.test("wire target validation rejects values outside the released schema", (
       wire_conformance: {
         ...valid.wire_conformance,
         transports: [{ name: "tcp", endpoint: "127.0.0.1:4433", tls: "false" }],
+      },
+    },
+    {
+      ...valid,
+      wire_conformance: {
+        ...valid.wire_conformance,
+        transports: [{ name: "quic", endpoint: "127.0.0.1:4433", tls: false }],
+      },
+    },
+    {
+      ...valid,
+      wire_conformance: {
+        ...valid.wire_conformance,
+        transports: [{ name: "quic", endpoint: "127.0.0.1:4433", tls: true }],
+      },
+    },
+    {
+      ...valid,
+      wire_conformance: {
+        ...valid.wire_conformance,
+        transports: [{
+          name: "tcp",
+          endpoint: "127.0.0.1:4433",
+          tls: false,
+          security: {
+            server_name: "localhost",
+            trusted_certificate_der_path: "certs/server.der",
+            certificate_der_path: "certs/server.der",
+            private_key_pkcs8_der_path: "certs/server-key.der",
+          },
+        }],
+      },
+    },
+    {
+      ...valid,
+      wire_conformance: {
+        ...valid.wire_conformance,
+        transports: [{ name: "tcp", endpoint: "127.0.0.1:4433", tls: false, security: undefined }],
+      },
+    },
+    {
+      ...valid,
+      wire_conformance: {
+        ...valid.wire_conformance,
+        transports: [{ name: "websocket", endpoint: "wss://localhost:4433/nnrp", tls: false }],
+      },
+    },
+    {
+      ...valid,
+      wire_conformance: {
+        ...valid.wire_conformance,
+        transports: [{ name: "websocket", endpoint: "https://localhost:4433/nnrp", tls: false }],
       },
     },
     { ...valid, wire_conformance: { ...valid.wire_conformance, capabilities: [] } },
