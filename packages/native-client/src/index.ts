@@ -53,6 +53,8 @@ import {
   type ObjectDescriptorMetadata,
   type ObjectReferenceMetadata,
   type ObjectReleaseMetadata,
+  ObjectReleaseReason,
+  OwnershipHint,
   type PressureMetadata,
   resolveProviderEndpoint,
   type RouteHintMetadata,
@@ -71,6 +73,143 @@ const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 3;
 const EXPECTED_ABI_MINOR = 0;
 const EXPECTED_ABI_PATCH = 0;
+
+type RuntimeObjectSendMetadata =
+  | ObjectDescriptorMetadata
+  | ObjectReferenceMetadata
+  | ObjectReleaseMetadata
+  | ObjectDeltaMetadata
+  | CacheReferenceMetadata
+  | CacheMissMetadata;
+
+interface TrackedRuntimeObject {
+  readonly descriptor: ObjectDescriptorMetadata;
+  readonly operations: Set<bigint>;
+  readonly releasedOperations: Set<bigint>;
+  objectVersion?: bigint;
+  deltaSequence?: bigint;
+  released: boolean;
+}
+
+class RuntimeObjectLifecycle {
+  readonly #objects = new Map<bigint, TrackedRuntimeObject>();
+
+  public validate(messageType: NnrpMessageType, metadata: RuntimeObjectSendMetadata): void {
+    if (messageType === NnrpMessageType.ObjectDeclare) {
+      const declaration = metadata as ObjectDescriptorMetadata;
+      const existing = this.#objects.get(declaration.objectId);
+      if (existing !== undefined && !existing.released) {
+        throw objectLifecycleError(declaration.objectId, "is already declared");
+      }
+      return;
+    }
+    if (messageType === NnrpMessageType.ObjectRef) {
+      const reference = metadata as ObjectReferenceMetadata;
+      const object = this.#active(reference.objectId);
+      if (reference.operationId !== 0n && object.releasedOperations.has(reference.operationId)) {
+        throw objectLifecycleError(reference.objectId, `was already released by operation ${reference.operationId}`);
+      }
+      if (object.objectVersion !== undefined && reference.objectVersion < object.objectVersion) {
+        throw objectLifecycleError(
+          reference.objectId,
+          `version ${reference.objectVersion} is older than ${object.objectVersion}`,
+        );
+      }
+      return;
+    }
+    if (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta) {
+      const delta = metadata as ObjectDeltaMetadata;
+      const object = this.#active(delta.objectId);
+      if (object.deltaSequence !== undefined && delta.deltaSequence <= object.deltaSequence) {
+        throw objectLifecycleError(
+          delta.objectId,
+          `delta sequence ${delta.deltaSequence} does not advance ${object.deltaSequence}`,
+        );
+      }
+      return;
+    }
+    if (messageType === NnrpMessageType.ObjectRelease) {
+      const release = metadata as ObjectReleaseMetadata;
+      const object = this.#active(release.objectId);
+      if (release.operationId !== 0n && object.releasedOperations.has(release.operationId)) {
+        throw objectLifecycleError(release.objectId, `was already released by operation ${release.operationId}`);
+      }
+    }
+  }
+
+  public commit(messageType: NnrpMessageType, metadata: RuntimeObjectSendMetadata): void {
+    if (messageType === NnrpMessageType.ObjectDeclare) {
+      const descriptor = metadata as ObjectDescriptorMetadata;
+      this.#objects.set(descriptor.objectId, {
+        descriptor,
+        operations: new Set(),
+        releasedOperations: new Set(),
+        released: false,
+      });
+      return;
+    }
+    if (messageType === NnrpMessageType.ObjectRef) {
+      const reference = metadata as ObjectReferenceMetadata;
+      const object = this.#active(reference.objectId);
+      object.objectVersion = reference.objectVersion;
+      if (reference.operationId !== 0n) object.operations.add(reference.operationId);
+      return;
+    }
+    if (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta) {
+      const delta = metadata as ObjectDeltaMetadata;
+      this.#active(delta.objectId).deltaSequence = delta.deltaSequence;
+      return;
+    }
+    if (messageType === NnrpMessageType.ObjectRelease) {
+      const release = metadata as ObjectReleaseMetadata;
+      const object = this.#active(release.objectId);
+      if (release.operationId === 0n || object.descriptor.ownershipHint === OwnershipHint.ReleaseOnDrop) {
+        object.released = true;
+        object.operations.clear();
+      } else {
+        object.operations.delete(release.operationId);
+        object.releasedOperations.add(release.operationId);
+      }
+    }
+  }
+
+  public releaseOnDropObjectIds(operationId: bigint): readonly bigint[] {
+    const objectIds: bigint[] = [];
+    for (const [objectId, object] of this.#objects) {
+      if (
+        !object.released && object.descriptor.ownershipHint === OwnershipHint.ReleaseOnDrop &&
+        object.operations.has(operationId)
+      ) {
+        objectIds.push(objectId);
+      }
+    }
+    return objectIds.sort(compareBigInt);
+  }
+
+  public clear(): void {
+    this.#objects.clear();
+  }
+
+  #active(objectId: bigint): TrackedRuntimeObject {
+    const object = this.#objects.get(objectId);
+    if (object === undefined) throw objectLifecycleError(objectId, "has not been declared");
+    if (object.released) throw objectLifecycleError(objectId, "was already released");
+    return object;
+  }
+}
+
+function compareBigInt(left: bigint, right: bigint): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function objectLifecycleError(objectId: bigint, detail: string): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_OBJECT_LIFECYCLE_INVALID",
+    message: `Runtime object ${objectId} ${detail}.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
 const NATIVE_RUNTIME_CAPABILITIES = [
   "cache",
   "schema",
@@ -930,11 +1069,13 @@ export interface NnrpClientSessionState {
 
 export class NnrpClientSession {
   readonly #state: NnrpClientSessionState;
+  readonly #runtimeObjects = new RuntimeObjectLifecycle();
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
   readonly #cancelledOperations = new Set<bigint>();
   readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
+  #runtimeObjectQueue: Promise<void> = Promise.resolve();
   #availableCredits: number;
   #nextControlSequence = 1n;
   #nextRuntimeFrameId = 1;
@@ -1016,15 +1157,11 @@ export class NnrpClientSession {
   }
 
   public cancel(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Cancel, metadata, diagnostic).then(() => {
-      this.#cancelledOperations.add(metadata.operationId);
-    });
+    return this.sendControl(NnrpMessageType.Cancel, metadata, diagnostic);
   }
 
   public abort(metadata: ControlRequestMetadata, diagnostic: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Abort, metadata, diagnostic).then(() => {
-      this.#cancelledOperations.add(metadata.operationId);
-    });
+    return this.sendControl(NnrpMessageType.Abort, metadata, diagnostic);
   }
 
   public updatePriority(metadata: SchedulingMetadata): Promise<void> {
@@ -1076,7 +1213,9 @@ export class NnrpClientSession {
       assertClientRuntimeControlMessage(messageType);
       const payload = encodeRuntimeControlMetadata(messageType, metadata, tail);
       this.#observeControlSequence(metadata);
-      return this.#sendRuntimeFrame(messageType, payload);
+      return this.#sendRuntimeFrame(messageType, payload).then(
+        async () => await this.#applySentTerminalControl(messageType, metadata),
+      );
     } catch (error) {
       return Promise.reject(error);
     }
@@ -1172,6 +1311,7 @@ export class NnrpClientSession {
         ? options
         : { ...options, timeoutMillis: Math.max(0, deadlineMillis - Date.now()) };
       const event = await this.#state.client.nextSessionEvent(this.sessionId, pollOptions);
+      await this.#releaseForTerminalControl(event);
       if (this.#shouldSuppressCancelledPayload(event)) {
         continue;
       }
@@ -1236,6 +1376,7 @@ export class NnrpClientSession {
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
     this.#cancelledOperations.clear();
+    this.#runtimeObjects.clear();
     for (const cleanup of this.#submitCancellationCleanups.values()) {
       cleanup();
     }
@@ -1506,19 +1647,51 @@ export class NnrpClientSession {
 
   #sendRuntimeObject(
     messageType: NnrpMessageType,
-    metadata:
-      | ObjectDescriptorMetadata
-      | ObjectReferenceMetadata
-      | ObjectReleaseMetadata
-      | ObjectDeltaMetadata
-      | CacheReferenceMetadata
-      | CacheMissMetadata,
+    metadata: RuntimeObjectSendMetadata,
     tail: Uint8Array,
   ): Promise<void> {
-    try {
-      return this.#sendRuntimeFrame(messageType, encodeRuntimeObjectMetadata(messageType, metadata, tail));
-    } catch (error) {
-      return Promise.reject(error);
+    const send = this.#runtimeObjectQueue.then(async () => {
+      this.#runtimeObjects.validate(messageType, metadata);
+      const payload = encodeRuntimeObjectMetadata(messageType, metadata, tail);
+      await this.#sendRuntimeFrame(messageType, payload);
+      this.#runtimeObjects.commit(messageType, metadata);
+    });
+    this.#runtimeObjectQueue = send.catch(() => undefined);
+    return send;
+  }
+
+  async #releaseForTerminalControl(event: NnrpRuntimeEvent): Promise<void> {
+    if (event.type === "cancel" || event.type === "abort") {
+      await this.#releaseOperationObjects(event.metadata.operationId, ObjectReleaseReason.Cancelled);
+    } else if (event.type === "supersede") {
+      await this.#releaseOperationObjects(event.metadata.oldOperationId, ObjectReleaseReason.Replaced);
+    }
+  }
+
+  async #applySentTerminalControl(messageType: NnrpMessageType, metadata: RuntimeControlMetadata): Promise<void> {
+    if (messageType === NnrpMessageType.Cancel || messageType === NnrpMessageType.Abort) {
+      const operationId = (metadata as ControlRequestMetadata).operationId;
+      this.#cancelledOperations.add(operationId);
+      await this.#releaseOperationObjects(operationId, ObjectReleaseReason.Cancelled);
+    } else if (messageType === NnrpMessageType.Supersede) {
+      await this.#releaseOperationObjects(
+        (metadata as SupersedeMetadata).oldOperationId,
+        ObjectReleaseReason.Replaced,
+      );
+    }
+  }
+
+  async #releaseOperationObjects(operationId: bigint, releaseReason: ObjectReleaseReason): Promise<void> {
+    await this.#runtimeObjectQueue;
+    for (const objectId of this.#runtimeObjects.releaseOnDropObjectIds(operationId)) {
+      await this.releaseObject({
+        objectId,
+        operationId,
+        releaseReason,
+        sourceRole: RuntimeRole.Client,
+        flags: 0,
+        diagnosticBytes: 0,
+      });
     }
   }
 

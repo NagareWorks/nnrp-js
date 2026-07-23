@@ -121,7 +121,32 @@ Deno.test({
       });
       const cancellable = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(cancellable.type, "submit");
-      await session.cancel({
+      await session.declareObject({
+        objectId: 99n,
+        objectKind: RuntimeObjectKind.Tensor,
+        producerRole: RuntimeRole.Client,
+        consumerRole: RuntimeRole.Server,
+        sessionId: 1,
+        byteSize: 4n,
+        computeCostUnits: 1,
+        memoryLocationHint: MemoryLocationHint.HostMemory,
+        ownershipHint: OwnershipHint.ReleaseOnDrop,
+        lifetimeHintMs: 1_000,
+        metadataBytes: 0,
+      });
+      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-declare");
+      await session.referenceObject({
+        objectId: 99n,
+        operationId: 99n,
+        objectVersion: 1n,
+        offset: 0n,
+        length: 4n,
+        flags: 0,
+        metadataBytes: 0,
+      });
+      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-ref");
+      const beforeCancellation = sentPackets.length;
+      await session.sendControl(NnrpMessageType.Cancel, {
         operationId: 99n,
         controlSequence: 1n,
         reasonCode: 2,
@@ -129,13 +154,40 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 0,
       });
-      const manualCancelPacket = sentPackets.at(-1)!;
+      const cancellationPackets = sentPackets.slice(beforeCancellation);
+      const manualCancelPacket = cancellationPackets.find((packet) => packet[6] === NnrpMessageType.Cancel)!;
       assertEquals(manualCancelPacket[6], NnrpMessageType.Cancel);
       assertEquals(new DataView(manualCancelPacket.buffer).getUint32(20, true), 1);
       assertEquals(new DataView(manualCancelPacket.buffer).getUint32(24, true), 8);
       assertEquals(new DataView(manualCancelPacket.buffer).getBigUint64(40, true), 99n);
       const control = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(control.type, "cancel");
+      const released = await serverSession.receive({ timeoutMillis: 5_000 });
+      assertEquals(released.type, "object-release");
+      if (released.type === "object-release") {
+        assertEquals(released.metadata.objectId, 99n);
+        assertEquals(released.metadata.operationId, 99n);
+        assertEquals(released.metadata.releaseReason, ObjectReleaseReason.Cancelled);
+        assertEquals(released.metadata.sourceRole, RuntimeRole.Client);
+      }
+      assertEquals(
+        cancellationPackets.some((packet) => packet[6] === NnrpMessageType.CacheInvalidate),
+        false,
+      );
+      await assertRejects(
+        () =>
+          session.referenceObject({
+            objectId: 99n,
+            operationId: 99n,
+            objectVersion: 2n,
+            offset: 0n,
+            length: 4n,
+            flags: 0,
+            metadataBytes: 0,
+          }),
+        Error,
+        "was already released",
+      );
 
       await session.submitNoWait({
         operationId: 100n,
@@ -303,7 +355,7 @@ Deno.test({
       } as const;
       await session.patchObject(delta, new Uint8Array([11, 12]));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-patch");
-      await session.sendObjectDelta(delta, new Uint8Array([13, 14]));
+      await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, new Uint8Array([13, 14]));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-delta");
 
       await session.referenceCache({

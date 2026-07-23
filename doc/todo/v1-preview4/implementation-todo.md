@@ -25,7 +25,7 @@ and scenarios.
 - [ ] [02 - Codecs and runtime events](02-codecs-and-runtime-events.md)
 - [ ] [03 - Client control surface](03-client-control-surface.md)
 - [ ] [04 - Server control surface](04-server-control-surface.md)
-- [ ] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)
+- [x] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)
 - [x] [06 - IPC carrier provider](06-ipc-provider.md)
 - [x] [07 - WebSocket carrier provider](07-websocket-provider.md)
 - [ ] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)

@@ -4,6 +4,7 @@ import {
   CacheReuseScope,
   createBackendNativeManifest,
   decodeRuntimeControlMetadata,
+  decodeRuntimeObjectMetadata,
   MemoryLocationHint,
   NnrpCacheObjectKind,
   NnrpCapabilityError,
@@ -742,7 +743,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     metadataBytes: 0,
   } as const;
   await session.patchObject(delta, one);
-  await session.sendObjectDelta(delta, one);
+  await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, one);
   await session.referenceCache({
     cacheNamespace: 0,
     cacheKeyHi: 1n,
@@ -796,6 +797,131 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   ]);
   assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 21 }, (_, index) => index + 1));
   assertEquals(seen.every(({ payload }) => payload.byteLength > 0), true);
+});
+
+Deno.test("@nnrp/native-client enforces operation-owned runtime object lifecycles", async () => {
+  const seen: Array<{ readonly messageType: NnrpMessageType; readonly payload: Uint8Array }> = [];
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+    ffi: {
+      mode: "test",
+      sendRuntimeFrame: ({ messageType, payload }) => {
+        seen.push({ messageType, payload });
+      },
+    },
+  });
+  const session = client.openSession({ sessionId: "runtime-object-lifecycle" });
+  const reference = {
+    objectId: 41n,
+    operationId: 7n,
+    objectVersion: 2n,
+    offset: 0n,
+    length: 4n,
+    flags: 0,
+    metadataBytes: 0,
+  } as const;
+
+  await assertRejects(() => session.referenceObject(reference), Error, "has not been declared");
+  await session.declareObject({
+    objectId: 41n,
+    objectKind: RuntimeObjectKind.Tensor,
+    producerRole: RuntimeRole.Client,
+    consumerRole: RuntimeRole.Server,
+    sessionId: 1,
+    byteSize: 4n,
+    computeCostUnits: 1,
+    memoryLocationHint: MemoryLocationHint.HostMemory,
+    ownershipHint: OwnershipHint.ReleaseOnDrop,
+    lifetimeHintMs: 1_000,
+    metadataBytes: 0,
+  });
+  await session.referenceObject(reference);
+  await assertRejects(
+    () => session.referenceObject({ ...reference, objectVersion: 1n }),
+    Error,
+    "version 1 is older than 2",
+  );
+  const delta = {
+    objectId: 41n,
+    deltaSequence: 1n,
+    regionOffset: 0n,
+    regionBytes: 4,
+    deltaBytes: 4,
+    flags: 0,
+    metadataBytes: 0,
+  } as const;
+  await session.patchObject(delta, new Uint8Array(4));
+  await assertRejects(() => session.sendObjectDelta(delta, new Uint8Array(4)), Error, "does not advance 1");
+
+  await session.sendControl(NnrpMessageType.Cancel, {
+    operationId: 7n,
+    controlSequence: 1n,
+    reasonCode: 2,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+
+  assertEquals(seen.map(({ messageType }) => messageType), [
+    NnrpMessageType.ObjectDeclare,
+    NnrpMessageType.ObjectRef,
+    NnrpMessageType.ObjectPatch,
+    NnrpMessageType.Cancel,
+    NnrpMessageType.ObjectRelease,
+  ]);
+  const release = decodeRuntimeObjectMetadata(NnrpMessageType.ObjectRelease, seen.at(-1)!.payload).metadata;
+  assertEquals(release, {
+    objectId: 41n,
+    operationId: 7n,
+    releaseReason: ObjectReleaseReason.Cancelled,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+  assertEquals(seen.some(({ messageType }) => messageType === NnrpMessageType.CacheInvalidate), false);
+  await assertRejects(() => session.referenceObject(reference), Error, "was already released");
+
+  await session.declareObject({
+    objectId: 42n,
+    objectKind: RuntimeObjectKind.Tensor,
+    producerRole: RuntimeRole.Client,
+    consumerRole: RuntimeRole.Server,
+    sessionId: 1,
+    byteSize: 4n,
+    computeCostUnits: 1,
+    memoryLocationHint: MemoryLocationHint.HostMemory,
+    ownershipHint: OwnershipHint.ReleaseOnDrop,
+    lifetimeHintMs: 1_000,
+    metadataBytes: 0,
+  });
+  await session.referenceObject({ ...reference, objectId: 42n, operationId: 8n });
+  await session.supersede({
+    oldOperationId: 8n,
+    newOperationId: 9n,
+    controlSequence: 2n,
+    dropReasonCode: 2,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+  assertEquals(seen.slice(-2).map(({ messageType }) => messageType), [
+    NnrpMessageType.Supersede,
+    NnrpMessageType.ObjectRelease,
+  ]);
+  const supersededRelease = decodeRuntimeObjectMetadata(
+    NnrpMessageType.ObjectRelease,
+    seen.at(-1)!.payload,
+  ).metadata;
+  assertEquals(supersededRelease, {
+    objectId: 42n,
+    operationId: 8n,
+    releaseReason: ObjectReleaseReason.Replaced,
+    sourceRole: RuntimeRole.Client,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+
+  await client.close();
 });
 
 function fakeQuicNativeBinding(): NnrpQuicNativeBinding {

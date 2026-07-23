@@ -11,11 +11,11 @@
   - [x] `referenceCache(metadata, body?)`.
   - [x] `reportCacheMiss(metadata, diagnostic?)`.
   - [x] `invalidateCache(metadata)`.
-- [ ] Enforce object lifecycle validation.
-  - [ ] Require declaration before a local reference when local tracking is enabled.
-  - [ ] Track version and delta sequence monotonically.
-  - [ ] Reject a use-after-release operation.
-  - [ ] Release superseded or cancelled operation-owned objects without implicit global invalidation.
+- [x] Enforce object lifecycle validation.
+  - [x] Require declaration before a local reference when local tracking is enabled.
+  - [x] Track version and delta sequence monotonically.
+  - [x] Reject a use-after-release operation.
+  - [x] Release superseded or cancelled operation-owned objects without implicit global invalidation.
 
 ## Cache Semantics
 
@@ -44,7 +44,7 @@
 
 ## Acceptance Evidence
 
-- [ ] Lifecycle tests cover declare, ref, patch/delta, release, cancellation, and supersession.
-- [ ] Cache tests cover hit-reference, miss, invalidate, lease expiry, and no-implicit-lookup behavior.
+- [x] Lifecycle tests cover declare, ref, patch/delta, release, cancellation, and supersession.
+- [x] Cache tests cover hit-reference, miss, invalidate, lease expiry, and no-implicit-lookup behavior.
 - [x] Structured-clone tests cover every public object/cache type.
-- [ ] Public API snapshots match the frozen JavaScript client, server, and runtime pages in `nnrp-doc`.
+- [x] Public API snapshots match the frozen JavaScript client, server, and runtime pages in `nnrp-doc`.
