@@ -100,6 +100,7 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.d.ts",
       "dist/index.d.ts.map",
       "dist/index.js",
+      "dist/browser.js",
       "dist/native.js",
       "dist/native-node.js",
       "native/windows-x86_64/manifest.json",

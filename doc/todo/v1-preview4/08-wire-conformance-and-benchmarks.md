@@ -7,11 +7,11 @@
   - [x] Emit only live endpoint entries with `name`, `endpoint`, and `tls`.
   - [x] Emit exact capability tokens and positive `max_frame_bytes`/`max_in_flight` limits.
   - [x] Validate generated manifests before starting a harness.
-- [ ] Declare modes by actual role behavior.
+- [x] Declare modes by actual role behavior.
   - [x] Native server harness declares `suite_as_client`.
   - [x] Native client harness declares `suite_as_server`.
   - [x] Native target exposes the QUIC upstream role required by `suite_as_proxy`.
-  - [ ] Browser client harness declares `suite_as_server` over WebSocket only.
+  - [x] Browser client harness declares `suite_as_server` over WebSocket only.
   - [x] No harness declares a mode or transport it did not start.
 
 ## Live Harnesses
@@ -21,10 +21,10 @@
   - [x] Start client-target mode for the frozen TCP and WebSocket scenarios.
   - [x] Serve the QUIC upstream for the suite-owned proxy with independent ingress and egress evidence.
   - [x] Shut down providers and sessions deterministically after each plan.
-- [ ] Add the browser harness.
-  - [ ] Start a browser client against the suite-owned WebSocket endpoint.
-  - [ ] Report browser/WASM observations in the standard case-results schema.
-  - [ ] Capture console, frame, and timing evidence without SDK-adapter translation.
+- [x] Add the browser harness.
+  - [x] Start a browser client against the suite-owned WebSocket endpoint.
+  - [x] Report browser/WASM observations in the standard case-results schema.
+  - [x] Capture console, frame, and timing evidence without SDK-adapter translation.
 - [x] Integrate result validation.
   - [x] Write observed frames, terminal state, failures, and evidence paths.
   - [x] Run the suite validator on every produced report.
@@ -36,7 +36,7 @@
   - [x] Run the complete Preview4 control/object/cache scenario set on the Linux x86_64 native job.
   - [ ] Run TCP and IPC on every compatible native CI host.
   - [x] Run QUIC and native WebSocket in their configured integration jobs.
-  - [ ] Run browser WebSocket/WASM scenarios in the browser job.
+  - [x] Run browser WebSocket/WASM scenarios in the browser job.
   - [ ] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
   - [x] Fail when a declared capability, mode, or transport has no selected scenario.
 

@@ -99,7 +99,7 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
   }
 }
 
-async function runCargo(conformanceRoot: string, runnerArgs: readonly string[]): Promise<void> {
+export async function runCargo(conformanceRoot: string, runnerArgs: readonly string[]): Promise<void> {
   const status = await new Deno.Command("cargo", {
     cwd: conformanceRoot,
     args: [
@@ -121,7 +121,7 @@ async function runCargo(conformanceRoot: string, runnerArgs: readonly string[]):
   }
 }
 
-async function buildRunner(conformanceRoot: string): Promise<void> {
+export async function buildRunner(conformanceRoot: string): Promise<void> {
   const status = await new Deno.Command("cargo", {
     cwd: conformanceRoot,
     args: [
@@ -159,7 +159,7 @@ async function waitForManifest(path: string, targetStatus: Promise<Deno.CommandS
   throw new Error(`wire target did not publish ${path} within ${MANIFEST_WAIT_MILLIS} ms`);
 }
 
-async function requireFile(path: string, description: string): Promise<void> {
+export async function requireFile(path: string, description: string): Promise<void> {
   try {
     if ((await Deno.stat(path)).isFile) return;
   } catch (error) {

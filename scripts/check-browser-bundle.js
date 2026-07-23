@@ -1,5 +1,7 @@
 const wasmEntrypoint = "packages/browser-client/dist/index.js";
 const source = await Deno.readTextFile(wasmEntrypoint);
+const websocketEntrypoint = "packages/transport-websocket/dist/browser.js";
+const websocketSource = await Deno.readTextFile(websocketEntrypoint);
 
 const forbiddenPatterns = [
   { label: "Node built-in import", pattern: /\bfrom\s+["']node:/ },
@@ -12,8 +14,16 @@ const forbiddenPatterns = [
 const failures = forbiddenPatterns
   .filter(({ pattern }) => pattern.test(source))
   .map(({ label }) => `${wasmEntrypoint}: ${label}`);
+failures.push(
+  ...forbiddenPatterns
+    .filter(({ pattern }) => pattern.test(websocketSource))
+    .map(({ label }) => `${websocketEntrypoint}: ${label}`),
+);
 
 const moduleExports = await import(new URL("../packages/browser-client/dist/index.js", import.meta.url).href);
+const websocketExports = await import(
+  new URL("../packages/transport-websocket/dist/browser.js", import.meta.url).href
+);
 
 for (const exportName of ["openBrowserRuntime", "NnrpBrowserRuntime", "NnrpBrowserClient"]) {
   if (!(exportName in moduleExports)) {
@@ -25,6 +35,10 @@ for (const exportName of ["NnrpServer", "NnrpServerSession", "openBackendRuntime
   if (exportName in moduleExports) {
     failures.push(`${wasmEntrypoint}: forbidden server/native export ${exportName}`);
   }
+}
+
+if (!("createWebSocketTransportProvider" in websocketExports)) {
+  failures.push(`${websocketEntrypoint}: missing browser WebSocket provider export`);
 }
 
 if (failures.length > 0) {

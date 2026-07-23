@@ -26,6 +26,7 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": "./dist/browser.js",
       "default": "./dist/index.js"
     },
     "./experimental/*": null,
@@ -36,6 +37,7 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
+    "dist/browser.js",
     "dist/native.js",
     "dist/native-node.js",
     "native/**"

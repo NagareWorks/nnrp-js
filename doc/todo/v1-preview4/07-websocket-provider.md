@@ -31,9 +31,9 @@
   - [x] Accept `ws://` and `wss://` provider endpoints.
   - [x] Preserve path, query, authority, and TLS intent.
   - [x] Enforce `prefer-websocket` and `force-websocket` semantics.
-- [ ] Add native and browser tests.
+- [x] Add native and browser tests.
   - [x] Node/Deno native client/server loopback fixture.
-  - [ ] Browser client fixture against a suite-owned WebSocket server.
+  - [x] Browser client fixture against a suite-owned WebSocket server.
   - [x] Binary frame, batch, fragmentation, close, text rejection, and backpressure cases.
   - [x] Control, object, cache, partial-result, and terminal frame exchange.
 

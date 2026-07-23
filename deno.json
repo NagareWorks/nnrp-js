@@ -21,6 +21,7 @@
     "conformance:backend": "deno run --allow-env scripts/run-conformance-adapter.ts --mode backend-native",
     "conformance:browser": "deno run --allow-env scripts/run-conformance-adapter.ts --mode browser-wasm",
     "wire-conformance:native": "deno run --unstable-sloppy-imports --allow-env=NNRP_CONFORMANCE_ROOT --allow-run=deno,cargo --allow-read --allow-write=artifacts/wire-conformance/native scripts/run-wire-conformance.ts",
+    "wire-conformance:browser": "deno run --unstable-sloppy-imports --allow-env=NNRP_CONFORMANCE_ROOT,NNRP_BROWSER_EXECUTABLE --allow-run --allow-net=127.0.0.1,localhost --allow-read --allow-write=artifacts/wire-conformance/browser scripts/run-browser-wire-conformance.ts",
     "examples:check": "deno check --unstable-sloppy-imports examples/*.ts",
     "manifest": "deno run --allow-env scripts/generate-capability-manifest.ts",
     "browser-bundle-smoke": "deno run --allow-read scripts/check-browser-bundle.js",

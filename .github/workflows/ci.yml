@@ -291,6 +291,55 @@ jobs:
             artifacts/wire-conformance/native/results.json
             artifacts/wire-conformance/native/evidence
 
+  wire-conformance-browser:
+    name: wire-conformance-browser
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v5
+      - name: Checkout conformance suite
+        uses: actions/checkout@v5
+        with:
+          repository: NagareWorks/nnrp-conformance
+          ref: 6a91995b21c276938619bc759321963c71f05415
+          path: .conformance
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust runner
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .conformance
+      - name: Prepare browser WASM artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: deno task artifacts:prepare
+      - name: Run browser wire conformance
+        env:
+          NNRP_CONFORMANCE_ROOT: ${{ github.workspace }}/.conformance
+          NNRP_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+        run: deno task wire-conformance:browser
+      - name: Upload browser wire evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nnrp-js-browser-wire-conformance
+          if-no-files-found: error
+          path: |
+            artifacts/wire-conformance/browser/target.json
+            artifacts/wire-conformance/browser/plan.json
+            artifacts/wire-conformance/browser/results.json
+            artifacts/wire-conformance/browser/browser-results.json
+            artifacts/wire-conformance/browser/browser-evidence.jsonl
+            artifacts/wire-conformance/browser/browser-stdout.log
+            artifacts/wire-conformance/browser/browser-stderr.log
+            artifacts/wire-conformance/browser/evidence
+
   docs-only:
     name: docs-only
     runs-on: ubuntu-latest
@@ -310,6 +359,7 @@ jobs:
       - docs-only
       - runtime-policy
       - wire-conformance-native
+      - wire-conformance-browser
     if: always()
     steps:
       - name: Verify required checks
@@ -321,6 +371,7 @@ jobs:
           docs="${{ needs.docs-only.result }}"
           runtime_policy="${{ needs.runtime-policy.result }}"
           wire_conformance="${{ needs.wire-conformance-native.result }}"
+          browser_wire_conformance="${{ needs.wire-conformance-browser.result }}"
           if [[ "$content_policy" != "success" ]]; then
             echo "content-policy did not pass: $content_policy"
             exit 1
@@ -331,6 +382,10 @@ jobs:
           fi
           if [[ "$wire_conformance" != "success" && "$docs" != "success" ]]; then
             echo "wire-conformance-native did not pass: $wire_conformance"
+            exit 1
+          fi
+          if [[ "$browser_wire_conformance" != "success" && "$docs" != "success" ]]; then
+            echo "wire-conformance-browser did not pass: $browser_wire_conformance"
             exit 1
           fi
           if [[ "$build" == "success" || "$docs" == "success" ]]; then
