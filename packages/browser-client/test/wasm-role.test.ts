@@ -1,6 +1,38 @@
 import { NnrpMessageType, type NnrpTransportConnection, type NnrpTransportReceiveOptions } from "@nnrp/core";
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { type BrowserRoleEventPacket, type BrowserWasmModule, openBrowserWasmRole } from "../src/wasm-role.ts";
+import { NnrpWasmBindingUnavailableError } from "../src/errors.ts";
+import {
+  type BrowserRoleEventPacket,
+  type BrowserWasmModule,
+  loadBrowserWasmModule,
+  openBrowserWasmRole,
+} from "../src/wasm-role.ts";
+
+Deno.test("browser WASM loading reports typed capability failures", async () => {
+  const importFailure = await assertRejects(
+    () => loadBrowserWasmModule("data:text/javascript,throw new Error('missing glue')", "missing.wasm"),
+    NnrpWasmBindingUnavailableError,
+  );
+  assertEquals(importFailure.diagnostic.code, "NNRP_WASM_GLUE_IMPORT_FAILED");
+
+  const exportFailure = await assertRejects(
+    () => loadBrowserWasmModule("data:text/javascript,export default async function(){}", "missing.wasm"),
+    NnrpWasmBindingUnavailableError,
+  );
+  assertEquals(exportFailure.diagnostic.code, "NNRP_WASM_ROLE_EXPORTS_MISSING");
+
+  const initializationFailure = await assertRejects(
+    () =>
+      loadBrowserWasmModule(
+        "data:text/javascript,export default async function(){throw new Error('missing wasm')};" +
+          "export function openBrowserClientRole(){};export function nnrp_wasm_protocol_major(){};" +
+          "export function nnrp_wasm_wire_format(){}",
+        "missing.wasm",
+      ),
+    NnrpWasmBindingUnavailableError,
+  );
+  assertEquals(initializationFailure.diagnostic.code, "NNRP_WASM_INITIALIZATION_FAILED");
+});
 
 Deno.test("browser WASM role owns carrier callbacks, patch encoding, events, and close order", async () => {
   const log: string[] = [];

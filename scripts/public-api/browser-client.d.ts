@@ -1,4 +1,6 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, type NnrpCapabilityManifest, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { NnrpWasmBindingUnavailableError } from "./errors.js";
+export { NnrpWasmBindingUnavailableError };
 export interface NnrpBrowserRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
@@ -70,9 +72,6 @@ export interface NnrpResolvedWasmArtifact {
     readonly glueUrl: string;
     readonly typesUrl: string;
     readonly requiredExports: readonly string[];
-}
-export declare class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
-    constructor(diagnostic: NnrpDiagnostic);
 }
 export declare function openBrowserRuntime(options?: NnrpBrowserRuntimeOptions): Promise<NnrpBrowserRuntime>;
 export declare class NnrpBrowserRuntime {

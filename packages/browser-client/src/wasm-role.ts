@@ -22,6 +22,7 @@ import {
   type RuntimeControlMetadata,
   type SchedulingMetadata,
 } from "@nnrp/core";
+import { NnrpWasmBindingUnavailableError } from "./errors.js";
 
 const SESSION_PATCH_METADATA_BYTES = 36;
 const SESSION_PATCH_ACK_METADATA_BYTES = 48;
@@ -106,16 +107,37 @@ export async function loadBrowserWasmModule(
   try {
     imported = await import(glueUrl);
   } catch (cause) {
-    throw new Error(`Unable to import the package-owned NNRP browser WASM glue from ${glueUrl}.`, { cause });
+    throw new NnrpWasmBindingUnavailableError({
+      code: "NNRP_WASM_GLUE_IMPORT_FAILED",
+      message: `Unable to import the package-owned NNRP browser WASM glue from ${glueUrl}.`,
+      source: "wasm",
+      retryable: false,
+      cause,
+    });
   }
   const binding = imported as Partial<BrowserWasmModule>;
   if (
     typeof binding.default !== "function" || typeof binding.openBrowserClientRole !== "function" ||
     typeof binding.nnrp_wasm_protocol_major !== "function" || typeof binding.nnrp_wasm_wire_format !== "function"
   ) {
-    throw new Error("The package-owned NNRP browser WASM glue is missing required role exports.");
+    throw new NnrpWasmBindingUnavailableError({
+      code: "NNRP_WASM_ROLE_EXPORTS_MISSING",
+      message: "The package-owned NNRP browser WASM glue is missing required role exports.",
+      source: "wasm",
+      retryable: false,
+    });
   }
-  await binding.default({ module_or_path: module ?? moduleUrl });
+  try {
+    await binding.default({ module_or_path: module ?? moduleUrl });
+  } catch (cause) {
+    throw new NnrpWasmBindingUnavailableError({
+      code: "NNRP_WASM_INITIALIZATION_FAILED",
+      message: `Unable to initialize the package-owned NNRP browser WASM module from ${moduleUrl}.`,
+      source: "wasm",
+      retryable: false,
+      cause,
+    });
+  }
   return binding as BrowserWasmModule;
 }
 

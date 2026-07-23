@@ -15,7 +15,6 @@ import {
   type NnrpAbortSignalLike,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
-  type NnrpDiagnostic,
   type NnrpEventPollOptions,
   type NnrpInputProfile,
   NnrpMessageType,
@@ -68,6 +67,9 @@ import {
   standardProfileId,
   standardProfileSchema,
 } from "./wasm-role.js";
+import { NnrpWasmBindingUnavailableError } from "./errors.js";
+
+export { NnrpWasmBindingUnavailableError };
 
 const EMPTY_PAYLOAD = new Uint8Array();
 const FRAME_SUBMIT_METADATA_SIZE = 72;
@@ -180,13 +182,6 @@ export interface NnrpResolvedWasmArtifact {
   readonly glueUrl: string;
   readonly typesUrl: string;
   readonly requiredExports: readonly string[];
-}
-
-export class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
-  public constructor(diagnostic: NnrpDiagnostic) {
-    super(diagnostic);
-    this.name = "NnrpWasmBindingUnavailableError";
-  }
 }
 
 const browserRuntimeModules = new WeakMap<NnrpBrowserRuntime, BrowserWasmModule>();

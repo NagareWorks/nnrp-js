@@ -23,9 +23,9 @@
   - [x] One public runtime-object operation maps to one native or WASM submit call.
   - [x] Event polling decodes batches without one FFI call per metadata field.
   - [x] Provider selection occurs before runtime dispatch and does not add per-frame dynamic imports.
-- [ ] Remove JavaScript-owned protocol fallbacks.
+- [x] Remove JavaScript-owned protocol fallbacks.
   - [x] Native role packages fail with a typed capability error when no installed provider can load.
-  - [ ] Browser runtime fails with a typed capability error when browser WASM or host WebSocket is absent.
+  - [x] Browser runtime fails with a typed capability error when browser WASM or host WebSocket is absent.
   - [x] No Preview3 fake FFI, mock native session, or silent pure-JavaScript protocol path remains.
 
 ## Closure Automation
