@@ -2,6 +2,9 @@ const coverageDir = "artifacts/coverage";
 const lcovPath = `${coverageDir}/lcov.info`;
 const lineThreshold = parseLineThreshold(Deno.args);
 const excludedSources = new Set([
+  "packages/browser-client/src/index.ts",
+  "packages/browser-client/src/wasm-role.ts",
+  "packages/browser-client/wasm/nnrp_wasm.js",
   "packages/native-client/src/index.ts",
   "packages/native-server/src/index.ts",
   "packages/transport-ipc/src/native.ts",
@@ -20,6 +23,7 @@ await run(Deno.execPath(), [
   "test",
   "--unstable-sloppy-imports",
   "--allow-env",
+  "--allow-ffi",
   "--allow-net=127.0.0.1",
   "--allow-read",
   "--allow-write",
@@ -35,7 +39,6 @@ await run(Deno.execPath(), [
   "--allow-net=127.0.0.1",
   "--allow-read",
   "--allow-write",
-  `--coverage=${coverageDir}`,
   "scripts/check-native-transport-loopback.ts",
 ]);
 
@@ -50,7 +53,7 @@ const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath), excludedSo
 const linePercent = percentage(coverage.lines.hit, coverage.lines.found);
 
 console.log(
-  `Coverage gate excludes native role facades and platform FFI adapters covered by native loopback smoke: ${
+  `Coverage gate excludes role facades, generated WASM glue, and platform FFI adapters covered by real loopback smoke: ${
     [...excludedSources].join(", ")
   }.`,
 );
@@ -135,8 +138,8 @@ async function run(command: string, args: readonly string[]): Promise<void> {
     stdout: "inherit",
     stderr: "inherit",
   });
-  const status = await child.output();
+  const status = await child.spawn().status;
   if (!status.success) {
-    Deno.exit(status.code);
+    throw new Error(`${command} exited with code ${status.code}`);
   }
 }

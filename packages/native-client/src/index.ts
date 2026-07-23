@@ -71,7 +71,31 @@ const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 3;
 const EXPECTED_ABI_MINOR = 0;
 const EXPECTED_ABI_PATCH = 0;
-const NATIVE_RUNTIME_CAPABILITIES = ["cache", "schema", "recovery", "flow.update", "result.hint"] as const;
+const NATIVE_RUNTIME_CAPABILITIES = [
+  "cache",
+  "schema",
+  "recovery",
+  "flow.update",
+  "result.hint",
+  "control.cancel_abort",
+  "control.supersede",
+  "control.priority_update",
+  "control.deadline_expire",
+  "control.progress_partial",
+  "control.credit_backpressure",
+  "control.capability_costs",
+  "control.route_execution_hint",
+  "control.trace_context",
+  "control.result_drop_reason",
+  "control.degrade_profile",
+  "control.budget_update",
+  "control.recoverable_error",
+  "object.lifecycle",
+  "object.delta",
+  "object.cost",
+  "object.ownership",
+  "cache.reference",
+] as const;
 const RUNTIME_FEATURE_PROTOCOL_CORE = 0x0000000000000001n;
 const RUNTIME_FEATURE_CLIENT_API = 0x0000000000000002n;
 const RUNTIME_FEATURE_EVENT_POLLING = 0x0000000000000008n;
@@ -1113,6 +1137,12 @@ export class NnrpClientSession {
       return;
     }
 
+    if (event.type === "credit-update") {
+      this.#availableCredits = normalizeCreditWindow(event.metadata.creditWindow);
+      this.#drainCapacityWaiters();
+      return;
+    }
+
     if (event.type === "close") {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
@@ -1338,7 +1368,7 @@ export class NnrpClientSession {
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
   ): Promise<void> | undefined {
-    if (this.#state.options.submitCapacityPolicy !== "await-credit") {
+    if (this.#state.options.submitCapacityPolicy !== "await") {
       return undefined;
     }
 
@@ -1401,7 +1431,7 @@ export class NnrpClientSession {
   }
 
   #reserveImmediateCapacity(): void {
-    if (this.#state.options.submitCapacityPolicy !== "await-credit") {
+    if (this.#state.options.submitCapacityPolicy !== "await") {
       return;
     }
 
@@ -1929,6 +1959,10 @@ function recoveryUnsupportedError(source: "native" | "wasm"): NnrpRecoveryError 
     source,
     retryable: false,
   });
+}
+
+function normalizeCreditWindow(creditWindow: bigint): number {
+  return creditWindow > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(creditWindow);
 }
 
 function backpressureCreditExhaustedError(source: "native" | "wasm"): NnrpTransportError {

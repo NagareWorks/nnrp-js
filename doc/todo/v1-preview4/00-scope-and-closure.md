@@ -18,15 +18,15 @@
 
 ## Runtime Boundary
 
-- [ ] Keep the coarse Rust-call boundary.
-  - [ ] One public control operation maps to one native or WASM submit call.
-  - [ ] One public runtime-object operation maps to one native or WASM submit call.
-  - [ ] Event polling decodes batches without one FFI call per metadata field.
-  - [ ] Provider selection occurs before runtime dispatch and does not add per-frame dynamic imports.
+- [x] Keep the coarse Rust-call boundary.
+  - [x] One public control operation maps to one native or WASM submit call.
+  - [x] One public runtime-object operation maps to one native or WASM submit call.
+  - [x] Event polling decodes batches without one FFI call per metadata field.
+  - [x] Provider selection occurs before runtime dispatch and does not add per-frame dynamic imports.
 - [ ] Remove JavaScript-owned protocol fallbacks.
-  - [ ] Native role packages fail with a typed capability error when no installed provider can load.
+  - [x] Native role packages fail with a typed capability error when no installed provider can load.
   - [ ] Browser runtime fails with a typed capability error when browser WASM or host WebSocket is absent.
-  - [ ] No Preview3 fake FFI, mock native session, or silent pure-JavaScript protocol path remains.
+  - [x] No Preview3 fake FFI, mock native session, or silent pure-JavaScript protocol path remains.
 
 ## Closure Automation
 
@@ -36,12 +36,12 @@
   - [x] Reject deferred-contract phrases and old-preview compatibility language.
   - [x] Reject `transport-ws`, `webtransport`, `score`, `tcp-only`, and `quic-only` as API identifiers.
 - [ ] Add ownership checks to CI.
-  - [ ] Validate package dependency direction.
-  - [ ] Validate artifact placement.
+  - [x] Validate package dependency direction.
+  - [x] Validate artifact placement.
   - [ ] Validate that every public API snapshot is linked from one frozen workstream.
 
 ## Acceptance Evidence
 
-- [ ] `deno task runtime-policy` proves package and runtime ownership.
+- [x] `deno task runtime-policy` proves package and runtime ownership.
 - [x] `deno task todo:check` proves parent/child closure and vocabulary rules.
-- [ ] Unit tests prove missing providers fail explicitly without fallback execution.
+- [x] Unit tests prove missing providers fail explicitly without fallback execution.

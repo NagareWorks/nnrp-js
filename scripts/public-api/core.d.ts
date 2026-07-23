@@ -337,7 +337,7 @@ export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
 export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefer-ipc" | "prefer-websocket" | "force-quic" | "force-tcp" | "force-ipc" | "force-websocket";
 export type NnrpOperationId = bigint;
 export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
-export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "control.retry_after" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
+export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
     readonly code: string;
@@ -478,7 +478,7 @@ export interface NnrpRejectedTransportCandidate {
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 export type NnrpSubmitMode = "inline" | "object-reference";
-export type NnrpSubmitCapacityPolicy = "immediate" | "await-credit";
+export type NnrpSubmitCapacityPolicy = "reject" | "await";
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
 export type NnrpCacheObjectKind = "tensor" | "token" | "schema" | "artifact" | "tool";
 export interface NnrpTensorSection {

@@ -2,13 +2,16 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 
 const releaseWorkflow = await Deno.readTextFile(".github/workflows/release.yml");
 const artifactPreparation = await Deno.readTextFile("scripts/prepare-rust-artifact-packages.ts");
+const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
 
-Deno.test("release workflow and local preparation pin Rust preview4.10", () => {
-  assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.10/g)?.length, 2);
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.10"');
-  assertEquals(releaseWorkflow.includes("1.0.0-preview.4.4"), false);
-  assertEquals(artifactPreparation.includes("1.0.0-preview.4.4"), false);
+Deno.test("release workflow and local preparation pin Rust preview4.14", () => {
+  assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.14/g)?.length, 2);
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.14"');
+  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.14"');
+  assertEquals(releaseWorkflow.includes("1.0.0-preview.4.13"), false);
+  assertEquals(artifactPreparation.includes("1.0.0-preview.4.13"), false);
+  assertEquals(sdkReporting.includes("1.0.0-preview.4.13"), false);
 });
 
 Deno.test("generated Rust artifacts stay out of source control for every package owner", () => {

@@ -14,10 +14,10 @@
 
 ## Browser Ownership
 
-- [ ] Bind the browser host WebSocket to `nnrp-wasm-browser` runtime primitives.
+- [x] Bind the browser host WebSocket to `nnrp-wasm-browser` runtime primitives.
   - [x] Accept a host WebSocket constructor/factory through frozen provider options.
   - [x] Use binary messages only and reject text protocol frames.
-  - [ ] Feed owned binary bytes into WASM frame/control/object decoding.
+  - [x] Feed owned binary bytes into WASM frame/control/object decoding.
   - [x] Apply buffered-amount backpressure without a JavaScript protocol fallback.
   - [x] Implement browser client connect and close; expose no browser server listener.
 - [x] Keep artifact placement correct.
@@ -34,8 +34,8 @@
 - [ ] Add native and browser tests.
   - [x] Node/Deno native client/server loopback fixture.
   - [ ] Browser client fixture against a suite-owned WebSocket server.
-  - [ ] Binary frame, batch, fragmentation, close, text rejection, and backpressure cases.
-  - [ ] Control, object, cache, partial-result, and terminal frame exchange.
+  - [x] Binary frame, batch, fragmentation, close, text rejection, and backpressure cases.
+  - [x] Control, object, cache, partial-result, and terminal frame exchange.
 
 ## Acceptance Evidence
 

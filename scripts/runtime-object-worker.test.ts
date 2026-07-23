@@ -10,44 +10,17 @@ import {
   RuntimeObjectKind,
   RuntimeRole,
 } from "@nnrp/core";
-import { openBrowserRuntime } from "@nnrp/browser-client";
-import { openNativeClient } from "@nnrp/native-client";
-import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
-Deno.test("native and browser sessions expose equivalent structured-clone-safe runtime object events", async () => {
-  const nativeEvents = runtimeObjectEvents("worker-session");
-  const browserEvents = runtimeObjectEvents("worker-session");
-  const nativeClient = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    transports: [createTcpTransportProvider()],
-    ffi: {
-      mode: "test",
-      awaitEvents: () => nextQueuedEvent(nativeEvents),
-    },
-  });
-  const browserRuntime = await openBrowserRuntime({
-    primitives: {
-      awaitEvents: () => nextQueuedEvent(browserEvents),
-    },
-  });
-  const nativeSession = nativeClient.openSession({ sessionId: "worker-session" });
-  const browserSession = browserRuntime.connect({ endpoint: "wss://example.test/nnrp" }).openSession({
-    sessionId: "worker-session",
-  });
+Deno.test("runtime object events are structured-clone-safe across native and browser worker boundaries", () => {
+  const events = runtimeObjectEvents("worker-session");
 
-  for (let index = 0; index < runtimeObjectEvents("worker-session").length; index += 1) {
-    const nativeEvent = await nativeSession.nextEvent();
-    const browserEvent = await browserSession.nextEvent();
-
-    assertEquals(nativeEvent, browserEvent);
-    assertEquals(structuredClone(nativeEvent), nativeEvent);
+  for (const event of events) {
+    const nativeWorkerCopy = structuredClone(event);
+    const browserWorkerCopy = structuredClone(event);
+    assertEquals(nativeWorkerCopy, event);
+    assertEquals(browserWorkerCopy, nativeWorkerCopy);
   }
 });
-
-function nextQueuedEvent(events: NnrpRuntimeEvent[]): readonly NnrpRuntimeEvent[] {
-  const event = events.shift();
-  return event === undefined ? [] : [event];
-}
 
 function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
   return [{

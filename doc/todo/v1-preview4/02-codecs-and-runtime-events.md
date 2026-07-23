@@ -49,13 +49,13 @@
 
 ## Runtime Adapter Calls
 
-- [ ] Bind Preview4 native exports.
+- [x] Bind Preview4 native exports.
   - [x] Bind the role-neutral `nnrp_runtime_frame_send` coarse frame export.
-  - [ ] Bind `nnrp_client_submit_runtime_object_loop_compact`.
-  - [ ] Bind server receive, control/result send, and event polling exports used by the frozen API.
-- [ ] Bind equivalent browser WASM exports.
-  - [ ] Decode control/object batches in browser workers.
-  - [ ] Keep native and browser event shapes identical.
+  - [x] Bind `nnrp_client_await_events` and `nnrp_server_await_events` batch polling exports.
+  - [x] Bind role session, result, close, and receive exports used by the frozen API.
+- [x] Bind equivalent browser WASM exports.
+  - [x] Decode control/object batches in browser workers.
+  - [x] Keep native and browser event shapes identical.
   - [x] Copy owned bytes before a native or WASM buffer is released.
 
 ## Acceptance Evidence

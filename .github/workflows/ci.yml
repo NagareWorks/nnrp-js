@@ -169,16 +169,16 @@ jobs:
         run: deno task todo:check
       - name: Public API consistency
         run: deno task api-consistency
+      - name: Prepare Rust artifact packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: deno task artifacts:prepare
       - name: Typecheck
         run: deno task typecheck
       - name: Test
         run: deno task test
       - name: Build
         run: deno task build
-      - name: Prepare Rust artifact packages
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: deno task artifacts:prepare
       - name: Coverage
         run: deno task coverage
       - name: Native runtime frame smoke

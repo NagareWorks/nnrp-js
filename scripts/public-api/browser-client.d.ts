@@ -1,15 +1,16 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportProviderCost, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
-export interface NnrpWasmRuntimeOptions {
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+export interface NnrpBrowserRuntimeOptions {
     readonly moduleUrl?: string | URL;
     readonly module?: WebAssembly.Module;
     readonly artifact?: NnrpWasmArtifactOptions;
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
-    readonly primitives?: NnrpWasmPrimitiveBinding;
 }
 export interface NnrpBrowserConnectOptions {
-    readonly endpoint: string | URL;
+    readonly endpoint: string;
+    readonly providerEndpoint?: string | URL;
     readonly transportPolicy?: NnrpTransportPolicy;
+    readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
     readonly sessionDefaults?: NnrpBrowserSessionOptions;
 }
 export interface NnrpBrowserTransportSelectionOptions {
@@ -22,13 +23,7 @@ export interface NnrpBrowserTransportSelectionOptions {
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
     readonly kind: NnrpBrowserTransportKind;
-}
-export interface NnrpBrowserTransportProviderOptions {
-    readonly available?: boolean;
-    readonly cost?: NnrpTransportProviderCost;
-    readonly preferenceRank?: number;
-    readonly maxFrameBytes?: bigint;
-    readonly diagnostic?: NnrpDiagnostic;
+    connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
 }
 export interface NnrpBrowserSessionOptions extends NnrpSessionFlowControlOptions {
     readonly sessionId?: string;
@@ -42,7 +37,6 @@ export interface NnrpWasmBindingOptions {
     readonly module?: WebAssembly.Module;
     readonly artifact?: NnrpWasmArtifactOptions;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
-    readonly primitives?: NnrpWasmPrimitiveBinding;
 }
 export interface NnrpWasmRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
@@ -50,48 +44,11 @@ export interface NnrpWasmRuntimeBinding {
     readonly module?: WebAssembly.Module;
     readonly artifact?: NnrpResolvedWasmArtifact;
     readonly transportProviders: readonly NnrpBrowserTransportProvider[];
-    readonly primitives?: NnrpWasmPrimitiveBinding;
-}
-export interface NnrpWasmSubmitRequest {
-    readonly sessionOptions: NnrpBrowserSessionOptions;
-    readonly submit: NnrpNormalizedSubmitRequest;
-}
-export interface NnrpWasmRuntimeFrameSendRequest {
-    readonly sessionOptions: NnrpBrowserSessionOptions;
-    readonly messageType: NnrpMessageType;
-    readonly frameId: number;
-    readonly payload: Uint8Array;
-}
-export interface NnrpWasmSessionPatchRequest {
-    readonly sessionOptions: NnrpBrowserSessionOptions;
-    readonly patch: NnrpSessionPatchRequest;
-}
-export interface NnrpWasmSubmitNoWaitRequest {
-    readonly sessionOptions: NnrpBrowserSessionOptions;
-    readonly submit: NnrpNormalizedSubmitRequest;
-}
-export interface NnrpWasmEventBatchRequest {
-    readonly maxEvents: number;
-    readonly timeoutMillis?: number;
 }
 export interface NnrpWasmProtocolVersion {
     readonly protocolMajor: number;
     readonly wireFormat: number;
     readonly version: string;
-}
-export interface NnrpWasmSubmitValidationRequest {
-    readonly sessionOptions: NnrpBrowserSessionOptions;
-    readonly submit: NnrpNormalizedSubmitRequest;
-}
-export interface NnrpWasmPrimitiveBinding {
-    protocolVersion?(): NnrpWasmProtocolVersion | Promise<NnrpWasmProtocolVersion>;
-    validateSubmit?(request: NnrpWasmSubmitValidationRequest): NnrpNormalizedSubmitRequest | void | Promise<NnrpNormalizedSubmitRequest | void>;
-    submit?(request: NnrpWasmSubmitRequest): NnrpResult | Promise<NnrpResult>;
-    submitNoWait?(request: NnrpWasmSubmitNoWaitRequest): bigint | Promise<bigint>;
-    sendRuntimeFrame?(request: NnrpWasmRuntimeFrameSendRequest): void | Promise<void>;
-    patchSession?(request: NnrpWasmSessionPatchRequest): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
-    awaitEvents?(request: NnrpWasmEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
-    close?(): void | Promise<void>;
 }
 export interface NnrpWasmArtifactOptions {
     readonly manifest: NnrpWasmArtifactManifest;
@@ -117,7 +74,7 @@ export interface NnrpResolvedWasmArtifact {
 export declare class NnrpWasmBindingUnavailableError extends NnrpCapabilityError {
     constructor(diagnostic: NnrpDiagnostic);
 }
-export declare function openBrowserRuntime(options?: NnrpWasmRuntimeOptions): Promise<NnrpBrowserRuntime>;
+export declare function openBrowserRuntime(options?: NnrpBrowserRuntimeOptions): Promise<NnrpBrowserRuntime>;
 export declare class NnrpBrowserRuntime {
     #private;
     constructor(binding: NnrpWasmRuntimeBinding, transportPolicy?: NnrpTransportPolicy);
@@ -128,16 +85,13 @@ export declare class NnrpBrowserRuntime {
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
     selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
     protocolVersion(): Promise<NnrpWasmProtocolVersion>;
-    submit(request: NnrpWasmSubmitRequest): Promise<NnrpResult>;
-    submitNoWait(request: NnrpWasmSubmitNoWaitRequest): Promise<bigint>;
-    sendRuntimeFrame(request: NnrpWasmRuntimeFrameSendRequest): Promise<void>;
-    patchSession(request: NnrpWasmSessionPatchRequest): Promise<NnrpSessionPatchResult>;
-    awaitEvents(request: NnrpWasmEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]>;
     close(): Promise<void>;
     get closed(): boolean;
 }
 export interface NnrpBrowserClientState {
     readonly endpoint: string;
+    readonly providerEndpoint: string;
+    readonly provider: NnrpBrowserTransportProvider;
     readonly runtime: NnrpBrowserRuntime;
     readonly transportPolicy: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpBrowserSessionOptions;
@@ -156,6 +110,7 @@ export declare class NnrpBrowserClient {
 export interface NnrpBrowserClientSessionState {
     readonly client: NnrpBrowserClient;
     options: NnrpBrowserSessionOptions;
+    readonly wireSessionId: number;
 }
 export declare class NnrpBrowserClientSession {
     #private;
@@ -198,5 +153,4 @@ export declare class NnrpBrowserClientSession {
 export declare function createWasmRuntimeBinding(options?: NnrpWasmBindingOptions): NnrpWasmRuntimeBinding;
 export declare function resolveWasmArtifact(options: NnrpWasmArtifactOptions): NnrpResolvedWasmArtifact;
 export declare function validateWasmArtifactManifest(manifest: NnrpWasmArtifactManifest, requiredExports?: readonly string[]): void;
-export declare function createBrowserTransportProvider(kind: NnrpBrowserTransportKind, options?: NnrpBrowserTransportProviderOptions): NnrpBrowserTransportProvider;
 //# sourceMappingURL=index.d.ts.map

@@ -52,9 +52,32 @@ Deno.test("@nnrp/native-client opens a client with explicit transport providers"
 
   assertEquals(client.endpoint, "nnrp://127.0.0.1:4433/session/default");
   assertEquals(client.runtime.manifest.transports, ["tcp"]);
-  assertEquals(client.runtime.manifest.capabilities.includes("client.session"), true);
-  assertEquals(client.runtime.manifest.capabilities.includes("server.session"), false);
-  assertEquals(client.runtime.manifest.capabilities.includes("native.loader"), false);
+  assertEquals(client.runtime.manifest.capabilities, [
+    "client.session",
+    "cache",
+    "schema",
+    "recovery",
+    "flow.update",
+    "result.hint",
+    "control.cancel_abort",
+    "control.supersede",
+    "control.priority_update",
+    "control.deadline_expire",
+    "control.progress_partial",
+    "control.credit_backpressure",
+    "control.capability_costs",
+    "control.route_execution_hint",
+    "control.trace_context",
+    "control.result_drop_reason",
+    "control.degrade_profile",
+    "control.budget_update",
+    "control.recoverable_error",
+    "object.lifecycle",
+    "object.delta",
+    "object.cost",
+    "object.ownership",
+    "cache.reference",
+  ]);
   assertEquals("listen" in client.runtime, false);
   assertEquals(session.sessionId, "native-session-1");
   assertEquals(session.options.metadata, { app: "agent", request: "one" });

@@ -10,22 +10,37 @@ import {
 } from "./sdk-reporting.ts";
 
 Deno.test("sdk reporting creates build-mode-specific manifests", () => {
-  const report = createCapabilityManifestReport({ mode: "all", artifactVersion: "1.0.0" });
+  const report = createCapabilityManifestReport({ mode: "all" });
 
   assertEquals(report.manifests.map((entry) => entry.buildMode), ["backend-native", "browser-wasm"]);
-  assertEquals(report.manifests[0]?.artifactVersion, "1.0.0");
+  assertEquals(report.manifests[0]?.artifactVersion, "1.0.0-preview.4.14");
+  assertEquals(report.manifests[0]?.manifest.transports, ["tcp", "quic", "ipc", "websocket"]);
   assertEquals(report.manifests[0]?.manifest.capabilities.includes("server.session"), true);
+  assertEquals(report.manifests[0]?.manifest.capabilities.includes("control.capability_costs"), true);
+  assertEquals(report.manifests[0]?.manifest.capabilities.includes("object.ownership"), true);
   assertEquals(report.manifests[1]?.manifest.capabilities.includes("server.session"), false);
+  assertEquals(report.manifests[1]?.manifest.capabilities.includes("control.capability_costs"), true);
+  assertEquals(report.manifests[1]?.manifest.capabilities.includes("cache.reference"), true);
+  assertEquals(
+    report.manifests.every((entry) =>
+      !(entry.manifest.capabilities as readonly string[]).includes("control.retry_after")
+    ),
+    true,
+  );
 });
 
-Deno.test("sdk reporting creates conformance smoke cases from capabilities", () => {
+Deno.test("sdk reporting keeps adapter smoke separate from wire evidence", () => {
   const report = createConformanceReport("backend-native");
 
   assertEquals(report.buildMode, "backend-native");
-  assertEquals(report.cases.length, report.manifest.capabilities.length + 1);
-  assertEquals(report.cases.filter((entry) => entry.status === "passed").length, report.manifest.capabilities.length);
-  assertEquals(report.cases.at(-1)?.status, "skipped");
-  assertEquals(report.cases.at(-1)?.diagnostic?.code, "NNRP_JS_NATIVE_ARTIFACT_UNAVAILABLE");
+  assertEquals(report.artifactVersion, "1.0.0-preview.4.14");
+  assertEquals(report.cases.length, report.manifest.capabilities.length);
+  assertEquals(report.cases.every((entry) => entry.status === "skipped"), true);
+  assertEquals(
+    report.cases.every((entry) => entry.diagnostic?.code === "NNRP_JS_WIRE_CONFORMANCE_NOT_EXECUTED"),
+    true,
+  );
+  assertEquals(report.diagnostics[0]?.code, "NNRP_JS_ADAPTER_CONTRACT_ONLY");
   assertEquals(report.transport.selected, "tcp");
   assertEquals(report.transport.rejected, []);
 });

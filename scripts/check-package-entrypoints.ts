@@ -70,7 +70,6 @@ const entrypoints: readonly PackageEntrypoint[] = [
     path: "../packages/browser-client/dist/index.js",
     exports: [
       "openBrowserRuntime",
-      "createBrowserTransportProvider",
       "createWasmRuntimeBinding",
       "resolveWasmArtifact",
       "validateWasmArtifactManifest",

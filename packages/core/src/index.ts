@@ -502,7 +502,6 @@ export type NnrpCapability =
   | "control.degrade_profile"
   | "control.budget_update"
   | "control.recoverable_error"
-  | "control.retry_after"
   | "object.lifecycle"
   | "object.delta"
   | "object.cost"
@@ -536,7 +535,6 @@ const NNRP_CAPABILITY_TOKENS = new Set<NnrpCapability>([
   "control.degrade_profile",
   "control.budget_update",
   "control.recoverable_error",
-  "control.retry_after",
   "object.lifecycle",
   "object.delta",
   "object.cost",
@@ -739,7 +737,7 @@ export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 
 export type NnrpSubmitMode = "inline" | "object-reference";
 
-export type NnrpSubmitCapacityPolicy = "immediate" | "await-credit";
+export type NnrpSubmitCapacityPolicy = "reject" | "await";
 
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
 

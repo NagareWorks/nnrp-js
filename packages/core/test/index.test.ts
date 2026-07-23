@@ -74,7 +74,6 @@ const PREVIEW4_CONTROL_CAPABILITIES = [
   "control.degrade_profile",
   "control.budget_update",
   "control.recoverable_error",
-  "control.retry_after",
 ] as const;
 
 const PREVIEW4_OBJECT_CAPABILITIES = [
@@ -1158,6 +1157,7 @@ Deno.test("@nnrp/core serializes every frozen Preview4 capability token", () => 
   });
 
   assertEquals(manifest.capabilities, capabilities);
+  assertEquals((manifest.capabilities as readonly string[]).includes("control.retry_after"), false);
 });
 
 Deno.test("@nnrp/core rejects capability tokens outside the frozen catalog", () => {
@@ -1682,7 +1682,7 @@ Deno.test("@nnrp/core normalizes session patch requests", () => {
     inputProfile: "token",
     targetCadence: 60,
     qualityTier: 2,
-    submitCapacityPolicy: "await-credit",
+    submitCapacityPolicy: "await",
     initialCredits: 3,
     metadata: { route: "fast" },
   });
@@ -1691,7 +1691,7 @@ Deno.test("@nnrp/core normalizes session patch requests", () => {
     inputProfile: "token",
     targetCadence: 60,
     qualityTier: 2,
-    submitCapacityPolicy: "await-credit",
+    submitCapacityPolicy: "await",
     initialCredits: 3,
     metadata: { route: "fast" },
   });

@@ -53,9 +53,32 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
   const server = runtime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default", transportPolicy: "force-quic" });
 
   assertEquals(runtime.manifest.transports, ["tcp", "quic"]);
-  assertEquals(runtime.manifest.capabilities.includes("server.session"), true);
-  assertEquals(runtime.manifest.capabilities.includes("client.session"), false);
-  assertEquals(runtime.manifest.capabilities.includes("native.loader"), false);
+  assertEquals(runtime.manifest.capabilities, [
+    "server.session",
+    "cache",
+    "schema",
+    "recovery",
+    "flow.update",
+    "result.hint",
+    "control.cancel_abort",
+    "control.supersede",
+    "control.priority_update",
+    "control.deadline_expire",
+    "control.progress_partial",
+    "control.credit_backpressure",
+    "control.capability_costs",
+    "control.route_execution_hint",
+    "control.trace_context",
+    "control.result_drop_reason",
+    "control.degrade_profile",
+    "control.budget_update",
+    "control.recoverable_error",
+    "object.lifecycle",
+    "object.delta",
+    "object.cost",
+    "object.ownership",
+    "cache.reference",
+  ]);
   assertEquals("connect" in runtime, false);
   assertEquals(server.endpoint, "nnrp://0.0.0.0:4433/session/default");
   assertEquals(server.transportPolicy, "force-quic");
