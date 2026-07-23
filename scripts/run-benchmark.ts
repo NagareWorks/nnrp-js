@@ -1,31 +1,37 @@
-import { createCapabilityManifest, type NnrpTransportKind } from "@nnrp/core";
+import { resolve } from "node:path";
+import {
+  MemoryLocationHint,
+  type NnrpTransportConnection,
+  type NnrpTransportKind,
+  OwnershipHint,
+  RuntimeObjectKind,
+  RuntimeRole,
+} from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
-import { openNativeClient } from "@nnrp/native-client";
-import { openBackendRuntime } from "@nnrp/native-server";
+import { type NnrpClientSession, openNativeClient } from "@nnrp/native-client";
+import { type NnrpServerSession, openBackendRuntime } from "@nnrp/native-server";
+import { createIpcTransportProvider } from "@nnrp/transport-ipc";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
+import { openNativeBenchmarkFfi } from "./benchmark-native-ffi.ts";
 import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson } from "./sdk-reporting.ts";
 
 const RESULT_SCHEMA_URL =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/benchmark-results.schema.json";
-const DEFAULT_DURATION_SECONDS = 10;
-const DEFAULT_ITERATIONS = 100_000;
-const DEFAULT_WARMUP_ITERATIONS = 1_000;
-const INLINE_PAYLOAD_BYTES = 1024;
+const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.16";
+const DEFAULT_DURATION_SECONDS = 3;
+const DEFAULT_WARMUP_ITERATIONS = 100;
+const DEFAULT_PAYLOAD_BYTES = 1024;
+const DEFAULT_BATCH_ITERATIONS = 1024;
 
 interface BenchmarkExecutionPlan {
   readonly protocol_version: string;
   readonly implementation_name: string;
-  readonly artifacts: {
-    readonly results_path: string;
-    readonly evidence_dir: string;
-  };
   readonly scenarios: readonly BenchmarkScenario[];
 }
 
 interface BenchmarkScenario {
   readonly id: string;
-  readonly category: "latency" | "throughput";
   readonly workload: BenchmarkWorkload;
 }
 
@@ -48,11 +54,11 @@ interface BenchmarkResultReport {
 
 interface BenchmarkEnvironment {
   readonly sdk_commit?: string;
+  readonly nnrp_rs_artifact: string;
   readonly host_runtime: string;
   readonly os: string;
   readonly arch: string;
-  readonly cpu?: string;
-  readonly notes?: string;
+  readonly notes: string;
 }
 
 interface BenchmarkScenarioResult {
@@ -82,11 +88,20 @@ interface Measurement {
   readonly samplesUs: readonly number[];
 }
 
+interface NativeRolePair {
+  readonly clientSession: NnrpClientSession;
+  readonly serverSession: NnrpServerSession;
+  close(): Promise<void>;
+}
+
 async function buildConformanceBenchmarkResults(planPath: string): Promise<BenchmarkResultReport> {
   const plan = JSON.parse(await Deno.readTextFile(planPath)) as BenchmarkExecutionPlan;
   const results: BenchmarkScenarioResult[] = [];
   for (const scenario of plan.scenarios) {
-    results.push(await runScenario(scenario));
+    console.error(`benchmark scenario started: ${scenario.id}`);
+    const result = await runScenario(scenario);
+    console.error(`benchmark scenario completed: ${scenario.id} (${result.outcome})`);
+    results.push(result);
   }
   return {
     $schema: RESULT_SCHEMA_URL,
@@ -100,208 +115,333 @@ async function buildConformanceBenchmarkResults(planPath: string): Promise<Bench
 async function runScenario(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
   try {
     switch (scenario.workload.operation) {
-      case "runtime_probe":
-        return runRuntimeProbe(scenario);
-      case "session_lifecycle":
-        return await runSessionLifecycle(scenario);
-      case "submit_result_loop":
-        return await runSubmitResultLoop(scenario);
+      case "coarse_ffi_submit_result_batch":
+        return runCoarseFfiSubmitResult(scenario);
+      case "runtime_control_loop":
+        return await runRuntimeControlLoop(scenario);
+      case "runtime_object_reference_loop":
+        return await runRuntimeObjectReferenceLoop(scenario);
+      case "runtime_object_delta_loop":
+        return await runRuntimeObjectDeltaLoop(scenario);
       case "transport_loopback":
         return await runTransportLoopback(scenario);
+      case "browser_wasm_websocket_loop":
+        return await runBrowserWasmWebSocketLoop(scenario);
       default:
         return skipResult(scenario.id, `JS benchmark runner does not implement ${scenario.workload.operation}.`);
     }
   } catch (error) {
-    return {
-      id: scenario.id,
-      outcome: "error",
-      message: error instanceof Error ? error.message : String(error),
-    };
+    return { id: scenario.id, outcome: "error", message: error instanceof Error ? error.message : String(error) };
   }
 }
 
-function runRuntimeProbe(scenario: BenchmarkScenario): BenchmarkScenarioResult {
-  const iterations = positiveInt(scenario.workload.iterations, DEFAULT_ITERATIONS);
-  const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, Math.min(10_000, iterations));
-  const local = createCapabilityManifest({
-    buildMode: "browser-wasm",
-    transports: ["websocket"],
-    capabilities: ["client.session", "cache", "schema"],
-  });
-
-  const operation = () => {
-    if (local.buildMode !== "browser-wasm" || !local.transports.includes("websocket")) {
-      throw new Error("runtime probe manifest mismatch");
-    }
-  };
-
-  for (let index = 0; index < warmupIterations; index += 1) {
-    operation();
-  }
-
-  return measuredLatencyResult(scenario.id, measureSyncSamples(operation, iterations));
-}
-
-async function runSessionLifecycle(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
-  const iterations = positiveInt(scenario.workload.iterations, DEFAULT_ITERATIONS);
-  const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, Math.min(10_000, iterations));
-  const runtime = await openBrowserRuntime({
-    transportProviders: [createWebSocketTransportProvider({ WebSocket: FakeWebSocket as unknown as typeof WebSocket })],
-  });
-  const client = runtime.connect({ endpoint: "wss://example.test/nnrp" });
-  let sessionCounter = 0;
-
-  const operation = () => {
-    sessionCounter += 1;
-    const session = client.openSession({ sessionId: `session-${sessionCounter}` });
-    void session.close();
-  };
-
-  for (let index = 0; index < warmupIterations; index += 1) {
-    operation();
-  }
-
-  try {
-    return measuredLatencyResult(scenario.id, measureSyncSamples(operation, iterations));
-  } finally {
-    await runtime.close();
-  }
-}
-
-async function runSubmitResultLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
-  const provider = createTcpTransportProvider();
-  if (!provider.localAvailable) {
-    return skipResult(
-      scenario.id,
-      `Native submit/result benchmark requires the packaged TCP provider: ${provider.diagnostic?.message ?? "unknown"}`,
-    );
+function runCoarseFfiSubmitResult(scenario: BenchmarkScenario): BenchmarkScenarioResult {
+  const libraryPath = Deno.env.get("NNRP_JS_BENCHMARK_NATIVE_LIBRARY");
+  if (libraryPath === undefined) {
+    return skipResult(scenario.id, "NNRP_JS_BENCHMARK_NATIVE_LIBRARY is required for the benchmark-ffi scenario.");
   }
   const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
+  const batchIterations = positiveInt(scenario.workload.iterations, DEFAULT_BATCH_ITERATIONS);
   const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
-  const payload = new Uint8Array(INLINE_PAYLOAD_BYTES);
-  const reservation = await provider.listen({ endpoint: "127.0.0.1:0", timeoutMillis: 5_000 });
-  const providerEndpoint = stripTcpScheme(reservation.endpoint);
-  await reservation.close();
-  const endpoint = `nnrp://${providerEndpoint}/session/default`;
-  const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: "force-tcp" });
-  const server = serverRuntime.listen({ endpoint, providerEndpoint, transportPolicy: "force-tcp" });
-  const accepting = server.accept();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  const client = await openNativeClient({
-    endpoint,
-    providerEndpoint,
-    transports: [provider],
-    transportPolicy: "force-tcp",
-  });
-  const clientSession = client.openSession({ sessionId: "benchmark-submit-result", inputProfile: "token" });
-  const bootstrapResult = clientSession.submit({
-    operationId: 1n,
-    frameId: 1,
-    payload,
-    inputProfile: "token",
-  });
-  const serverSession = await accepting;
-  const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-  if (bootstrapEvent.type !== "submit") {
-    throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.type}`);
-  }
-  await serverSession.sendResult({ frameId: bootstrapEvent.submit.frameId, payload });
-  await bootstrapResult;
+  const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
+  const ffi = openNativeBenchmarkFfi(libraryPath);
   let frameId = 1;
-
-  const operation = async () => {
-    frameId += 1;
-    const resultPending = clientSession.submit({
-      operationId: BigInt(frameId),
-      frameId,
-      payload,
-      inputProfile: "token",
-    });
-    const event = await serverSession.receive({ timeoutMillis: 5_000 });
-    if (event.type !== "submit") throw new Error(`expected submit event, got ${event.type}`);
-    await serverSession.sendResult({ frameId: event.submit.frameId, payload });
-    await resultPending;
+  const operation = () => {
+    const completed = ffi.submitResultBatch(frameId, batchIterations, payload);
+    if (completed !== batchIterations) throw new Error(`benchmark FFI completed ${completed}/${batchIterations}`);
+    frameId = frameId > 0xffff_ffff - batchIterations ? 1 : frameId + batchIterations;
+    return completed;
   };
-
-  for (let index = 0; index < warmupIterations; index += 1) {
-    await operation();
-  }
-
   try {
-    return measuredThroughputResult(scenario.id, await measureAsyncThroughput(operation, durationSeconds));
+    for (let index = 0; index < warmupIterations; index += 1) operation();
+    return measuredResult(
+      scenario,
+      measureCountedSyncThroughput(operation, durationSeconds),
+      payload.byteLength,
+      `benchmark-ffi ABI ${ffi.abiVersion}, protocol ${ffi.protocolVersion}, batch=${batchIterations}`,
+    );
   } finally {
-    await serverSession.close().catch(() => undefined);
-    await clientSession.close().catch(() => undefined);
-    await client.close().catch(() => undefined);
-    await server.close().catch(() => undefined);
-    await client.runtime.close().catch(() => undefined);
-    await serverRuntime.close().catch(() => undefined);
+    ffi.close();
+  }
+}
+
+async function runRuntimeControlLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
+  const pair = await openNativeRolePair("tcp");
+  await startBenchmarkOperation(pair, 2n, 2);
+  let sequence = 0n;
+  const operation = async () => {
+    sequence += 1n;
+    await pair.clientSession.updatePriority({
+      operationId: 2n,
+      controlSequence: sequence,
+      priorityClass: 1,
+      priorityDelta: 0,
+      deadlineUnixMs: 0n,
+      flags: 0,
+    });
+    const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+    if (event.type !== "priority-update") throw new Error(`expected priority-update, got ${event.type}`);
+  };
+  try {
+    return await measureAsyncScenario(scenario, operation, 0, "TCP runtime-control encode/send/poll");
+  } finally {
+    await pair.close();
+  }
+}
+
+async function runRuntimeObjectReferenceLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
+  const pair = await openNativeRolePair("tcp");
+  const size = payloadBytes(scenario.workload.payload);
+  await startBenchmarkOperation(pair, 2n, 2);
+  await declareBenchmarkObject(pair, size);
+  const operation = async () => {
+    await pair.clientSession.referenceObject({
+      objectId: 1n,
+      operationId: 2n,
+      objectVersion: 1n,
+      offset: 0n,
+      length: BigInt(size),
+      flags: 0,
+      metadataBytes: 0,
+    });
+    const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+    if (event.type !== "object-ref") throw new Error(`expected object-ref, got ${event.type}`);
+  };
+  try {
+    return await measureAsyncScenario(scenario, operation, size, "TCP runtime-object reference send/poll");
+  } finally {
+    await pair.close();
+  }
+}
+
+async function runRuntimeObjectDeltaLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
+  const pair = await openNativeRolePair("tcp");
+  const size = payloadBytes(scenario.workload.payload);
+  const delta = new Uint8Array(size);
+  await declareBenchmarkObject(pair, size);
+  let deltaSequence = 0n;
+  const operation = async () => {
+    deltaSequence += 1n;
+    await pair.clientSession.sendObjectDelta({
+      objectId: 1n,
+      deltaSequence,
+      regionOffset: 0n,
+      regionBytes: size,
+      deltaBytes: size,
+      flags: 0,
+      metadataBytes: 0,
+    }, delta);
+    const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+    if (event.type !== "object-delta") throw new Error(`expected object-delta, got ${event.type}`);
+  };
+  try {
+    return await measureAsyncScenario(scenario, operation, size, "TCP runtime-object delta send/poll");
+  } finally {
+    await pair.close();
   }
 }
 
 async function runTransportLoopback(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
   const transport = scenario.workload.transport as NnrpTransportKind | undefined;
-  if (transport === "quic") {
-    return skipResult(scenario.id, "QUIC loopback benchmark requires an injected native QUIC binding.");
+  if (transport !== "tcp" && transport !== "ipc" && transport !== "websocket") {
+    return skipResult(scenario.id, `Transport loopback supports tcp, ipc, or websocket; got ${transport ?? "none"}.`);
   }
-  if (transport !== "tcp") {
-    return skipResult(
-      scenario.id,
-      `JS benchmark runner does not implement ${transport ?? "unknown"} transport loopback.`,
-    );
+  const provider = nativeProvider(transport);
+  if (!provider.localAvailable) {
+    return skipResult(scenario.id, `${transport} provider unavailable: ${provider.diagnostic?.message ?? "unknown"}`);
   }
-
-  const durationSeconds = positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS);
-  const warmupIterations = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
-  const provider = createTcpTransportProvider();
-  const server = await provider.listen({ endpoint: "127.0.0.1:0" });
+  const endpoint = transportEndpoint(transport);
+  const server = await provider.listen({ endpoint });
   const accepted = server.accept();
   const client = await provider.connect({ endpoint: server.endpoint });
   const peer = await accepted;
+  const payload = new Uint8Array(40);
+  payload.set([0x4e, 0x4e, 0x52, 0x50, 1, 0, 0x20, 40]);
   let echoing = true;
-  const echoLoop = (async () => {
-    while (echoing) {
-      try {
-        const packets = await peer.receive({ maxPackets: 16, timeoutMillis: 1_000 });
-        await peer.send(packets);
-      } catch (error) {
-        if (!echoing) return;
-        throw error;
-      }
-    }
-  })();
+  const echoLoop = echoPackets(peer, () => echoing);
   let frameId = 0;
-
   const operation = async () => {
-    frameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
-    const packet = benchmarkPacket(frameId);
-    await client.send(packet);
-    const echoed = await client.receive({ maxPackets: 1, timeoutMillis: 1_000 });
+    frameId += 1;
+    new DataView(payload.buffer).setUint32(24, frameId, true);
+    await client.send(payload);
+    const echoed = await client.receive({ maxPackets: 1, timeoutMillis: 5_000 });
     if (echoed.length !== 1 || new DataView(echoed[0]!.buffer, echoed[0]!.byteOffset).getUint32(24, true) !== frameId) {
-      throw new Error("TCP loopback returned an unexpected packet");
+      throw new Error(`${transport} loopback returned an unexpected packet`);
     }
   };
-
-  for (let index = 0; index < warmupIterations; index += 1) {
-    await operation();
-  }
-
   try {
-    return measuredThroughputResult(scenario.id, await measureAsyncThroughput(operation, durationSeconds));
+    return await measureAsyncScenario(
+      scenario,
+      operation,
+      payload.byteLength,
+      `${transport} package-owned Rust provider`,
+    );
   } finally {
     echoing = false;
-    client.close();
-    peer.close();
-    await server.close();
+    await closeQuietly(() => client.close());
+    await closeQuietly(() => peer.close());
+    await closeQuietly(() => server.close());
     await echoLoop.catch(() => undefined);
   }
 }
 
-function benchmarkPacket(frameId: number): Uint8Array {
-  const packet = new Uint8Array(40);
-  packet.set([0x4e, 0x4e, 0x52, 0x50, 1, 0, 0x20, 40]);
-  new DataView(packet.buffer).setUint32(24, frameId, true);
-  return packet;
+async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise<BenchmarkScenarioResult> {
+  const nativeProvider = createWebSocketTransportProvider();
+  const providerEndpoint = await reserveEndpoint(nativeProvider, "websocket");
+  const serverRuntime = await openBackendRuntime({
+    transports: [nativeProvider],
+    transportPolicy: "force-websocket",
+  });
+  const server = serverRuntime.listen({
+    endpoint: "nnrp://localhost/benchmark-browser",
+    providerEndpoint,
+    transportPolicy: "force-websocket",
+  });
+  const accepting = server.accept();
+  await delay(25);
+  const wasmBytes = await Deno.readFile(new URL("../packages/browser-client/wasm/nnrp_wasm_bg.wasm", import.meta.url));
+  const browserRuntime = await openBrowserRuntime({
+    module: await WebAssembly.compile(wasmBytes),
+    transportProviders: [createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket })],
+    transportPolicy: "force-websocket",
+  });
+  const client = browserRuntime.connect({ endpoint: "nnrp://localhost/benchmark-browser", providerEndpoint });
+  const session = client.openSession({ sessionId: "benchmark-browser", inputProfile: "token" });
+  const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
+  const serverSessionPromise = accepting;
+  const bootstrap = session.submit({ operationId: 1n, frameId: 1, inputProfile: "token", payload });
+  const serverSession = await serverSessionPromise;
+  const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+  if (bootstrapEvent.type !== "submit") throw new Error(`expected bootstrap submit, got ${bootstrapEvent.type}`);
+  await serverSession.sendResult({ frameId: 1, payload });
+  await bootstrap;
+  let frameId = 1;
+  const operation = async () => {
+    frameId += 1;
+    const pending = session.submit({ operationId: BigInt(frameId), frameId, inputProfile: "token", payload });
+    const event = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (event.type !== "submit") throw new Error(`expected submit, got ${event.type}`);
+    await serverSession.sendResult({ frameId, payload });
+    await pending;
+  };
+  try {
+    return await measureAsyncScenario(scenario, operation, payload.byteLength, "browser WASM role over real WebSocket");
+  } finally {
+    await closeQuietly(() => serverSession.close());
+    await closeQuietly(() => session.close());
+    await closeQuietly(() => client.close());
+    await closeQuietly(() => browserRuntime.close());
+    await closeQuietly(() => server.close());
+    await closeQuietly(() => serverRuntime.close());
+  }
+}
+
+async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promise<NativeRolePair> {
+  const provider = nativeProvider(transport);
+  if (!provider.localAvailable) throw new Error(`${transport} provider is unavailable`);
+  const providerEndpoint = transport === "ipc" ? transportEndpoint("ipc") : await reserveEndpoint(provider, transport);
+  const policy = `force-${transport}` as const;
+  const endpoint = `nnrp://localhost/benchmark-${transport}`;
+  const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: policy });
+  const server = serverRuntime.listen({ endpoint, providerEndpoint, transportPolicy: policy });
+  const accepting = server.accept();
+  await delay(25);
+  const client = await openNativeClient({
+    endpoint,
+    providerEndpoint,
+    transports: [provider],
+    transportPolicy: policy,
+  });
+  const clientSession = client.openSession({ sessionId: `benchmark-${transport}`, inputProfile: "token" });
+  const payload = new Uint8Array(1);
+  const bootstrap = clientSession.submit({ operationId: 1n, frameId: 1, inputProfile: "token", payload });
+  const serverSession = await accepting;
+  const event = await serverSession.receive({ timeoutMillis: 5_000 });
+  if (event.type !== "submit") throw new Error(`expected bootstrap submit, got ${event.type}`);
+  await serverSession.sendResult({ frameId: 1, payload });
+  await bootstrap;
+  return {
+    clientSession,
+    serverSession,
+    close: async () => {
+      await closeQuietly(() => serverSession.close());
+      await closeQuietly(() => clientSession.close());
+      await closeQuietly(() => client.close());
+      await closeQuietly(() => server.close());
+      await closeQuietly(() => client.runtime.close());
+      await closeQuietly(() => serverRuntime.close());
+    },
+  };
+}
+
+async function declareBenchmarkObject(pair: NativeRolePair, size: number): Promise<void> {
+  await pair.clientSession.declareObject({
+    objectId: 1n,
+    objectKind: RuntimeObjectKind.Tensor,
+    producerRole: RuntimeRole.Client,
+    consumerRole: RuntimeRole.Server,
+    sessionId: 1,
+    byteSize: BigInt(size),
+    computeCostUnits: 1,
+    memoryLocationHint: MemoryLocationHint.HostMemory,
+    ownershipHint: OwnershipHint.SessionOwned,
+    lifetimeHintMs: 60_000,
+    metadataBytes: 0,
+  });
+  const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+  if (event.type !== "object-declare") throw new Error(`expected object-declare, got ${event.type}`);
+}
+
+async function startBenchmarkOperation(pair: NativeRolePair, operationId: bigint, frameId: number): Promise<void> {
+  await pair.clientSession.submitNoWait({
+    operationId,
+    frameId,
+    inputProfile: "token",
+    payload: new Uint8Array(1),
+  });
+  const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+  if (event.type !== "submit") throw new Error(`expected active submit, got ${event.type}`);
+}
+
+async function measureAsyncScenario(
+  scenario: BenchmarkScenario,
+  operation: () => Promise<void>,
+  payloadSize: number,
+  path: string,
+): Promise<BenchmarkScenarioResult> {
+  const warmup = nonNegativeInt(scenario.workload.warmup_iterations, DEFAULT_WARMUP_ITERATIONS);
+  for (let index = 0; index < warmup; index += 1) await operation();
+  return measuredResult(
+    scenario,
+    await measureAsyncThroughput(operation, positiveInt(scenario.workload.duration_seconds, DEFAULT_DURATION_SECONDS)),
+    payloadSize,
+    path,
+  );
+}
+
+function measuredResult(
+  scenario: BenchmarkScenario,
+  measurement: Measurement,
+  payloadSize: number,
+  path: string,
+): BenchmarkScenarioResult {
+  return {
+    id: scenario.id,
+    outcome: "measured",
+    samples: [
+      { value: measurement.iterations, unit: "operations" },
+      { value: measurement.seconds, unit: "seconds" },
+      { value: measurement.samplesUs.length, unit: "latency_samples" },
+      { value: payloadSize, unit: "payload_bytes" },
+      { value: 1, unit: "concurrency" },
+    ],
+    metrics: {
+      ...percentileMetrics(measurement.samplesUs),
+      throughput_ops_per_sec: measurement.iterations / measurement.seconds,
+      peak_memory_bytes: Deno.memoryUsage().heapUsed,
+    },
+    message: path,
+  };
 }
 
 async function measureAsyncThroughput(operation: () => Promise<void>, durationSeconds: number): Promise<Measurement> {
@@ -315,57 +455,75 @@ async function measureAsyncThroughput(operation: () => Promise<void>, durationSe
     samplesUs.push((performance.now() - before) * 1000);
     iterations += 1;
   }
-
-  return {
-    iterations,
-    seconds: (performance.now() - started) / 1000,
-    samplesUs,
-  };
+  return { iterations, seconds: (performance.now() - started) / 1000, samplesUs };
 }
 
-function measureSyncSamples(operation: () => void, iterations: number): Measurement {
+function measureCountedSyncThroughput(operation: () => number, durationSeconds: number): Measurement {
   const samplesUs: number[] = [];
+  let iterations = 0;
   const started = performance.now();
-  for (let index = 0; index < iterations; index += 1) {
+  const deadline = started + durationSeconds * 1000;
+  while (performance.now() < deadline) {
     const before = performance.now();
-    operation();
-    samplesUs.push((performance.now() - before) * 1000);
+    const completed = operation();
+    const elapsedUs = (performance.now() - before) * 1000;
+    samplesUs.push(elapsedUs / completed);
+    iterations += completed;
   }
-
-  return {
-    iterations,
-    seconds: (performance.now() - started) / 1000,
-    samplesUs,
-  };
-}
-
-function measuredLatencyResult(id: string, measurement: Measurement): BenchmarkScenarioResult {
-  return {
-    id,
-    outcome: "measured",
-    metrics: percentileMetrics(measurement.samplesUs),
-  };
-}
-
-function measuredThroughputResult(id: string, measurement: Measurement): BenchmarkScenarioResult {
-  return {
-    id,
-    outcome: "measured",
-    metrics: {
-      ...percentileMetrics(measurement.samplesUs),
-      throughput_ops_per_sec: measurement.iterations / measurement.seconds,
-    },
-  };
+  return { iterations, seconds: (performance.now() - started) / 1000, samplesUs };
 }
 
 function percentileMetrics(samplesUs: readonly number[]): BenchmarkMetrics {
   const sorted = [...samplesUs].sort((left, right) => left - right);
-  return {
-    p50_us: percentile(sorted, 0.5),
-    p95_us: percentile(sorted, 0.95),
-    p99_us: percentile(sorted, 0.99),
-    peak_memory_bytes: Deno.memoryUsage().heapUsed,
-  };
+  return { p50_us: percentile(sorted, 0.5), p95_us: percentile(sorted, 0.95), p99_us: percentile(sorted, 0.99) };
+}
+
+function percentile(sorted: readonly number[], ratio: number): number {
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] ?? 0;
+}
+
+type NativeProvider =
+  | ReturnType<typeof createTcpTransportProvider>
+  | ReturnType<typeof createIpcTransportProvider>
+  | ReturnType<typeof createWebSocketTransportProvider>;
+
+function nativeProvider(transport: "tcp" | "ipc" | "websocket"): NativeProvider {
+  if (transport === "tcp") return createTcpTransportProvider();
+  if (transport === "ipc") return createIpcTransportProvider();
+  return createWebSocketTransportProvider();
+}
+
+async function reserveEndpoint(provider: NativeProvider, transport: "tcp" | "websocket"): Promise<string> {
+  const reservation = await provider.listen({ endpoint: transport === "tcp" ? "127.0.0.1:0" : "ws://127.0.0.1:0" });
+  const endpoint = transport === "tcp" ? stripTcpScheme(reservation.endpoint) : reservation.endpoint;
+  await Promise.resolve(reservation.close());
+  return endpoint;
+}
+
+function transportEndpoint(transport: "tcp" | "ipc" | "websocket"): string {
+  if (transport === "tcp") return "127.0.0.1:0";
+  if (transport === "websocket") return "ws://127.0.0.1:0";
+  if (Deno.build.os === "windows") return `npipe://nnrp-js-benchmark-${Deno.pid}-${Date.now()}`;
+  const path = resolve(`artifacts/nnrp-js-benchmark-${Deno.pid}.sock`).replaceAll("\\", "/");
+  return `unix://${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+async function echoPackets(connection: NnrpTransportConnection, running: () => boolean): Promise<void> {
+  while (running()) {
+    try {
+      const packets = await connection.receive({ maxPackets: 16, timeoutMillis: 1_000 });
+      if (packets.length > 0) await connection.send(packets);
+    } catch (error) {
+      if (!running()) return;
+      throw error;
+    }
+  }
+}
+
+function payloadBytes(name: string): number {
+  const match = name.match(/(?:^|_)(\d+)(?:b|_bytes)?$/i);
+  if (match === null) return DEFAULT_PAYLOAD_BYTES;
+  return positiveInt(Number(match[1]), DEFAULT_PAYLOAD_BYTES);
 }
 
 function stripTcpScheme(endpoint: string): string {
@@ -374,23 +532,40 @@ function stripTcpScheme(endpoint: string): string {
   return `${url.hostname}:${url.port}`;
 }
 
-function skipResult(id: string, message: string): BenchmarkScenarioResult {
-  return {
-    id,
-    outcome: "skip",
-    message,
-  };
-}
-
 function buildEnvironment(): BenchmarkEnvironment {
   return {
     ...(Deno.env.get("GITHUB_SHA") === undefined ? {} : { sdk_commit: Deno.env.get("GITHUB_SHA") }),
+    nnrp_rs_artifact: RUST_ARTIFACT_VERSION,
     host_runtime: `deno ${Deno.version.deno}`,
     os: Deno.build.os,
     arch: Deno.build.arch,
     notes:
-      "JS benchmark results use the conformance benchmark-results schema; native throughput scenarios use package-owned Rust transport artifacts and real role sessions.",
+      "Production scenarios use package-owned Rust providers and real role sessions; coarse FFI uses an explicit benchmark-ffi build.",
   };
+}
+
+function skipResult(id: string, message: string): BenchmarkScenarioResult {
+  return { id, outcome: "skip", message };
+}
+
+function positiveInt(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1) throw new Error(`Expected positive integer, got ${value}`);
+  return value;
+}
+
+function nonNegativeInt(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 0) throw new Error(`Expected non-negative integer, got ${value}`);
+  return value;
+}
+
+async function closeQuietly(close: () => void | Promise<void>): Promise<void> {
+  await Promise.resolve().then(close).catch(() => undefined);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
 function valueAfter(args: readonly string[], name: string): string | undefined {
@@ -398,79 +573,15 @@ function valueAfter(args: readonly string[], name: string): string | undefined {
   return index === -1 ? undefined : args[index + 1];
 }
 
-function positiveInt(value: number | undefined, fallback: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`Expected positive integer, got ${value}`);
-  }
-  return value;
-}
-
-function nonNegativeInt(value: number | undefined, fallback: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`Expected non-negative integer, got ${value}`);
-  }
-  return value;
-}
-
-function percentile(sorted: readonly number[], ratio: number): number {
-  if (sorted.length === 0) {
-    return 0;
-  }
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] ?? 0;
-}
-
-function parentPath(path: string): string | undefined {
-  const normalized = path.replaceAll("\\", "/");
-  const separator = normalized.lastIndexOf("/");
-  if (separator === -1) {
-    return undefined;
-  }
-
-  return path.slice(0, separator);
-}
-
-class FakeWebSocket extends EventTarget {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-
-  readyState = FakeWebSocket.CONNECTING;
-
-  constructor() {
-    super();
-    queueMicrotask(() => {
-      this.readyState = FakeWebSocket.OPEN;
-      this.dispatchEvent(new Event("open"));
-    });
-  }
-
-  send(_payload: Uint8Array): void {}
-
-  close(): void {
-    this.readyState = FakeWebSocket.CLOSED;
-  }
-}
-
 async function main(): Promise<void> {
-  const conformancePlanPath = valueAfter(Deno.args, "--plan") ?? Deno.env.get("NNRP_CONFORMANCE_BENCHMARK_PLAN");
-  if (conformancePlanPath !== undefined) {
+  const planPath = valueAfter(Deno.args, "--plan") ?? Deno.env.get("NNRP_CONFORMANCE_BENCHMARK_PLAN");
+  if (planPath !== undefined) {
     const outputPath = valueAfter(Deno.args, "--output") ?? Deno.env.get("NNRP_CONFORMANCE_BENCHMARK_RESULTS");
-    const report = await buildConformanceBenchmarkResults(conformancePlanPath);
+    const report = await buildConformanceBenchmarkResults(planPath);
     const serialized = `${JSON.stringify(report, null, 2)}\n`;
-    if (outputPath === undefined) {
-      console.log(serialized);
-    } else {
-      const outputParentPath = parentPath(outputPath);
-      if (outputParentPath !== undefined) {
-        await Deno.mkdir(outputParentPath, { recursive: true });
-      }
+    if (outputPath === undefined) console.log(serialized);
+    else {
+      await Deno.mkdir(resolve(outputPath, "..").replaceAll("\\", "/"), { recursive: true });
       await Deno.writeTextFile(outputPath, serialized);
     }
     return;
@@ -480,7 +591,6 @@ async function main(): Promise<void> {
   const reports = selectBuildModes(options.mode).map((buildMode) =>
     createBenchmarkReport(buildMode, { artifactVersion: options.artifactVersion })
   );
-
   writeJson(options.mode === "all" ? { sdk: "nnrp-js", reports } : reports[0]);
 }
 

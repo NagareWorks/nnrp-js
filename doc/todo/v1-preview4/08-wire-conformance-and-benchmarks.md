@@ -42,21 +42,21 @@
 
 ## Benchmarks
 
-- [ ] Add Preview4 benchmark entrypoints.
-  - [ ] Runtime-control encode/submit/poll throughput.
-  - [ ] Runtime-object reference and delta throughput.
-  - [ ] IPC loopback throughput and latency.
-  - [ ] Native WebSocket loopback throughput and latency.
-  - [ ] Browser WebSocket/WASM throughput and latency.
-- [ ] Preserve performance evidence.
-  - [ ] Compare coarse-call overhead against the checked-in Preview3 native baseline.
-  - [ ] Record environment, artifact version, payload sizes, concurrency, and sample counts.
-  - [ ] Store machine-readable results and a human-readable report under `doc/benchmarks`.
-  - [ ] Fail the release gate on a configured coarse-FFI regression threshold.
+- [x] Add Preview4 benchmark entrypoints.
+  - [x] Runtime-control encode/submit/poll throughput.
+  - [x] Runtime-object reference and delta throughput.
+  - [x] IPC loopback throughput and latency.
+  - [x] Native WebSocket loopback throughput and latency.
+  - [x] Browser WebSocket/WASM throughput and latency.
+- [x] Preserve performance evidence.
+  - [x] Compare coarse-call overhead against the checked-in Preview3 native baseline.
+  - [x] Record environment, artifact version, payload sizes, concurrency, and sample counts.
+  - [x] Store machine-readable results and a human-readable report under `doc/benchmarks`.
+  - [x] Fail the release gate on a configured coarse-FFI regression threshold.
 
 ## Acceptance Evidence
 
 - [x] All generated target manifests validate against `wire-conformance-target.schema.json`.
 - [x] All reports validate against the selected plan and case-results schema.
 - [x] CI artifacts identify every executed and skipped matrix cell.
-- [ ] Benchmark reports contain no private hostnames, addresses, tokens, or local user paths.
+- [x] Benchmark reports contain no private hostnames, addresses, tokens, or local user paths.

@@ -3,15 +3,18 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 const releaseWorkflow = await Deno.readTextFile(".github/workflows/release.yml");
 const artifactPreparation = await Deno.readTextFile("scripts/prepare-rust-artifact-packages.ts");
 const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
+const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
 
-Deno.test("release workflow and local preparation pin Rust preview4.15", () => {
-  assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.15/g)?.length, 2);
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.15"');
-  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.15"');
-  assertEquals(releaseWorkflow.includes("1.0.0-preview.4.14"), false);
-  assertEquals(artifactPreparation.includes("1.0.0-preview.4.14"), false);
-  assertEquals(sdkReporting.includes("1.0.0-preview.4.14"), false);
+Deno.test("release workflow and local preparation pin Rust preview4.16", () => {
+  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.16/g)?.length ?? 0) >= 3, true);
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.16"');
+  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.16"');
+  assertEquals(releaseWorkflow.includes("1.0.0-preview.4.15"), false);
+  assertEquals(artifactPreparation.includes("1.0.0-preview.4.15"), false);
+  assertEquals(sdkReporting.includes("1.0.0-preview.4.15"), false);
+  assertStringIncludes(dryRunArtifacts, "await writeJson(`${outputDir}/rust-artifacts.json`, rustArtifacts)");
+  assertStringIncludes(dryRunArtifacts, 'readRequiredString(manifest, "source_archive_sha256", manifestPath)');
 });
 
 Deno.test("generated Rust artifacts stay out of source control for every package owner", () => {
@@ -28,12 +31,13 @@ Deno.test("generated Rust artifacts stay out of source control for every package
   }
 });
 
-Deno.test("native benchmark reuses package-owned prepared transport artifacts", () => {
+Deno.test("release benchmark separates production providers from the explicit Rust benchmark-ffi build", () => {
   assertStringIncludes(
     releaseWorkflow,
     "deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run",
   );
   assertStringIncludes(releaseWorkflow, "deno task benchmark:conformance");
-  assertEquals(releaseWorkflow.includes("NNRP_NATIVE_LIBRARY"), false);
-  assertEquals(releaseWorkflow.includes("artifacts/native-benchmark"), false);
+  assertStringIncludes(releaseWorkflow, "--features benchmark-ffi,transport-tcp");
+  assertStringIncludes(releaseWorkflow, "NNRP_JS_BENCHMARK_NATIVE_LIBRARY");
+  assertStringIncludes(releaseWorkflow, "deno task benchmark:privacy");
 });

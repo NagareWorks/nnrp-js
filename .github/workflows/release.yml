@@ -32,7 +32,7 @@ on:
       rust_artifact_version:
         description: nnrp-rs release version that provides the Linux native benchmark artifact.
         required: true
-        default: 1.0.0-preview.4.15
+        default: 1.0.0-preview.4.16
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -63,6 +63,14 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout Rust benchmark source
+        uses: actions/checkout@v5
+        with:
+          repository: NagareWorks/nnrp-rs
+          ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.16' }}
+          path: .rust-benchmark
       - name: Resolve version
         id: version
         shell: bash
@@ -117,17 +125,25 @@ jobs:
       - name: Verify release gates
         env:
           GH_TOKEN: ${{ github.token }}
-          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.15' }}
+          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.16' }}
         run: deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run
       - name: Verify real native benchmark gate
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         shell: bash
         run: |
           set -euo pipefail
+          cargo build \
+            --manifest-path .rust-benchmark/Cargo.toml \
+            --release \
+            -p nnrp-ffi \
+            --no-default-features \
+            --features benchmark-ffi,transport-tcp
+          export NNRP_JS_BENCHMARK_NATIVE_LIBRARY="$GITHUB_WORKSPACE/.rust-benchmark/target/release/libnnrp_ffi.so"
           deno task benchmark:conformance \
             --plan scripts/release-benchmark-plan.json \
             --output artifacts/release-benchmark-results.json
           deno task benchmark:release-gate --results artifacts/release-benchmark-results.json
+          deno task benchmark:privacy artifacts/release-benchmark-results.json
       - name: Pack GitHub release assets
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release)
         shell: bash

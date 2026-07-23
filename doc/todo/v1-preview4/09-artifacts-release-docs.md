@@ -2,10 +2,10 @@
 
 ## Rust Preview4 Artifact Adoption
 
-- [ ] Set the default Rust artifact version to `1.0.0-preview.4.15`.
+- [x] Set the default Rust artifact version to `1.0.0-preview.4.16`.
   - [x] Update release workflow inputs and fallback values.
   - [x] Update local artifact preparation defaults.
-  - [ ] Record the resolved Rust release tag and checksums in dry-run evidence.
+  - [x] Record the resolved Rust release tag and checksums in dry-run evidence.
 - [x] Stage all transport-scoped native artifacts.
   - [x] Download TCP platform archives into `@nnrp/transport-tcp`.
   - [x] Download QUIC platform archives into `@nnrp/transport-quic`.

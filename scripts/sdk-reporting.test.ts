@@ -13,7 +13,7 @@ Deno.test("sdk reporting creates build-mode-specific manifests", () => {
   const report = createCapabilityManifestReport({ mode: "all" });
 
   assertEquals(report.manifests.map((entry) => entry.buildMode), ["backend-native", "browser-wasm"]);
-  assertEquals(report.manifests[0]?.artifactVersion, "1.0.0-preview.4.15");
+  assertEquals(report.manifests[0]?.artifactVersion, "1.0.0-preview.4.16");
   assertEquals(report.manifests[0]?.manifest.transports, ["tcp", "quic", "ipc", "websocket"]);
   assertEquals(report.manifests[0]?.manifest.capabilities.includes("server.session"), true);
   assertEquals(report.manifests[0]?.manifest.capabilities.includes("control.capability_costs"), true);
@@ -33,7 +33,7 @@ Deno.test("sdk reporting keeps adapter smoke separate from wire evidence", () =>
   const report = createConformanceReport("backend-native");
 
   assertEquals(report.buildMode, "backend-native");
-  assertEquals(report.artifactVersion, "1.0.0-preview.4.15");
+  assertEquals(report.artifactVersion, "1.0.0-preview.4.16");
   assertEquals(report.cases.length, report.manifest.capabilities.length);
   assertEquals(report.cases.every((entry) => entry.status === "skipped"), true);
   assertEquals(

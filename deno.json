@@ -16,6 +16,7 @@
     "benchmark:backend": "deno run --unstable-sloppy-imports --allow-env --allow-net=127.0.0.1 --allow-read --allow-write=artifacts scripts/run-benchmark.ts --mode backend-native",
     "benchmark:browser": "deno run --unstable-sloppy-imports --allow-env --allow-net=127.0.0.1 --allow-read --allow-write=artifacts scripts/run-benchmark.ts --mode browser-wasm",
     "benchmark:conformance": "deno run --unstable-sloppy-imports --allow-env --allow-ffi --allow-net=127.0.0.1 --allow-read --allow-write=artifacts scripts/run-benchmark.ts",
+    "benchmark:privacy": "deno run --allow-read scripts/check-benchmark-privacy.ts",
     "benchmark:release-gate": "deno run --allow-read scripts/check-release-benchmark-gate.ts",
     "benchmark:smoke": "deno run --allow-env scripts/check-benchmark-smoke.ts",
     "conformance:backend": "deno run --allow-env scripts/run-conformance-adapter.ts --mode backend-native",
