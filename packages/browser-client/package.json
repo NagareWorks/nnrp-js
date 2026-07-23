@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/browser-client",
-  "version": "1.0.0-preview.3.5",
+  "version": "1.0.0-preview.4",
   "description": "Browser and edge client SDK for NNRP.",
   "keywords": [
     "nnrp",
@@ -36,12 +36,19 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
+    "dist/errors.js",
+    "dist/errors.d.ts",
+    "dist/errors.d.ts.map",
+    "dist/wasm-role.js",
+    "dist/wasm-role.d.ts",
+    "dist/wasm-role.d.ts.map",
     "wasm/**"
   ],
   "dependencies": {
     "@nnrp/core": "workspace:*"
   },
   "nnrp": {
+    "runtimeTargets": ["browser-es2022"],
     "wasmArtifacts": {
       "enabled": true
     }

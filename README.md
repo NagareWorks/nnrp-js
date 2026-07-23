@@ -13,60 +13,97 @@
 
 # nnrp-js
 
-Deno-first TypeScript SDK workspace for NNRP, with Node-compatible package output.
+Deno-first TypeScript SDK for NNRP/1 Preview4, with Node-compatible ESM packages and a browser WASM client.
 
-NNRP is a lightweight real-time AI application-layer protocol. This repository is the JavaScript SDK surface for
-Deno-driven tooling, Node-compatible service packages, browser/edge WASM integrations, and later Coding Agent
-orchestration experiments.
+The SDK separates application roles from carrier providers. Native client and server packages own role/session
+lifecycle; each native carrier package owns its Rust transport implementation and platform libraries; the browser client
+owns the browser WASM runtime.
 
 ## Packages
 
-| Package                     | Purpose                                                                                  |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
-| `@nnrp/core`                | Shared TypeScript types, protocol constants, capability and transport selection helpers. |
-| `@nnrp/native-client`       | Node.js and Deno native client/session entrypoint.                                       |
-| `@nnrp/native-server`       | Node.js and Deno native server/listen/session entrypoint.                                |
-| `@nnrp/browser-client`      | Browser and edge client/session entrypoint backed by browser runtime primitives.         |
-| `@nnrp/transport-tcp`       | TCP transport adapter with packaged native transport artifacts.                          |
-| `@nnrp/transport-quic`      | QUIC transport adapter with packaged native transport artifacts.                         |
-| `@nnrp/transport-websocket` | Browser-native WebSocket transport adapter for browser clients.                          |
+| Package                     | Owned boundary                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| `@nnrp/core`                | Runtime-neutral contracts, codecs, validation, endpoints, and provider selection.   |
+| `@nnrp/native-client`       | Node.js/Deno client, session, control, object, and cache lifecycle.                 |
+| `@nnrp/native-server`       | Node.js/Deno listener, accepted session, response, control, object, and cache APIs. |
+| `@nnrp/browser-client`      | Browser client/session lifecycle and the single `nnrp-wasm-browser` artifact.       |
+| `@nnrp/transport-tcp`       | TCP provider behavior and TCP native libraries.                                     |
+| `@nnrp/transport-quic`      | QUIC provider behavior and QUIC native libraries.                                   |
+| `@nnrp/transport-ipc`       | Unix-domain socket / Windows named-pipe provider behavior and native libraries.     |
+| `@nnrp/transport-websocket` | Native WebSocket provider libraries plus the browser host-WebSocket binding.        |
 
 ## Build Modes
 
-| Build mode       | Role packages                                | Runtime target                         | Transport adapter packages                    |
-| ---------------- | -------------------------------------------- | -------------------------------------- | --------------------------------------------- |
-| `core`           | `@nnrp/core`                                 | Runtime-neutral TypeScript contract    | None                                          |
-| `backend-native` | `@nnrp/native-client`, `@nnrp/native-server` | Node-compatible services, CLIs, agents | `@nnrp/transport-tcp`, `@nnrp/transport-quic` |
-| `browser-client` | `@nnrp/browser-client`                       | Browser and edge clients               | `@nnrp/transport-websocket`                   |
+| Build mode       | Role packages                                | Runtime target                  | Carrier packages                       |
+| ---------------- | -------------------------------------------- | ------------------------------- | -------------------------------------- |
+| `core`           | `@nnrp/core`                                 | Runtime-neutral TypeScript      | None                                   |
+| `backend-native` | `@nnrp/native-client`, `@nnrp/native-server` | Node.js 20.11+ and Deno 2+      | TCP, QUIC, IPC, and WebSocket packages |
+| `browser-client` | `@nnrp/browser-client`                       | Modern ES2022 browser with WASM | `@nnrp/transport-websocket`            |
 
-The backend-native packages target Node.js 20.11 or newer compatible runtimes. Browser packages target modern ES2022
-browser and edge environments with `WebAssembly.Module`. Transport packages are independent install units: install one
-transport to force that candidate shape, or install several and let runtime probing plus policy select the active
-transport.
+Install exactly the carriers an application permits. One installed provider is used directly; multiple providers are
+probed and selected by the frozen policy, limits, cost, preference, throughput, and RTT rules.
 
 ## Quick Start
 
 ```bash
-deno task lint
-deno task test
-deno task build
-deno task manifest
-deno task conformance:backend
-deno task benchmark:backend
-deno task benchmark:conformance --plan ../nnrp-conformance/docs/examples/benchmark-execution-plan.sample.json --output artifacts/benchmark-results.json
+npm install @nnrp/native-client @nnrp/transport-tcp
 ```
 
-The first preview keeps the JavaScript layer thin: Deno drives formatting, linting, tests, and TypeScript builds. The
-published package shape remains Node-compatible ESM with declaration files, but Node.js is treated as a compatibility
-target rather than the repository tooling base. Rust remains the preferred implementation for protocol-critical native
-and WASM primitives.
+```ts
+import { openNativeClient } from "@nnrp/native-client";
+import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
-`benchmark:backend` and `benchmark:browser` keep SDK-local smoke reports for release dry runs. `benchmark:conformance`
-is the cross-SDK benchmark entrypoint: it consumes a conformance benchmark execution plan and emits a results document
-that validates against the conformance benchmark-results schema. Native throughput scenarios load the Rust artifacts
-owned by the installed transport packages and execute through real client/server role sessions. Benchmark scenarios run
-sequentially so each measurement owns its provider and timing window, and release publishing is gated on the Rust-backed
-throughput scenario.
+const client = await openNativeClient({
+  endpoint: "nnrp://127.0.0.1:4433/session/default",
+  transports: [createTcpTransportProvider()],
+  transportPolicy: "auto",
+});
+
+const session = client.openSession({ inputProfile: "tensor" });
+const result = await session.submit({
+  operationId: 1n,
+  frameId: 1,
+  payload: new Uint8Array([1, 2, 3]),
+  inputProfile: "tensor",
+  submitMode: "inline",
+});
+
+await session.close();
+await client.close();
+```
+
+Use `@nnrp/native-server` for a listener and `@nnrp/browser-client` with `@nnrp/transport-websocket` for a browser
+client. The [JavaScript quick start](https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/quick-start) covers all
+three roles.
+
+## Endpoints
+
+Role APIs receive an NNRP application endpoint such as `nnrp://host:4433/session/default`. A carrier-local endpoint is
+separate and optional: TCP/QUIC can derive one, while IPC (`unix://`, `npipe://`) and WebSocket (`ws://`, `wss://`)
+require an explicit `providerEndpoint` when the application endpoint cannot determine it. Provider-local addresses are
+never serialized into operation payloads.
+
+## Runtime Surface
+
+Native and browser clients expose the same submit, cancellation, deadline, priority, progress, partial-result, runtime
+object, cache reference, and event polling concepts. `@nnrp/native-server` additionally exposes listen/accept and
+server-only response controls. Public methods use structured Preview4 metadata and `bigint` for wire `u64` fields;
+native handles, WASM handles, and transport-library handles remain private.
+
+## Conformance And Benchmarks
+
+```bash
+deno task wire-conformance:native
+deno task wire-conformance:browser
+deno task installed-package-smoke
+deno task benchmark:conformance --plan scripts/release-benchmark-plan.json --output artifacts/release-benchmark-results.json
+```
+
+Wire evidence is written beneath `artifacts/wire-conformance/native` and `artifacts/wire-conformance/browser`. Release
+tarball evidence, including Node, Deno, and browser import results, is written to
+`artifacts/installed-package-smoke/evidence.json`. Benchmark results are checked against the committed Preview3
+coarse-FFI baseline and the public result is recorded in
+[`doc/benchmarks/preview4-runtime-and-carriers.md`](doc/benchmarks/preview4-runtime-and-carriers.md).
 
 `nnrp-js` uses Deno for repository tooling and keeps Node.js compatibility for package consumers. Bun is not a supported
 runtime, build tool, compatibility target, or CI axis for this SDK.
@@ -83,11 +120,6 @@ runtime, build tool, compatibility target, or CI axis for this SDK.
 Examples use package entrypoint names through the repository import map. They are checked with
 `deno task examples:check`.
 
-## Repository Status
-
-This repository is being bootstrapped for Preview3-era SDK integration. Public package publishing is gated by the
-release workflow until package checks, conformance smoke, benchmark smoke, and import smoke pass.
-
 Preview package versions are synchronized across the role, transport, and core packages. Source package manifests stay
 `private: true` for workspace safety; the release workflow stages publishable manifests before running `npm publish`.
 
@@ -95,11 +127,9 @@ The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure tru
 with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN` secret is
 required for the default path.
 
-TCP and QUIC transport packages bundle the supported native platform artifacts inside their own package payloads.
-Runtime resolution first looks inside the installed transport package and still accepts explicit library paths, artifact
-directories, or injected FFI bindings for controlled deployments. The browser client bundles browser runtime primitives,
-and is the only package that carries browser WASM output. WebSocket stays browser-native because the Rust runtime does
-not expose a WebSocket transport implementation.
+TCP, QUIC, IPC, and WebSocket transport packages each bundle their own supported native platform artifacts. Role
+packages contain no native libraries. The browser client is the only package carrying browser WASM; the WebSocket
+package does not duplicate it.
 
 ## Contributors
 

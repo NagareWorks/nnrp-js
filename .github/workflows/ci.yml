@@ -187,6 +187,8 @@ jobs:
         run: deno task native-transport-smoke
       - name: Package entrypoint smoke
         run: deno task package-check
+      - name: Installed package smoke
+        run: deno task installed-package-smoke
       - name: SDK command smoke
         shell: bash
         run: |

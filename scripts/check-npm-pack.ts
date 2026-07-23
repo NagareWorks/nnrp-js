@@ -39,6 +39,12 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.d.ts",
       "dist/index.d.ts.map",
       "dist/index.js",
+      "dist/errors.d.ts",
+      "dist/errors.d.ts.map",
+      "dist/errors.js",
+      "dist/wasm-role.d.ts",
+      "dist/wasm-role.d.ts.map",
+      "dist/wasm-role.js",
       "package.json",
       "wasm/manifest.json",
       "wasm/nnrp_wasm.d.ts",
@@ -138,6 +144,7 @@ for (const policy of packages) {
   }
 
   const packedFiles = pack.files.map((file) => normalizePackPath(file.path)).sort();
+  await checkRelativeModuleClosure(policy, packedFiles);
   checkNativeArtifactMetadata(policy, packageJson, packedFiles);
   checkWasmArtifactMetadata(policy, packageJson, packedFiles);
   for (const expected of policy.expectedFiles) {
@@ -153,6 +160,39 @@ for (const policy of packages) {
       }
     }
   }
+}
+
+async function checkRelativeModuleClosure(
+  policy: PackagePackPolicy,
+  packedFiles: readonly string[],
+): Promise<void> {
+  const packedFileSet = new Set(packedFiles);
+  const moduleSpecifierPattern = /(?:from\s+|import\s*\(|require\s*\()\s*["'](\.\.?\/[^"']+)["']/g;
+  for (const file of packedFiles) {
+    if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
+    const content = await Deno.readTextFile(`${policy.directory}/${file}`);
+    for (const match of content.matchAll(moduleSpecifierPattern)) {
+      const specifier = match[1];
+      const resolved = resolveRelativePackPath(file, specifier);
+      if (!packedFileSet.has(resolved)) {
+        failures.push(`${policy.name}: ${file} imports missing packed module ${resolved}`);
+      }
+    }
+  }
+}
+
+function resolveRelativePackPath(importer: string, specifier: string): string {
+  const segments = importer.split("/");
+  segments.pop();
+  for (const segment of specifier.split("/")) {
+    if (segment === "." || segment === "") continue;
+    if (segment === "..") {
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.join("/");
 }
 
 const versions = new Set(packageVersions.values());

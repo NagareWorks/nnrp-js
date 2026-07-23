@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/transport-websocket",
-  "version": "1.0.0-preview.3.5",
+  "version": "1.0.0-preview.4",
   "description": "WebSocket transport provider with native artifacts and browser host bindings for NNRP runtimes.",
   "keywords": [
     "nnrp",
@@ -48,6 +48,7 @@
   },
   "nnrp": {
     "transport": "websocket",
+    "runtimeTargets": ["node>=20.11", "deno>=2", "browser-es2022"],
     "nativeArtifacts": {
       "enabled": true
     }

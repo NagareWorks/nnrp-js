@@ -10,23 +10,38 @@ The package exposes browser client/session APIs and browser transport provider s
 `nnrp-wasm-browser` runtime artifact; `moduleUrl` and injected `WebAssembly.Module` values explicitly override that
 default for controlled deployments.
 
+```bash
+npm install @nnrp/browser-client @nnrp/transport-websocket
+```
+
 ```ts
 import { openBrowserRuntime } from "@nnrp/browser-client";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
 const runtime = await openBrowserRuntime({
-  moduleUrl: "/assets/nnrp_wasm_bg.wasm",
   transportProviders: [createWebSocketTransportProvider()],
 });
 
-const client = await runtime.connect({ endpoint: "wss://example.test/nnrp" });
+const client = runtime.connect({
+  endpoint: "nnrps://example.test/session/default",
+  providerEndpoint: "wss://example.test/nnrp",
+});
 const session = client.openSession({ inputProfile: "structured_event" });
 
-await session.submitNoWait({
+await session.submit({
+  operationId: 1n,
   frameId: 1,
   payload: new TextEncoder().encode("hello"),
   inputProfile: "structured_event",
+  submitMode: "inline",
 });
+
+await session.close();
+await client.close();
+await runtime.close();
 ```
+
+The browser client mirrors the native client control, object, cache, and event concepts. It exports no server API and
+loads no `.dll`, `.so`, or `.dylib`.
 
 SDK reference: https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/api/browser-client

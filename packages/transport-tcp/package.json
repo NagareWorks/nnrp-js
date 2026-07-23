@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/transport-tcp",
-  "version": "1.0.0-preview.3.5",
+  "version": "1.0.0-preview.4",
   "description": "TCP transport adapter with native artifacts for NNRP runtimes.",
   "keywords": [
     "nnrp",
@@ -45,6 +45,7 @@
   },
   "nnrp": {
     "transport": "tcp",
+    "runtimeTargets": ["node>=20.11", "deno>=2"],
     "nativeArtifacts": {
       "enabled": true
     }

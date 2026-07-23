@@ -37,10 +37,10 @@
 
 ## Release Workflow
 
-- [ ] Update Preview4 workspace versions consistently.
-  - [ ] Set every publishable package to the same Preview4 SDK version.
-  - [ ] Set internal dependency ranges to the exact workspace release version during staging.
-  - [ ] Validate the Git tag version against every staged package version.
+- [x] Update Preview4 workspace versions consistently.
+  - [x] Set every publishable package to the same Preview4 SDK version.
+  - [x] Set internal dependency ranges to the exact workspace release version during staging.
+  - [x] Validate the Git tag version against every staged package version.
 - [ ] Keep publishing rerunnable and trusted.
   - [x] Publish in dependency order: core, transports, role packages.
   - [x] Skip an already-published identical package version and continue remaining packages.
@@ -50,22 +50,22 @@
 
 ## Documentation and Package Metadata
 
-- [ ] Synchronize repository and npm documentation.
-  - [ ] Document role-package selection.
-  - [ ] Document all four carrier packages and application/provider endpoint separation.
-  - [ ] Document native and browser client parity and server-only APIs.
-  - [ ] Document control, object/cache, IPC, native WebSocket, and browser WebSocket examples.
-  - [ ] Document wire-conformance commands and expected evidence files.
-- [ ] Validate package metadata.
-  - [ ] Every package has description, keywords, license, repository, exports, files, and runtime constraints.
-  - [ ] Every package README has the shared banner, installation, owned boundary, and relevant example.
-  - [ ] The repository README has the contributor avatar wall and current package map.
+- [x] Synchronize repository and npm documentation.
+  - [x] Document role-package selection.
+  - [x] Document all four carrier packages and application/provider endpoint separation.
+  - [x] Document native and browser client parity and server-only APIs.
+  - [x] Document control, object/cache, IPC, native WebSocket, and browser WebSocket examples.
+  - [x] Document wire-conformance commands and expected evidence files.
+- [x] Validate package metadata.
+  - [x] Every package has description, keywords, license, repository, exports, files, and runtime constraints.
+  - [x] Every package README has the shared banner, installation, owned boundary, and relevant example.
+  - [x] The repository README has the contributor avatar wall and current package map.
 
 ## Final Validation
 
-- [ ] Run `deno task lint`.
-- [ ] Run `deno task test` and the 90 percent line coverage gate.
-- [ ] Run `deno task package-check` and `deno task release-dry-run`.
-- [ ] Inspect every generated npm tarball and GitHub release archive.
-- [ ] Validate installed-package smoke tests on Node, Deno, and a browser runner.
+- [x] Run `deno task lint`.
+- [x] Run `deno task test` and the 90 percent line coverage gate.
+- [x] Run `deno task package-check` and `deno task release-dry-run`.
+- [x] Inspect every generated npm tarball and GitHub release archive.
+- [x] Validate installed-package smoke tests on Node, Deno, and a browser runner.
 - [ ] Confirm all Preview4 todo files contain zero unchecked boxes before release.

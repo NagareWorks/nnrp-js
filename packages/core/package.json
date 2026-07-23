@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/core",
-  "version": "1.0.0-preview.3.5",
+  "version": "1.0.0-preview.4",
   "description": "Shared TypeScript primitives for NNRP.",
   "keywords": [
     "nnrp",
@@ -35,5 +35,8 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map"
-  ]
+  ],
+  "nnrp": {
+    "runtimeTargets": ["node>=20.11", "deno>=2", "browser-es2022"]
+  }
 }

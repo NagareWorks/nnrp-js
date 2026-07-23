@@ -36,7 +36,19 @@ const packages: readonly PackagePolicy[] = [
   {
     name: "@nnrp/browser-client",
     directory: "packages/browser-client",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "wasm/**"],
+    requiredFiles: [
+      "README.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/errors.js",
+      "dist/errors.d.ts",
+      "dist/errors.d.ts.map",
+      "dist/wasm-role.js",
+      "dist/wasm-role.d.ts",
+      "dist/wasm-role.d.ts.map",
+      "wasm/**",
+    ],
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
   {
@@ -103,6 +115,17 @@ const NATIVE_TRANSPORT_PACKAGES = new Set([
   "@nnrp/transport-ipc",
   "@nnrp/transport-websocket",
 ]);
+
+const EXPECTED_RUNTIME_TARGETS: Readonly<Record<string, readonly string[]>> = {
+  "@nnrp/core": ["node>=20.11", "deno>=2", "browser-es2022"],
+  "@nnrp/native-client": ["node>=20.11", "deno>=2"],
+  "@nnrp/native-server": ["node>=20.11", "deno>=2"],
+  "@nnrp/browser-client": ["browser-es2022"],
+  "@nnrp/transport-tcp": ["node>=20.11", "deno>=2"],
+  "@nnrp/transport-quic": ["node>=20.11", "deno>=2"],
+  "@nnrp/transport-ipc": ["node>=20.11", "deno>=2"],
+  "@nnrp/transport-websocket": ["node>=20.11", "deno>=2", "browser-es2022"],
+};
 
 const failures: string[] = [];
 const nativeArtifactManifestPattern = /^native\/[^/]+\/manifest\.json$/;
@@ -259,10 +282,31 @@ function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string,
   }
 
   checkKeywords(policy, packageJson.keywords);
+  checkRuntimeTargets(policy, packageJson.nnrp);
   if (isNativeArtifactPackage(policy)) {
     checkNativeArtifactExportMap(policy, packageJson.exports);
   } else {
     checkExportMap(policy, packageJson.exports);
+  }
+}
+
+function checkRuntimeTargets(policy: PackagePolicy, nnrp: unknown): void {
+  if (!nnrp || typeof nnrp !== "object" || Array.isArray(nnrp)) {
+    failures.push(`${policy.name}: package.json nnrp metadata must be an object`);
+    return;
+  }
+  const runtimeTargets = (nnrp as Record<string, unknown>).runtimeTargets;
+  const expected = EXPECTED_RUNTIME_TARGETS[policy.name];
+  if (!Array.isArray(runtimeTargets) || runtimeTargets.some((entry) => typeof entry !== "string")) {
+    failures.push(`${policy.name}: package.json nnrp.runtimeTargets must be a string array`);
+    return;
+  }
+  if (JSON.stringify(runtimeTargets) !== JSON.stringify(expected)) {
+    failures.push(
+      `${policy.name}: package.json nnrp.runtimeTargets must be ${JSON.stringify(expected)}, got ${
+        JSON.stringify(runtimeTargets)
+      }`,
+    );
   }
 }
 
