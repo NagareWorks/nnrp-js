@@ -48,4 +48,5 @@
 - [x] Server tests cover every receive and send method.
 - [x] State-machine tests cover partial, terminal, duplicate-terminal, and post-terminal behavior.
 - [x] Direction tests reject client-only messages from server send helpers.
-- [x] Public API snapshots match the frozen JavaScript server page in `nnrp-doc`.
+- [x] Public API snapshot `scripts/public-api/native-server.d.ts` matches the frozen JavaScript server page in
+      `nnrp-doc`.

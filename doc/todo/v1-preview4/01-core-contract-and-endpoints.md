@@ -59,4 +59,5 @@
 
 - [x] Core unit tests cover every enum member and policy branch.
 - [x] Type tests prove removed Preview3 values do not compile.
-- [x] Public API snapshots match the frozen JavaScript core and transport pages in `nnrp-doc`.
+- [x] Public API snapshots `scripts/public-api/core.d.ts`, `scripts/public-api/transport-tcp.d.ts`, and
+      `scripts/public-api/transport-quic.d.ts` match the frozen JavaScript core and transport pages in `nnrp-doc`.

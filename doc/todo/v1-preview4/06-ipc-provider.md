@@ -41,4 +41,5 @@
 
 - [x] Package policy proves only IPC native artifacts are present.
 - [ ] Loopback tests exchange control, object, cache, partial-result, and terminal frames.
-- [x] Public API snapshot matches the frozen JavaScript transport page in `nnrp-doc`.
+- [x] Public API snapshot `scripts/public-api/transport-ipc.d.ts` matches the frozen JavaScript transport page in
+      `nnrp-doc`.

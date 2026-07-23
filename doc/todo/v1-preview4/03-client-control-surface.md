@@ -48,7 +48,8 @@
 - [x] Browser-client tests cover every public control method and failure path.
 - [x] AbortSignal tests cover pre-dispatch, in-flight, terminal, and listener-cleanup cases.
 - [x] Type tests prove native and browser client session method parity.
-- [x] Public API snapshots match the frozen JavaScript client page in `nnrp-doc`.
+- [x] Public API snapshots `scripts/public-api/native-client.d.ts` and `scripts/public-api/browser-client.d.ts` match
+      the frozen JavaScript client page in `nnrp-doc`.
 
 ## Native Carrier-Backed Role Integration
 

@@ -35,13 +35,13 @@
   - [x] Reject a checked parent with an unchecked child.
   - [x] Reject deferred-contract phrases and old-preview compatibility language.
   - [x] Reject `transport-ws`, `webtransport`, `score`, `tcp-only`, and `quic-only` as API identifiers.
-- [ ] Add ownership checks to CI.
+- [x] Add ownership checks to CI.
   - [x] Validate package dependency direction.
   - [x] Validate artifact placement.
-  - [ ] Validate that every public API snapshot is linked from one frozen workstream.
+  - [x] Validate that every public API snapshot is linked from one frozen workstream.
 
 ## Acceptance Evidence
 
-- [x] `deno task runtime-policy` proves package and runtime ownership.
+- [x] `deno task runtime-policy` and `deno task public-api` prove package, runtime, and snapshot ownership.
 - [x] `deno task todo:check` proves parent/child closure and vocabulary rules.
 - [x] Unit tests prove missing providers fail explicitly without fallback execution.

@@ -41,4 +41,5 @@
 
 - [x] Native tarball inspection finds the WebSocket library and no browser WASM.
 - [x] Browser tarball inspection finds one browser WASM artifact and no native library.
-- [x] Public API snapshot matches the frozen JavaScript transport page in `nnrp-doc`.
+- [x] Public API snapshot `scripts/public-api/transport-websocket.d.ts` matches the frozen JavaScript transport page in
+      `nnrp-doc`.
