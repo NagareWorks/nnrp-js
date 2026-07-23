@@ -7,6 +7,7 @@ import {
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
+import { dirname } from "node:path";
 import {
   CacheReuseScope,
   MemoryLocationHint,
@@ -22,6 +23,11 @@ import {
 } from "@nnrp/core";
 import { createSocket } from "node:dgram";
 import { QUIC_TEST_CERTIFICATE_DER, QUIC_TEST_PRIVATE_KEY_PKCS8_DER } from "./fixtures/quic-test-identity.ts";
+import {
+  type NativeTransportKind,
+  type NativeTransportSmokeOptions,
+  parseNativeTransportSmokeOptions,
+} from "./native-transport-smoke-options.ts";
 
 type NativeProvider = NnrpTransportProvider & NnrpClientTransportProvider & NnrpServerTransportProvider;
 
@@ -38,10 +44,11 @@ interface RoleLoopbackOptions {
   readonly security?: LoopbackSecurity;
 }
 
-const nonce = `${Deno.pid}-${Date.now()}`;
-const ipcProviderEndpoint = Deno.build.os === "windows"
-  ? `npipe://nnrp-js-${nonce}`
-  : `unix://${Deno.makeTempDirSync()}/nnrp.sock`;
+interface NativeTransportSmokeCell {
+  readonly transport: NativeTransportKind;
+  readonly status: "executed" | "failed";
+  readonly diagnostic?: string;
+}
 
 const quicSecurity: LoopbackSecurity = {
   client: {
@@ -56,46 +63,106 @@ const quicSecurity: LoopbackSecurity = {
   },
 };
 
-const tcp = createTcpTransportProvider();
-const tcpPacketEndpoint = await verifyPacketLoopback(tcp, "127.0.0.1:0");
-const tcpProviderEndpoint = formatHostAndPort(parseHostAndPort(tcpPacketEndpoint, "tcp"));
-await verifyRoleLoopback({
-  provider: tcp,
-  providerEndpoint: tcpProviderEndpoint,
-  endpoint: `nnrp://${tcpProviderEndpoint}/session/default`,
-  policy: "force-tcp",
-});
+if (import.meta.main) {
+  await runNativeTransportSmoke(parseNativeTransportSmokeOptions(Deno.args));
+}
 
-const ipc = createIpcTransportProvider();
-await verifyPacketLoopback(ipc, ipcProviderEndpoint);
-await verifyRoleLoopback({
-  provider: ipc,
-  providerEndpoint: ipcProviderEndpoint,
-  endpoint: "nnrp://localhost/session/default",
-  policy: "force-ipc",
-});
+export async function runNativeTransportSmoke(options: NativeTransportSmokeOptions): Promise<void> {
+  const cells: NativeTransportSmokeCell[] = [];
+  for (const transport of options.transports) {
+    try {
+      await runNativeTransportCell(transport);
+      cells.push({ transport, status: "executed" });
+    } catch (error) {
+      cells.push({ transport, status: "failed", diagnostic: errorMessage(error) });
+      await writeNativeTransportSmokeResult(options.resultPath, cells);
+      throw error;
+    }
+  }
+  await writeNativeTransportSmokeResult(options.resultPath, cells);
+}
 
-const websocket = createWebSocketTransportProvider();
-const websocketProviderEndpoint = await verifyPacketLoopback(websocket, "ws://127.0.0.1:0/nnrp");
-const websocketUrl = new URL(websocketProviderEndpoint);
-await verifyRoleLoopback({
-  provider: websocket,
-  providerEndpoint: websocketProviderEndpoint,
-  endpoint: `nnrp://${websocketUrl.hostname}:${websocketUrl.port}/session/default`,
-  policy: "force-websocket",
-});
+async function runNativeTransportCell(transport: NativeTransportKind): Promise<void> {
+  if (transport === "tcp") {
+    const provider = createTcpTransportProvider();
+    const packetEndpoint = await verifyPacketLoopback(provider, "127.0.0.1:0");
+    const providerEndpoint = formatHostAndPort(parseHostAndPort(packetEndpoint, "tcp"));
+    await verifyRoleLoopback({
+      provider,
+      providerEndpoint,
+      endpoint: `nnrp://${providerEndpoint}/session/default`,
+      policy: "force-tcp",
+    });
+    return;
+  }
+  if (transport === "ipc") {
+    const provider = createIpcTransportProvider();
+    const nonce = `${Deno.pid}-${Date.now()}`;
+    const providerEndpoint = Deno.build.os === "windows"
+      ? `npipe://nnrp-js-${nonce}`
+      : `unix://${Deno.makeTempDirSync()}/nnrp.sock`;
+    await verifyPacketLoopback(provider, providerEndpoint);
+    await verifyRoleLoopback({
+      provider,
+      providerEndpoint,
+      endpoint: "nnrp://localhost/session/default",
+      policy: "force-ipc",
+    });
+    return;
+  }
+  if (transport === "websocket") {
+    const provider = createWebSocketTransportProvider();
+    const providerEndpoint = await verifyPacketLoopback(provider, "ws://127.0.0.1:0/nnrp");
+    const url = new URL(providerEndpoint);
+    await verifyRoleLoopback({
+      provider,
+      providerEndpoint,
+      endpoint: `nnrp://${url.hostname}:${url.port}/session/default`,
+      policy: "force-websocket",
+    });
+    return;
+  }
+  const provider = createQuicTransportProvider();
+  await verifyPacketLoopback(provider, "127.0.0.1:0", quicSecurity);
+  const address = await reserveUdpEndpoint();
+  const providerEndpoint = formatHostAndPort(address);
+  await verifyRoleLoopback({
+    provider,
+    providerEndpoint,
+    endpoint: `nnrps://localhost:${address.port}/session/default`,
+    policy: "force-quic",
+    security: quicSecurity,
+  });
+}
 
-const quic = createQuicTransportProvider();
-await verifyPacketLoopback(quic, "127.0.0.1:0", quicSecurity);
-const quicAddress = await reserveUdpEndpoint();
-const quicProviderEndpoint = formatHostAndPort(quicAddress);
-await verifyRoleLoopback({
-  provider: quic,
-  providerEndpoint: quicProviderEndpoint,
-  endpoint: `nnrps://localhost:${quicAddress.port}/session/default`,
-  policy: "force-quic",
-  security: quicSecurity,
-});
+async function writeNativeTransportSmokeResult(
+  resultPath: string | undefined,
+  cells: readonly NativeTransportSmokeCell[],
+): Promise<void> {
+  if (resultPath === undefined) return;
+  await Deno.mkdir(dirname(resultPath), { recursive: true });
+  const temporaryPath = `${resultPath}.tmp`;
+  await Deno.writeTextFile(
+    temporaryPath,
+    `${
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          sdk: "nnrp-js",
+          host: { os: Deno.build.os, arch: Deno.build.arch },
+          cells,
+        },
+        null,
+        2,
+      )
+    }\n`,
+  );
+  await Deno.rename(temporaryPath, resultPath);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 async function verifyPacketLoopback(
   provider: NativeProvider,

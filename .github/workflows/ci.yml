@@ -340,6 +340,45 @@ jobs:
             artifacts/wire-conformance/browser/browser-stderr.log
             artifacts/wire-conformance/browser/evidence
 
+  native-carrier-matrix:
+    name: native-carrier-${{ matrix.os }}-${{ matrix.transport }}
+    runs-on: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        transport:
+          - tcp
+          - ipc
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v5
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Prepare Rust artifact packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: deno task artifacts:prepare
+      - name: Run native carrier E2E
+        run: >-
+          deno task native-transport-smoke
+          --transport ${{ matrix.transport }}
+          --result artifacts/native-carrier-matrix/${{ runner.os }}-${{ runner.arch }}-${{ matrix.transport }}.json
+      - name: Upload native carrier evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nnrp-js-${{ runner.os }}-${{ runner.arch }}-${{ matrix.transport }}
+          if-no-files-found: error
+          path: artifacts/native-carrier-matrix/*.json
+
   docs-only:
     name: docs-only
     runs-on: ubuntu-latest
@@ -360,6 +399,7 @@ jobs:
       - runtime-policy
       - wire-conformance-native
       - wire-conformance-browser
+      - native-carrier-matrix
     if: always()
     steps:
       - name: Verify required checks
@@ -372,6 +412,7 @@ jobs:
           runtime_policy="${{ needs.runtime-policy.result }}"
           wire_conformance="${{ needs.wire-conformance-native.result }}"
           browser_wire_conformance="${{ needs.wire-conformance-browser.result }}"
+          native_carrier_matrix="${{ needs.native-carrier-matrix.result }}"
           if [[ "$content_policy" != "success" ]]; then
             echo "content-policy did not pass: $content_policy"
             exit 1
@@ -386,6 +427,10 @@ jobs:
           fi
           if [[ "$browser_wire_conformance" != "success" && "$docs" != "success" ]]; then
             echo "wire-conformance-browser did not pass: $browser_wire_conformance"
+            exit 1
+          fi
+          if [[ "$native_carrier_matrix" != "success" && "$docs" != "success" ]]; then
+            echo "native-carrier-matrix did not pass: $native_carrier_matrix"
             exit 1
           fi
           if [[ "$build" == "success" || "$docs" == "success" ]]; then

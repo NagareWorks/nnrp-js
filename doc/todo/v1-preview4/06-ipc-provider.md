@@ -31,8 +31,8 @@
   - [x] Select IPC directly when it is the only compatible installed provider.
   - [x] Include IPC cost, limit, and diagnostics in multi-provider probing.
   - [x] Enforce `prefer-ipc` and `force-ipc` semantics.
-- [ ] Add provider tests.
-  - [ ] Unix-domain loopback fixture.
+- [x] Add provider tests.
+  - [x] Unix-domain loopback fixture.
   - [x] Windows named-pipe loopback fixture.
   - [x] Invalid endpoint, missing artifact, close, timeout, and backpressure cases.
   - [x] Native client/server session integration over IPC.

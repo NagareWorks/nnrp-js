@@ -32,12 +32,12 @@
 
 ## CI Coverage
 
-- [ ] Add wire-conformance jobs with explicit result states.
+- [x] Add wire-conformance jobs with explicit result states.
   - [x] Run the complete Preview4 control/object/cache scenario set on the Linux x86_64 native job.
-  - [ ] Run TCP and IPC on every compatible native CI host.
+  - [x] Run TCP and IPC on every compatible native CI host.
   - [x] Run QUIC and native WebSocket in their configured integration jobs.
   - [x] Run browser WebSocket/WASM scenarios in the browser job.
-  - [ ] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
+  - [x] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
   - [x] Fail when a declared capability, mode, or transport has no selected scenario.
 
 ## Benchmarks
@@ -58,5 +58,5 @@
 
 - [x] All generated target manifests validate against `wire-conformance-target.schema.json`.
 - [x] All reports validate against the selected plan and case-results schema.
-- [ ] CI artifacts identify every executed and skipped matrix cell.
+- [x] CI artifacts identify every executed and skipped matrix cell.
 - [ ] Benchmark reports contain no private hostnames, addresses, tokens, or local user paths.
