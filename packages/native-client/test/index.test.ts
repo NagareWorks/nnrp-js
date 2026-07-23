@@ -312,6 +312,66 @@ Deno.test("@nnrp/native-client rejects carriers without client role adoption", a
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_ROLE_ADOPTION_UNAVAILABLE");
 });
 
+Deno.test("@nnrp/native-client starts the Rust session handshake when the session is opened", async () => {
+  let openSessionCalls = 0;
+  let submitCalls = 0;
+  let releaseHandshake: (() => void) | undefined;
+  const handshake = new Promise<void>((resolve) => {
+    releaseHandshake = resolve;
+  });
+  const binding: NnrpNativeTransportBinding = {
+    ...fakeTransportBinding("tcp"),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "tcp",
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+        [CLIENT_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            openSession: async () => {
+              openSessionCalls += 1;
+              await handshake;
+              return {
+                handle: { kind: 2, id: 1n, generation: 1, flags: 0 },
+                submit: (_operationId: bigint, _frameId: number, _payload: Uint8Array) => {
+                  submitCalls += 1;
+                  return Promise.resolve({ kind: 3, id: 1n, generation: 1, flags: 0 });
+                },
+                poll: () => Promise.resolve([]),
+                sendRuntimeFrame: () => Promise.resolve(),
+                close: () => Promise.resolve(),
+              };
+            },
+            close: () => Promise.resolve(),
+          }),
+      } as NnrpTransportConnection),
+  };
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding })],
+    transportPolicy: "force-tcp",
+  });
+
+  const session = client.openSession({ sessionId: "eager-handshake" });
+  assertEquals(openSessionCalls, 1);
+  let submitSettled = false;
+  const submit = session.submitNoWait({ operationId: 1n, frameId: 1 }).then((operationId) => {
+    submitSettled = true;
+    return operationId;
+  });
+  await Promise.resolve();
+  assertEquals(submitSettled, false);
+
+  releaseHandshake?.();
+  assertEquals(await submit, 1n);
+  assertEquals(submitCalls, 1);
+  await session.close();
+  await client.close();
+});
+
 Deno.test("@nnrp/native-client rejects missing transport providers at connect time", async () => {
   const error = await assertRejects(
     () =>

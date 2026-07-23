@@ -134,6 +134,7 @@ const EVENT_KIND_RUNTIME_FRAME = 13;
 const EVENT_KIND_SESSION_CLOSED = 4;
 
 const clientRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (sessionId: string) => Promise<void>>();
+const clientRoleSessionOpeners = new WeakMap<NnrpBackendRuntime, (options: NnrpSessionOptions) => Promise<void>>();
 
 interface InternalNativeHandle {
   readonly kind: number;
@@ -357,6 +358,9 @@ class NnrpBackendRuntime {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
     this.#transportProviders = [...transportProviders];
+    clientRoleSessionOpeners.set(this, async (options) => {
+      if (this.#binding.ffi === undefined) await this.#roleSession(options);
+    });
     clientRoleSessionClosers.set(this, (sessionId) => this.#closeRoleSession(sessionId));
   }
 
@@ -850,10 +854,13 @@ export class NnrpClient {
   public openSession(options: NnrpSessionOptions = {}): NnrpClientSession {
     this.#ensureOpen();
     validateSessionMetadata(options);
+    const normalized = this.#createSessionOptions(options);
+    const handshake = clientRoleSessionOpeners.get(this.#state.runtime)?.(normalized) ?? Promise.resolve();
+    void handshake.catch(() => {});
 
     return new NnrpClientSession({
       client: this,
-      options: this.#createSessionOptions(options),
+      options: normalized,
     });
   }
 

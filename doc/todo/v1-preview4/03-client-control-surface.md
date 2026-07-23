@@ -52,11 +52,11 @@
 
 ## Native Carrier-Backed Role Integration
 
-- [ ] Make `openNativeClient` establish a carrier-backed role connection.
+- [x] Make `openNativeClient` establish a carrier-backed role connection.
   - [x] Resolve one provider by the frozen forced/auto/probe policy.
   - [x] Open the provider-local endpoint through the selected provider artifact.
   - [x] Transfer the native carrier to the role runtime in the same loaded library.
-  - [ ] Perform the real session handshake before returning a usable session.
+  - [x] Perform the real session handshake before returning a usable session.
   - [x] Keep transfer handles private to provider and role packages.
 - [x] Send and receive every native client operation over the adopted carrier.
   - [x] Submit encoded metadata/body without local result echo.
