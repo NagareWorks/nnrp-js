@@ -22,7 +22,7 @@ and scenarios.
 
 - [ ] [00 - Scope, ownership, and closure](00-scope-and-closure.md)
 - [ ] [01 - Core contract and endpoints](01-core-contract-and-endpoints.md)
-- [ ] [02 - Codecs and runtime events](02-codecs-and-runtime-events.md)
+- [x] [02 - Codecs and runtime events](02-codecs-and-runtime-events.md)
 - [ ] [03 - Client control surface](03-client-control-surface.md)
 - [ ] [04 - Server control surface](04-server-control-surface.md)
 - [x] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)

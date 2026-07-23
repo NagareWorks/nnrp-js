@@ -60,7 +60,7 @@
 
 ## Acceptance Evidence
 
-- [ ] Golden vectors round-trip every metadata type against Rust Preview4 fixtures.
-- [ ] Negative vectors cover length, range, message/type, and truncation failures.
-- [ ] Native and WASM parity tests produce identical normalized events.
+- [x] Golden vectors round-trip every metadata type against Rust Preview4 fixtures.
+- [x] Negative vectors cover length, range, message/type, and truncation failures.
+- [x] Native and WASM parity tests produce identical normalized events.
 - [x] Public API snapshots match the frozen JavaScript runtime page in `nnrp-doc`.
