@@ -108,19 +108,15 @@ jobs:
             echo "Manual npm publishing requires create_tag=true so package publication cannot start from an untagged ref."
             exit 1
           fi
-      - name: Create git tag
-        if: github.event_name == 'workflow_dispatch' && inputs.create_tag
-        shell: bash
-        run: |
-          set -euo pipefail
 
-          git fetch --tags
-          tag="${{ steps.version.outputs.tag_name }}"
-          if [ -z "$(git tag --list "$tag")" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag "$tag"
-            git push origin "$tag"
+          if [ "${{ inputs.create_tag }}" = "true" ] && [ "${{ inputs.publish_to_npm }}" != "true" ]; then
+            echo "Manual tag creation requires publish_to_npm=true so the tag is created only after npm publication succeeds."
+            exit 1
+          fi
+
+          if [ "${{ inputs.create_tag }}" = "true" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "Dry-run releases cannot create immutable Git tags."
+            exit 1
           fi
       - name: Verify release gates
         env:
@@ -145,7 +141,7 @@ jobs:
           deno task benchmark:release-gate --results artifacts/release-benchmark-results.json
           deno task benchmark:privacy artifacts/release-benchmark-results.json
       - name: Pack GitHub release assets
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release && inputs.publish_to_npm && !inputs.dry_run)
         shell: bash
         run: |
           set -euo pipefail
@@ -161,13 +157,6 @@ jobs:
           for package_dir in artifacts/npm-publish/*; do
             npm pack "./$package_dir" --pack-destination artifacts/release-assets
           done
-      - name: Publish GitHub release
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release)
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag_name }}
-          name: ${{ steps.version.outputs.release_name }}
-          files: artifacts/release-assets/*.tgz
       - name: Publish packages
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         env:
@@ -188,3 +177,30 @@ jobs:
             --allow-env=ComSpec \
             --allow-run=npm,cmd \
             scripts/publish-packages.ts --provenance "${args[@]}"
+      - name: Create or verify git tag
+        if: github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_to_npm && !inputs.dry_run
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags
+          tag="${{ steps.version.outputs.tag_name }}"
+          target="$(git rev-parse HEAD)"
+          existing="$(git rev-list -n 1 "$tag" 2>/dev/null || true)"
+          if [ -n "$existing" ] && [ "$existing" != "$target" ]; then
+            echo "Release tag $tag points to $existing, expected $target."
+            exit 1
+          fi
+          if [ -z "$existing" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$tag" "$target"
+            git push origin "$tag"
+          fi
+      - name: Publish GitHub release
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release && inputs.publish_to_npm && !inputs.dry_run)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: ${{ steps.version.outputs.release_name }}
+          files: artifacts/release-assets/*.tgz

@@ -42,11 +42,11 @@
   - [ ] Set internal dependency ranges to the exact workspace release version during staging.
   - [ ] Validate the Git tag version against every staged package version.
 - [ ] Keep publishing rerunnable and trusted.
-  - [ ] Publish in dependency order: core, transports, role packages.
-  - [ ] Skip an already-published identical package version and continue remaining packages.
-  - [ ] Fail on an already-published version whose staged tarball digest differs.
+  - [x] Publish in dependency order: core, transports, role packages.
+  - [x] Skip an already-published identical package version and continue remaining packages.
+  - [x] Fail on an already-published version whose staged tarball digest differs.
   - [ ] Apply requested npm dist-tags after every package version exists.
-  - [ ] Create or verify the matching Git tag only after npm publication succeeds.
+  - [x] Create or verify the matching Git tag only after npm publication succeeds.
 
 ## Documentation and Package Metadata
 

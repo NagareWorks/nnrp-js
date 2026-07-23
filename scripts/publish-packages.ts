@@ -1,12 +1,12 @@
 const packages: readonly PackagePolicy[] = [
   { name: "@nnrp/core", directory: "packages/core" },
-  { name: "@nnrp/native-client", directory: "packages/native-client" },
-  { name: "@nnrp/native-server", directory: "packages/native-server" },
-  { name: "@nnrp/browser-client", directory: "packages/browser-client" },
   { name: "@nnrp/transport-tcp", directory: "packages/transport-tcp" },
   { name: "@nnrp/transport-quic", directory: "packages/transport-quic" },
   { name: "@nnrp/transport-ipc", directory: "packages/transport-ipc" },
   { name: "@nnrp/transport-websocket", directory: "packages/transport-websocket" },
+  { name: "@nnrp/native-client", directory: "packages/native-client" },
+  { name: "@nnrp/native-server", directory: "packages/native-server" },
+  { name: "@nnrp/browser-client", directory: "packages/browser-client" },
 ];
 
 const options = parsePublishOptions(Deno.args);
@@ -16,6 +16,7 @@ const rootNpmrc = await resolveRootNpmrc();
 validatePublishOptions(options);
 await resetOutputDir(options.outputDir);
 
+const stagedPackages: StagedPackage[] = [];
 for (const policy of packages) {
   const packageJson = await readPackageJson(policy.directory);
   const packageVersion = readString(packageJson, "version", policy.name);
@@ -30,16 +31,32 @@ for (const policy of packages) {
     `${stageDir}/package.json`,
     `${JSON.stringify(publishablePackageJson(packageJson), null, 2)}\n`,
   );
-  if (!options.skipPublish) {
-    if (await npmPackageVersionExists(policy.name, packageVersion)) {
-      console.log(`${policy.name}@${packageVersion} already exists; skipping publish.`);
-      if (!options.dryRun) {
-        await npmDistTagAdd(policy.name, stageDir, options.tag, rootNpmrc);
-        await npmDistTagAddMany(policy.name, stageDir, options.additionalTags, rootNpmrc);
-      }
-    } else {
-      await npmPublish(policy.name, stageDir, options, rootNpmrc);
+  stagedPackages.push({ ...policy, version: packageVersion, stageDir });
+}
+
+if (!options.skipPublish) {
+  if (options.dryRun) {
+    for (const stagedPackage of stagedPackages) {
+      await npmPublish(stagedPackage, options, rootNpmrc);
     }
+  } else {
+    const publicationPlan = await inspectPublicationPlan(stagedPackages);
+    for (const entry of publicationPlan) {
+      if (entry.alreadyPublished) {
+        console.log(`${entry.package.name}@${entry.package.version} already exists with identical integrity.`);
+        continue;
+      }
+      await npmPublish(entry.package, options, rootNpmrc);
+    }
+
+    await verifyPublishedPackages(stagedPackages);
+    if (!options.provenance) {
+      for (const stagedPackage of stagedPackages) {
+        await npmDistTagAdd(stagedPackage, options.tag, rootNpmrc);
+        await npmDistTagAddMany(stagedPackage, options.additionalTags, rootNpmrc);
+      }
+    }
+    await verifyDistTags(stagedPackages, [options.tag, ...options.additionalTags]);
   }
 }
 
@@ -182,8 +199,7 @@ async function stagePackageFiles(
 }
 
 async function npmPublish(
-  packageName: string,
-  stageDir: string,
+  stagedPackage: StagedPackage,
   options: PublishOptions,
   rootNpmrc: string | undefined,
 ): Promise<void> {
@@ -200,70 +216,171 @@ async function npmPublish(
   ];
   const output = await new Deno.Command(npmCommand(), {
     args: npmArgs(args),
-    cwd: stageDir,
+    cwd: stagedPackage.stageDir,
     stdout: "inherit",
     stderr: "inherit",
   }).output();
 
   if (!output.success) {
-    throw new Error(`${packageName}: npm publish failed with code ${output.code}`);
+    throw new Error(`${stagedPackage.name}: npm publish failed with code ${output.code}`);
   }
-
-  if (options.dryRun) {
-    return;
-  }
-
-  await npmDistTagAddMany(packageName, stageDir, options.additionalTags, rootNpmrc);
 }
 
 async function npmDistTagAddMany(
-  packageName: string,
-  stageDir: string,
+  stagedPackage: StagedPackage,
   distTags: readonly string[],
   rootNpmrc: string | undefined,
 ): Promise<void> {
   for (const distTag of distTags) {
-    await npmDistTagAdd(packageName, stageDir, distTag, rootNpmrc);
+    await npmDistTagAdd(stagedPackage, distTag, rootNpmrc);
   }
 }
 
-async function npmPackageVersionExists(packageName: string, packageVersion: string): Promise<boolean> {
+async function inspectPublicationPlan(stagedPackages: readonly StagedPackage[]): Promise<PublicationPlanEntry[]> {
+  const plan: PublicationPlanEntry[] = [];
+  for (const stagedPackage of stagedPackages) {
+    const stagedIntegrity = await npmPackIntegrity(stagedPackage);
+    const publishedIntegrity = await npmPublishedIntegrity(stagedPackage);
+    if (publishedIntegrity !== undefined && publishedIntegrity !== stagedIntegrity) {
+      throw new Error(
+        `${stagedPackage.name}@${stagedPackage.version}: registry integrity ${publishedIntegrity} ` +
+          `does not match staged integrity ${stagedIntegrity}`,
+      );
+    }
+    plan.push({ package: stagedPackage, stagedIntegrity, alreadyPublished: publishedIntegrity !== undefined });
+  }
+  return plan;
+}
+
+async function npmPackIntegrity(stagedPackage: StagedPackage): Promise<string> {
+  const output = await runNpm(
+    ["pack", "--dry-run", "--json"],
+    stagedPackage.stageDir,
+    `${stagedPackage.name}: npm pack integrity inspection`,
+  );
+  const parsed = JSON.parse(output) as unknown;
+  if (!Array.isArray(parsed) || parsed.length !== 1 || typeof parsed[0] !== "object" || parsed[0] === null) {
+    throw new Error(`${stagedPackage.name}: unexpected npm pack --json output`);
+  }
+  const integrity = (parsed[0] as Record<string, unknown>).integrity;
+  if (typeof integrity !== "string" || !integrity.startsWith("sha512-")) {
+    throw new Error(`${stagedPackage.name}: npm pack did not return a SHA-512 integrity`);
+  }
+  return integrity;
+}
+
+async function npmPublishedIntegrity(stagedPackage: StagedPackage): Promise<string | undefined> {
   const output = await new Deno.Command(npmCommand(), {
-    args: npmArgs(["view", `${packageName}@${packageVersion}`, "version", "--json"]),
+    args: npmArgs(["view", `${stagedPackage.name}@${stagedPackage.version}`, "dist.integrity", "--json"]),
     stdout: "piped",
-    stderr: "null",
+    stderr: "piped",
   }).output();
   if (!output.success) {
-    return false;
+    const stderr = new TextDecoder().decode(output.stderr);
+    if (stderr.includes("E404") || stderr.includes("404 Not Found")) {
+      return undefined;
+    }
+    throw new Error(
+      `${stagedPackage.name}: npm registry inspection failed with code ${output.code}\n${stderr.trim()}`,
+    );
   }
-  const value = new TextDecoder().decode(output.stdout).trim();
-  return value === JSON.stringify(packageVersion) || value === packageVersion;
+  const parsed = JSON.parse(new TextDecoder().decode(output.stdout)) as unknown;
+  if (typeof parsed !== "string" || !parsed.startsWith("sha512-")) {
+    throw new Error(`${stagedPackage.name}: registry returned an invalid dist.integrity`);
+  }
+  return parsed;
 }
 
 async function npmDistTagAdd(
-  packageName: string,
-  stageDir: string,
+  stagedPackage: StagedPackage,
   distTag: string,
   rootNpmrc: string | undefined,
 ): Promise<void> {
-  const packageVersion = await readStringFromPackageFile(`${stageDir}/package.json`, "version", packageName);
   const args = [
     "dist-tag",
     "add",
-    `${packageName}@${packageVersion}`,
+    `${stagedPackage.name}@${stagedPackage.version}`,
     distTag,
     ...(rootNpmrc === undefined ? [] : ["--userconfig", rootNpmrc]),
   ];
   const output = await new Deno.Command(npmCommand(), {
     args: npmArgs(args),
-    cwd: stageDir,
+    cwd: stagedPackage.stageDir,
     stdout: "inherit",
     stderr: "inherit",
   }).output();
 
   if (!output.success) {
-    throw new Error(`${packageName}: npm dist-tag add ${distTag} failed with code ${output.code}`);
+    throw new Error(`${stagedPackage.name}: npm dist-tag add ${distTag} failed with code ${output.code}`);
   }
+}
+
+async function verifyPublishedPackages(stagedPackages: readonly StagedPackage[]): Promise<void> {
+  for (const stagedPackage of stagedPackages) {
+    const expected = await npmPackIntegrity(stagedPackage);
+    const actual = await retryRegistryValue(() => npmPublishedIntegrity(stagedPackage));
+    if (actual !== expected) {
+      throw new Error(
+        `${stagedPackage.name}@${stagedPackage.version}: published integrity ${actual ?? "missing"} ` +
+          `does not match staged integrity ${expected}`,
+      );
+    }
+  }
+}
+
+async function verifyDistTags(stagedPackages: readonly StagedPackage[], distTags: readonly string[]): Promise<void> {
+  for (const stagedPackage of stagedPackages) {
+    for (const distTag of distTags) {
+      const actual = await retryRegistryValue(() => npmDistTagVersion(stagedPackage.name, distTag));
+      if (actual !== stagedPackage.version) {
+        throw new Error(
+          `${stagedPackage.name}: npm dist-tag ${distTag} resolves to ${actual ?? "missing"}, ` +
+            `expected ${stagedPackage.version}`,
+        );
+      }
+    }
+  }
+}
+
+async function npmDistTagVersion(packageName: string, distTag: string): Promise<string | undefined> {
+  const output = await new Deno.Command(npmCommand(), {
+    args: npmArgs(["view", `${packageName}@${distTag}`, "version", "--json"]),
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!output.success) {
+    const stderr = new TextDecoder().decode(output.stderr);
+    if (stderr.includes("E404") || stderr.includes("404 Not Found")) return undefined;
+    throw new Error(
+      `${packageName}: npm dist-tag ${distTag} inspection failed with code ${output.code}\n${stderr.trim()}`,
+    );
+  }
+  const parsed = JSON.parse(new TextDecoder().decode(output.stdout)) as unknown;
+  return typeof parsed === "string" ? parsed : undefined;
+}
+
+async function retryRegistryValue<T>(read: () => Promise<T | undefined>): Promise<T | undefined> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 500));
+  }
+  return undefined;
+}
+
+async function runNpm(args: readonly string[], cwd: string, description: string): Promise<string> {
+  const output = await new Deno.Command(npmCommand(), {
+    args: npmArgs(args),
+    cwd,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const stdout = new TextDecoder().decode(output.stdout);
+  if (!output.success) {
+    const stderr = new TextDecoder().decode(output.stderr);
+    throw new Error(`${description} failed with code ${output.code}\n${stderr.trim()}\n${stdout.trim()}`);
+  }
+  return stdout;
 }
 
 async function resetOutputDir(path: string): Promise<void> {
@@ -314,10 +431,6 @@ function readString(packageJson: Record<string, unknown>, field: string, package
   return value;
 }
 
-async function readStringFromPackageFile(path: string, field: string, packageName: string): Promise<string> {
-  return readString(JSON.parse(await Deno.readTextFile(path)) as Record<string, unknown>, field, packageName);
-}
-
 async function resolveRootNpmrc(): Promise<string | undefined> {
   const npmrcPath = `${Deno.cwd()}/.npmrc`;
   try {
@@ -350,6 +463,17 @@ function windowsCommandShell(): string {
 interface PackagePolicy {
   readonly name: string;
   readonly directory: string;
+}
+
+interface StagedPackage extends PackagePolicy {
+  readonly version: string;
+  readonly stageDir: string;
+}
+
+interface PublicationPlanEntry {
+  readonly package: StagedPackage;
+  readonly stagedIntegrity: string;
+  readonly alreadyPublished: boolean;
 }
 
 interface PublishOptions {
