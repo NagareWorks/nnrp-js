@@ -34,12 +34,12 @@
 - [ ] Add provider tests.
   - [ ] Unix-domain loopback fixture.
   - [x] Windows named-pipe loopback fixture.
-  - [ ] Invalid endpoint, missing artifact, close, timeout, and backpressure cases.
+  - [x] Invalid endpoint, missing artifact, close, timeout, and backpressure cases.
   - [x] Native client/server session integration over IPC.
 
 ## Acceptance Evidence
 
 - [x] Package policy proves only IPC native artifacts are present.
-- [ ] Loopback tests exchange control, object, cache, partial-result, and terminal frames.
+- [x] Loopback tests exchange control, object, cache, partial-result, and terminal frames.
 - [x] Public API snapshot `scripts/public-api/transport-ipc.d.ts` matches the frozen JavaScript transport page in
       `nnrp-doc`.

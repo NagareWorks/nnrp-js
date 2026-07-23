@@ -1,4 +1,9 @@
-import { type NnrpNativeTransportBinding, NnrpTransportError } from "@nnrp/core";
+import {
+  type NnrpNativeTransportBinding,
+  type NnrpTransportConnection,
+  NnrpTransportError,
+  type NnrpTransportReceiveOptions,
+} from "@nnrp/core";
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { createIpcTransportProvider } from "../src/index.ts";
 
@@ -38,6 +43,73 @@ Deno.test("@nnrp/transport-ipc enforces host-specific endpoint schemes", async (
       }),
     NnrpTransportError,
   );
+});
+
+Deno.test("@nnrp/transport-ipc reports a missing packaged artifact for every native operation", async () => {
+  const provider = createIpcTransportProvider({ available: false, platform: "unix" });
+  const endpoint = { endpoint: "unix:///run/nnrp/runtime.sock" };
+
+  assertEquals(provider.localAvailable, false);
+  assertEquals(provider.diagnostic?.code, "NNRP_IPC_NATIVE_BINDING_MISSING");
+  for (
+    const operation of [
+      () => provider.probe(endpoint),
+      () => provider.connect(endpoint),
+      () => provider.listen(endpoint),
+    ]
+  ) {
+    const error = await assertRejects(operation, NnrpTransportError);
+    assertEquals(error.diagnostic.code, "NNRP_IPC_NATIVE_BINDING_MISSING");
+    assertEquals(error.diagnostic.transport, "ipc");
+  }
+});
+
+Deno.test("@nnrp/transport-ipc preserves close, timeout, and backpressure binding contracts", async () => {
+  let receiveOptions: NnrpTransportReceiveOptions | undefined;
+  let closed = false;
+  const backpressure = new NnrpTransportError({
+    code: "NNRP_IPC_BACKPRESSURE",
+    message: "IPC send queue is full.",
+    source: "transport",
+    retryable: true,
+    transport: "ipc",
+  });
+  const connection: NnrpTransportConnection = {
+    kind: "ipc",
+    endpoint: "unix:///run/nnrp/runtime.sock",
+    get connected() {
+      return !closed;
+    },
+    send: () => Promise.reject(backpressure),
+    receive: (options) => {
+      receiveOptions = options;
+      return Promise.resolve([]);
+    },
+    close: () => {
+      closed = true;
+    },
+  };
+  const binding: NnrpNativeTransportBinding = {
+    mode: "test",
+    probe: () =>
+      Promise.resolve({
+        sampleCount: 1,
+        successCount: 1,
+        medianThroughputBytesPerSecond: 1n,
+        medianRttMicroseconds: 1n,
+      }),
+    connect: () => Promise.resolve(connection),
+    listen: () => Promise.reject(new Error("unused")),
+  };
+  const provider = createIpcTransportProvider({ binding, platform: "unix" });
+  const client = await provider.connect({ endpoint: connection.endpoint, timeoutMillis: 25 });
+
+  const error = await assertRejects(() => client.send(new Uint8Array([1])), NnrpTransportError);
+  assertEquals(error.diagnostic.code, "NNRP_IPC_BACKPRESSURE");
+  await client.receive({ maxPackets: 2, maxBytes: 32n, timeoutMillis: 17 });
+  assertEquals(receiveOptions, { maxPackets: 2, maxBytes: 32n, timeoutMillis: 17 });
+  await client.close();
+  assertEquals(client.connected, false);
 });
 
 function fakeIpcBinding(operations: string[]): NnrpNativeTransportBinding {

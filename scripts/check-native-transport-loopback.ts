@@ -7,12 +7,18 @@ import {
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
-import type {
+import {
+  CacheReuseScope,
+  MemoryLocationHint,
+  type NnrpRuntimeEvent,
   NnrpTransportClientSecurity,
   NnrpTransportConnection,
   NnrpTransportPolicy,
   NnrpTransportProvider,
   NnrpTransportServerSecurity,
+  OwnershipHint,
+  RuntimeObjectKind,
+  RuntimeRole,
 } from "@nnrp/core";
 import { createSocket } from "node:dgram";
 import { QUIC_TEST_CERTIFICATE_DER, QUIC_TEST_PRIVATE_KEY_PKCS8_DER } from "./fixtures/quic-test-identity.ts";
@@ -107,6 +113,9 @@ async function verifyPacketLoopback(
     ...(security === undefined ? {} : { security: security.server }),
   });
   const boundEndpoint = server.endpoint;
+  if (provider.kind === "ipc") {
+    await assertAcceptTimesOut(server);
+  }
   const accepting = server.accept({ timeoutMillis: 5_000 });
   const client = await provider.connect({
     endpoint: server.endpoint,
@@ -144,6 +153,17 @@ async function assertAcceptRejectedAfterClose(
   throw new Error(`${kind}: closed listener accepted another connection`);
 }
 
+async function assertAcceptTimesOut(
+  server: { accept(options?: { readonly timeoutMillis?: number }): Promise<NnrpTransportConnection> },
+): Promise<void> {
+  try {
+    await server.accept({ timeoutMillis: 25 });
+  } catch {
+    return;
+  }
+  throw new Error("ipc: listener accept ignored its timeout");
+}
+
 async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
   const timeoutMillis = 5_000;
   const serverRuntime = await openBackendRuntime({
@@ -175,7 +195,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       `${options.provider.kind} client connect`,
     );
     clientSession = client.openSession({ inputProfile: "token" });
-    const resultPending = clientSession.submit({
+    await clientSession.submitNoWait({
       operationId: 1n,
       frameId: 1,
       payload: new TextEncoder().encode("ping"),
@@ -190,11 +210,100 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
     if (submit.type !== "submit") {
       throw new Error(`${options.provider.kind}: expected submit, got ${submit.type}`);
     }
+
+    await clientSession.updatePriority({
+      operationId: submit.submit.operationId,
+      controlSequence: 1n,
+      priorityClass: 2,
+      priorityDelta: 1,
+      deadlineUnixMs: BigInt(Date.now() + timeoutMillis),
+      flags: 0,
+    });
+    const priority = await withTimeout(
+      serverSession.receive({ timeoutMillis }),
+      timeoutMillis,
+      `${options.provider.kind} server priority update`,
+    );
+    assertEventType(priority, "priority-update", options.provider.kind);
+    if (priority.type !== "priority-update" || priority.metadata.operationId !== submit.submit.operationId) {
+      throw new Error(`${options.provider.kind}: priority metadata did not round-trip`);
+    }
+
+    await clientSession.declareObject({
+      objectId: 11n,
+      objectKind: RuntimeObjectKind.Tensor,
+      producerRole: RuntimeRole.Client,
+      consumerRole: RuntimeRole.Server,
+      sessionId: 1,
+      byteSize: 4n,
+      computeCostUnits: 1,
+      memoryLocationHint: MemoryLocationHint.HostMemory,
+      ownershipHint: OwnershipHint.SessionOwned,
+      lifetimeHintMs: timeoutMillis,
+      metadataBytes: 1,
+    }, new Uint8Array([0xa1]));
+    const object = await withTimeout(
+      serverSession.receive({ timeoutMillis }),
+      timeoutMillis,
+      `${options.provider.kind} server object declaration`,
+    );
+    assertEventType(object, "object-declare", options.provider.kind);
+    if (object.type !== "object-declare" || object.metadata.objectId !== 11n || object.body?.[0] !== 0xa1) {
+      throw new Error(`${options.provider.kind}: object declaration did not round-trip`);
+    }
+
+    await clientSession.referenceCache({
+      cacheNamespace: 1,
+      cacheKeyHi: 2n,
+      cacheKeyLo: 3n,
+      profileId: 4,
+      reuseScope: CacheReuseScope.Session,
+      leaseId: 5n,
+      producerTraceId: 6n,
+      expirationHintMs: timeoutMillis,
+      metadataBytes: 1,
+      flags: 0,
+    }, new Uint8Array([0xc1]));
+    const cache = await withTimeout(
+      serverSession.receive({ timeoutMillis }),
+      timeoutMillis,
+      `${options.provider.kind} server cache reference`,
+    );
+    assertEventType(cache, "cache-reference", options.provider.kind);
+    if (cache.type !== "cache-reference" || cache.metadata.leaseId !== 5n || cache.body?.[0] !== 0xc1) {
+      throw new Error(`${options.provider.kind}: cache reference did not round-trip`);
+    }
+
+    await serverSession.sendPartialResult({
+      operationId: submit.submit.operationId,
+      resultSequence: 1n,
+      objectId: 11n,
+      deltaSequence: 1n,
+      bodyBytes: 2,
+      flags: 0,
+    }, new Uint8Array([0xd1, 0xd2]));
+    const partial = await withTimeout(
+      clientSession.nextEvent({ timeoutMillis }),
+      timeoutMillis,
+      `${options.provider.kind} client partial result`,
+    );
+    assertEventType(partial, "partial-result", options.provider.kind);
+    if (
+      partial.type !== "partial-result" || partial.metadata.objectId !== 11n || partial.body?.length !== 2 ||
+      partial.body[0] !== 0xd1 || partial.body[1] !== 0xd2
+    ) {
+      throw new Error(`${options.provider.kind}: partial result did not round-trip`);
+    }
+
     await serverSession.sendResult({
       frameId: submit.submit.frameId,
       payload: new TextEncoder().encode("pong"),
     });
-    const result = await withTimeout(resultPending, timeoutMillis, `${options.provider.kind} client result`);
+    const result = await withTimeout(
+      clientSession.nextResult({ timeoutMillis }),
+      timeoutMillis,
+      `${options.provider.kind} client result`,
+    );
     if (new TextDecoder().decode(result.payload) !== "pong") {
       throw new Error(`${options.provider.kind}: unexpected result payload`);
     }
@@ -220,6 +329,16 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
     await server.close().catch(() => undefined);
     await client?.runtime.close().catch(() => undefined);
     await serverRuntime.close().catch(() => undefined);
+  }
+}
+
+function assertEventType(
+  event: NnrpRuntimeEvent,
+  expected: NnrpRuntimeEvent["type"],
+  providerKind: string,
+): void {
+  if (event.type !== expected) {
+    throw new Error(`${providerKind}: expected ${expected}, got ${event.type}`);
   }
 }
 
