@@ -129,6 +129,28 @@ export declare enum CacheMissReason {
     LeaseRequired = 6,
     PermissionDenied = 7
 }
+export declare enum NnrpCacheObjectKind {
+    CameraBlock = 1,
+    TileIndexBlock = 2,
+    TensorSectionTable = 3,
+    CodecTable = 4,
+    ReusableResultObject = 5,
+    PayloadLayoutTemplate = 6,
+    PromptSegment = 7,
+    ToolSchema = 8,
+    StructuredEventSchema = 9
+}
+export declare enum CacheLeaseOwnerScope {
+    Connection = 0,
+    Session = 1,
+    Operation = 2
+}
+export interface CacheObjectId {
+    readonly cacheNamespace: number;
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
+    readonly objectKind: NnrpCacheObjectKind;
+}
 export interface ObjectDescriptorMetadata {
     readonly objectId: bigint;
     readonly objectKind: RuntimeObjectKind;
@@ -199,6 +221,19 @@ export interface CacheInvalidateMetadata {
     readonly cacheKeyHi: bigint;
     readonly cacheKeyLo: bigint;
     readonly reasonCode: number;
+}
+export declare class CacheLease {
+    readonly objectId: CacheObjectId;
+    readonly objectVersion: bigint;
+    readonly leaseId: bigint;
+    readonly ownerScope: CacheLeaseOwnerScope;
+    readonly ownerId: bigint;
+    readonly grantedAtMillis: bigint;
+    readonly ttlMillis: number;
+    constructor(objectId: CacheObjectId, objectVersion: bigint, leaseId: bigint, ownerScope: CacheLeaseOwnerScope, ownerId: bigint, grantedAtMillis: bigint, ttlMillis: number);
+    get expiresAtMillis(): bigint;
+    isExpiredAt(nowMillis: bigint): boolean;
+    validateVersion(expectedVersion: bigint): void;
 }
 interface NnrpRuntimeFrameEventBase<TType extends string, TMessageType extends NnrpMessageType, TMetadata> {
     readonly type: TType;
@@ -480,7 +515,6 @@ export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 export type NnrpSubmitMode = "inline" | "object-reference";
 export type NnrpSubmitCapacityPolicy = "reject" | "await";
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
-export type NnrpCacheObjectKind = "tensor" | "token" | "schema" | "artifact" | "tool";
 export interface NnrpTensorSection {
     readonly payload: NnrpBinaryPayload;
     readonly codecId?: number;

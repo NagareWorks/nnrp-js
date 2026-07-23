@@ -10,7 +10,7 @@ import {
   selectTransport,
 } from "@nnrp/core";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.14";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.15";
 const PREVIEW4_RUNTIME_CAPABILITIES = [
   "cache",
   "schema",

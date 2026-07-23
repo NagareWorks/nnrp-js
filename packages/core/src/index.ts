@@ -139,6 +139,31 @@ export enum CacheMissReason {
   PermissionDenied = 0x0007,
 }
 
+export enum NnrpCacheObjectKind {
+  CameraBlock = 0x0001,
+  TileIndexBlock = 0x0002,
+  TensorSectionTable = 0x0003,
+  CodecTable = 0x0004,
+  ReusableResultObject = 0x0005,
+  PayloadLayoutTemplate = 0x0006,
+  PromptSegment = 0x0007,
+  ToolSchema = 0x0008,
+  StructuredEventSchema = 0x0009,
+}
+
+export enum CacheLeaseOwnerScope {
+  Connection = 0,
+  Session = 1,
+  Operation = 2,
+}
+
+export interface CacheObjectId {
+  readonly cacheNamespace: number;
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
+  readonly objectKind: NnrpCacheObjectKind;
+}
+
 export interface ObjectDescriptorMetadata {
   readonly objectId: bigint;
   readonly objectKind: RuntimeObjectKind;
@@ -223,6 +248,64 @@ export interface CacheInvalidateMetadata {
   readonly cacheKeyHi: bigint;
   readonly cacheKeyLo: bigint;
   readonly reasonCode: number;
+}
+
+export class CacheLease {
+  public readonly objectId: CacheObjectId;
+  public readonly objectVersion: bigint;
+  public readonly leaseId: bigint;
+  public readonly ownerScope: CacheLeaseOwnerScope;
+  public readonly ownerId: bigint;
+  public readonly grantedAtMillis: bigint;
+  public readonly ttlMillis: number;
+
+  public constructor(
+    objectId: CacheObjectId,
+    objectVersion: bigint,
+    leaseId: bigint,
+    ownerScope: CacheLeaseOwnerScope,
+    ownerId: bigint,
+    grantedAtMillis: bigint,
+    ttlMillis: number,
+  ) {
+    validateCacheObjectId(objectId);
+    validateU64BigInt("objectVersion", objectVersion);
+    validateU64BigInt("leaseId", leaseId);
+    if (!isCacheLeaseOwnerScope(ownerScope)) {
+      throw runtimeObjectError("NNRP_CACHE_LEASE_OWNER_SCOPE_INVALID", "Cache lease ownerScope is not recognized.");
+    }
+    validateU64BigInt("ownerId", ownerId);
+    validateU64BigInt("grantedAtMillis", grantedAtMillis);
+    validateU32Number("ttlMillis", ttlMillis);
+
+    this.objectId = Object.freeze({ ...objectId });
+    this.objectVersion = objectVersion;
+    this.leaseId = leaseId;
+    this.ownerScope = ownerScope;
+    this.ownerId = ownerId;
+    this.grantedAtMillis = grantedAtMillis;
+    this.ttlMillis = ttlMillis;
+  }
+
+  public get expiresAtMillis(): bigint {
+    const ttl = BigInt(this.ttlMillis);
+    return U64_MAX - this.grantedAtMillis < ttl ? U64_MAX : this.grantedAtMillis + ttl;
+  }
+
+  public isExpiredAt(nowMillis: bigint): boolean {
+    validateU64BigInt("nowMillis", nowMillis);
+    return nowMillis >= this.expiresAtMillis;
+  }
+
+  public validateVersion(expectedVersion: bigint): void {
+    validateU64BigInt("expectedVersion", expectedVersion);
+    if (expectedVersion !== this.objectVersion) {
+      throw runtimeObjectError(
+        "NNRP_CACHE_LEASE_VERSION_MISMATCH",
+        `Cache lease covers object version ${this.objectVersion}, received ${expectedVersion}.`,
+      );
+    }
+  }
 }
 
 interface NnrpRuntimeFrameEventBase<
@@ -740,8 +823,6 @@ export type NnrpSubmitMode = "inline" | "object-reference";
 export type NnrpSubmitCapacityPolicy = "reject" | "await";
 
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
-
-export type NnrpCacheObjectKind = "tensor" | "token" | "schema" | "artifact" | "tool";
 
 export interface NnrpTensorSection {
   readonly payload: NnrpBinaryPayload;
@@ -2035,7 +2116,7 @@ function validateInputProfile(profile: string, strictProfiles: boolean): void {
 }
 
 function validateCacheKey(key: NnrpCacheKey): void {
-  if (!["tensor", "token", "schema", "artifact", "tool"].includes(key.kind)) {
+  if (!isCacheObjectKind(key.kind)) {
     throw new NnrpProtocolError({
       code: "NNRP_CACHE_KIND_INVALID",
       message: `Unsupported NNRP cache object kind '${key.kind}'.`,
@@ -2070,6 +2151,42 @@ function validateCacheKey(key: NnrpCacheKey): void {
       retryable: false,
     });
   }
+}
+
+const U64_MAX = 0xffff_ffff_ffff_ffffn;
+
+function validateCacheObjectId(objectId: CacheObjectId): void {
+  if (objectId === null || typeof objectId !== "object") {
+    throw runtimeObjectError("NNRP_CACHE_OBJECT_ID_INVALID", "Cache lease objectId must be an object.");
+  }
+  validateU32Number("objectId.cacheNamespace", objectId.cacheNamespace);
+  validateU64BigInt("objectId.cacheKeyHi", objectId.cacheKeyHi);
+  validateU64BigInt("objectId.cacheKeyLo", objectId.cacheKeyLo);
+  if (!isCacheObjectKind(objectId.objectKind)) {
+    throw runtimeObjectError("NNRP_CACHE_OBJECT_KIND_INVALID", "Cache lease object kind is not recognized.");
+  }
+}
+
+function validateU64BigInt(name: string, value: bigint): void {
+  if (typeof value !== "bigint" || value < 0n || value > U64_MAX) {
+    throw runtimeObjectError("NNRP_CACHE_LEASE_U64_INVALID", `${name} must fit the frozen u64 range.`);
+  }
+}
+
+function validateU32Number(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
+    throw runtimeObjectError("NNRP_CACHE_LEASE_U32_INVALID", `${name} must fit the frozen u32 range.`);
+  }
+}
+
+function isCacheObjectKind(value: number): value is NnrpCacheObjectKind {
+  return Number.isInteger(value) && value >= NnrpCacheObjectKind.CameraBlock &&
+    value <= NnrpCacheObjectKind.StructuredEventSchema;
+}
+
+function isCacheLeaseOwnerScope(value: number): value is CacheLeaseOwnerScope {
+  return value === CacheLeaseOwnerScope.Connection || value === CacheLeaseOwnerScope.Session ||
+    value === CacheLeaseOwnerScope.Operation;
 }
 
 function validateSchemaDescriptor(descriptor: NnrpSchemaDescriptor): void {

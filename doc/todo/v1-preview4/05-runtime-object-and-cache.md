@@ -27,9 +27,9 @@
   - [x] Encode the existing `CacheInvalidate` NNRP/1 frame.
   - [x] Preserve namespace and 128-bit cache key components.
   - [x] Apply invalidation scope and reason without inventing a Preview4-only replacement frame.
-- [ ] Implement local cache lease validation.
-  - [ ] Validate object/version, lease id, owner scope/id, grant time, and TTL.
-  - [ ] Keep lease state local and out of public native pointer representations.
+- [x] Implement local cache lease validation.
+  - [x] Validate object/version, lease id, owner scope/id, grant time, and TTL.
+  - [x] Keep lease state local and out of public native pointer representations.
 
 ## Browser and Worker Safety
 

@@ -5,6 +5,7 @@ import {
   createBackendNativeManifest,
   decodeRuntimeControlMetadata,
   MemoryLocationHint,
+  NnrpCacheObjectKind,
   NnrpCapabilityError,
   NnrpMessageType,
   type NnrpNativeTransportBinding,
@@ -425,7 +426,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
     descriptor: {
       profile: "tensor",
       cache: {
-        key: { kind: "tensor", key: "frame-1" },
+        key: { kind: NnrpCacheObjectKind.TensorSectionTable, key: "frame-1" },
         version: 3n,
         leaseMillis: 1_000,
       },

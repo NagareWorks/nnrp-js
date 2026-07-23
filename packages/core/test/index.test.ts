@@ -1,6 +1,8 @@
 import { assertEquals, assertInstanceOf, assertNotStrictEquals, assertThrows } from "jsr:@std/assert@1";
 import {
   type CacheInvalidateMetadata,
+  CacheLease,
+  CacheLeaseOwnerScope,
   CacheMissReason,
   CacheReuseScope,
   createBackendNativeManifest,
@@ -26,6 +28,7 @@ import {
   type NnrpCacheInvalidateResult,
   type NnrpCacheKey,
   type NnrpCacheMetadata,
+  NnrpCacheObjectKind,
   type NnrpCachePutRequest,
   type NnrpCachePutResult,
   NnrpCapabilityError,
@@ -951,12 +954,16 @@ Deno.test("@nnrp/core owns encoded and decoded runtime object tails", () => {
 });
 
 Deno.test("@nnrp/core keeps public runtime object and cache descriptors structured-clone compatible", () => {
-  const cacheKey: NnrpCacheKey = { kind: "tensor", key: 7n, namespaceId: 3 };
+  const cacheKey: NnrpCacheKey = {
+    kind: NnrpCacheObjectKind.TensorSectionTable,
+    key: 7n,
+    namespaceId: 3,
+  };
   const cacheMetadata: NnrpCacheMetadata = {
     key: cacheKey,
     version: 8n,
     leaseMillis: 1_000,
-    dependencies: [{ kind: "schema", key: "image-tile-v1" }],
+    dependencies: [{ kind: NnrpCacheObjectKind.StructuredEventSchema, key: "image-tile-v1" }],
   };
   const cachePutRequest: NnrpCachePutRequest = {
     key: cacheKey,
@@ -1479,7 +1486,7 @@ Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () =>
     tensors: [{ payload: new DataView(source.buffer, 2, 2), codecId: 4 }],
     inputProfile: "tensor",
     submitMode: "inline",
-    cacheKey: createCacheKey("tensor", "model-a", 1),
+    cacheKey: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "model-a", 1),
     descriptor: {
       profile: "tensor",
       schema: createSchemaDescriptor({
@@ -1489,8 +1496,8 @@ Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () =>
         flags: ["required", "lossless"],
       }),
       cache: {
-        key: createCacheKey("tensor", "model-a", 1),
-        dependencies: [createCacheKey("schema", "tensor-frame")],
+        key: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "model-a", 1),
+        dependencies: [createCacheKey(NnrpCacheObjectKind.StructuredEventSchema, "tensor-frame")],
       },
     },
   });
@@ -1510,7 +1517,7 @@ Deno.test("@nnrp/core can skip payload copies when ownership is explicit", () =>
 
 Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () => {
   assertThrows(
-    () => createCacheKey("tensor", -1),
+    () => createCacheKey(NnrpCacheObjectKind.TensorSectionTable, -1),
     NnrpProtocolError,
     "Numeric cache keys must be non-negative safe integers.",
   );
@@ -1533,16 +1540,16 @@ Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () =>
 
 Deno.test("@nnrp/core normalizes cache put and invalidate operations", () => {
   const put = normalizeCachePutRequest({
-    key: createCacheKey("tensor", "kv-block", 3),
+    key: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "kv-block", 3),
     payload: new Uint8Array([1, 2]),
     descriptor: {
       profile: "tensor",
-      cache: { key: createCacheKey("tensor", "kv-block", 3), leaseMillis: 1000 },
+      cache: { key: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "kv-block", 3), leaseMillis: 1000 },
     },
     metadata: { pool: "gpu-0" },
   });
   const invalidate = normalizeCacheInvalidateRequest({
-    key: createCacheKey("tensor", "kv-block", 3),
+    key: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "kv-block", 3),
     recursive: true,
     metadata: { reason: "evict" },
   });
@@ -1555,7 +1562,11 @@ Deno.test("@nnrp/core normalizes cache put and invalidate operations", () => {
 
 Deno.test("@nnrp/core rejects invalid cache leases and metadata boundaries", () => {
   assertThrows(
-    () => normalizeCachePutRequest({ key: createCacheKey("tensor", "a"), leaseMillis: -1 }),
+    () =>
+      normalizeCachePutRequest({
+        key: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "a"),
+        leaseMillis: -1,
+      }),
     NnrpProtocolError,
     "leaseMillis must be a non-negative",
   );
@@ -1581,17 +1592,17 @@ Deno.test("@nnrp/core rejects invalid cache leases and metadata boundaries", () 
 
 Deno.test("@nnrp/core rejects invalid cache and schema edge cases", () => {
   assertThrows(
-    () => createCacheKey("unknown" as never, "key"),
+    () => createCacheKey(0 as NnrpCacheObjectKind, "key"),
     NnrpProtocolError,
     "Unsupported NNRP cache object kind",
   );
   assertThrows(
-    () => createCacheKey("tensor", " "),
+    () => createCacheKey(NnrpCacheObjectKind.TensorSectionTable, " "),
     NnrpProtocolError,
     "Cache key strings must not be empty",
   );
   assertThrows(
-    () => createCacheKey("tensor", 1, -1),
+    () => createCacheKey(NnrpCacheObjectKind.TensorSectionTable, 1, -1),
     NnrpProtocolError,
     "namespaceId must be a non-negative",
   );
@@ -1631,9 +1642,9 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
       profile: "token",
       metadata: { format: "delta" },
       cache: {
-        key: createCacheKey("token", "stream"),
+        key: createCacheKey(NnrpCacheObjectKind.PromptSegment, "stream"),
         version: "1",
-        dependencies: [createCacheKey("schema", "token-delta")],
+        dependencies: [createCacheKey(NnrpCacheObjectKind.StructuredEventSchema, "token-delta")],
       },
     },
   });
@@ -1642,7 +1653,53 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
   assertEquals(summary.rejected[0]?.diagnostic, diagnostic);
   assertEquals(normalized.metadata, { request: "agent" });
   assertEquals(normalized.descriptor?.metadata, { format: "delta" });
-  assertEquals(normalized.descriptor?.cache?.dependencies?.[0]?.kind, "schema");
+  assertEquals(normalized.descriptor?.cache?.dependencies?.[0]?.kind, NnrpCacheObjectKind.StructuredEventSchema);
+});
+
+Deno.test("@nnrp/core exposes the frozen cache object kind values", () => {
+  assertEquals(NnrpCacheObjectKind.CameraBlock, 0x0001);
+  assertEquals(NnrpCacheObjectKind.TileIndexBlock, 0x0002);
+  assertEquals(NnrpCacheObjectKind.TensorSectionTable, 0x0003);
+  assertEquals(NnrpCacheObjectKind.CodecTable, 0x0004);
+  assertEquals(NnrpCacheObjectKind.ReusableResultObject, 0x0005);
+  assertEquals(NnrpCacheObjectKind.PayloadLayoutTemplate, 0x0006);
+  assertEquals(NnrpCacheObjectKind.PromptSegment, 0x0007);
+  assertEquals(NnrpCacheObjectKind.ToolSchema, 0x0008);
+  assertEquals(NnrpCacheObjectKind.StructuredEventSchema, 0x0009);
+});
+
+Deno.test("@nnrp/core validates frozen cache lease values", () => {
+  const objectId = {
+    cacheNamespace: 7,
+    cacheKeyHi: 8n,
+    cacheKeyLo: 9n,
+    objectKind: NnrpCacheObjectKind.ReusableResultObject,
+  } as const;
+  const lease = new CacheLease(objectId, 10n, 11n, CacheLeaseOwnerScope.Session, 12n, 100n, 25);
+
+  assertEquals(lease.objectId, objectId);
+  assertNotStrictEquals(lease.objectId, objectId);
+  assertEquals(lease.expiresAtMillis, 125n);
+  assertEquals(lease.isExpiredAt(124n), false);
+  assertEquals(lease.isExpiredAt(125n), true);
+  lease.validateVersion(10n);
+
+  const saturated = new CacheLease(objectId, 1n, 2n, CacheLeaseOwnerScope.Connection, 3n, 0xffff_ffff_ffff_fff0n, 32);
+  assertEquals(saturated.expiresAtMillis, 0xffff_ffff_ffff_ffffn);
+
+  const mismatch = assertThrows(() => lease.validateVersion(9n), NnrpProtocolError);
+  assertEquals(mismatch.diagnostic.code, "NNRP_CACHE_LEASE_VERSION_MISMATCH");
+  assertThrows(
+    () => new CacheLease(objectId, 1n, 2n, 3 as CacheLeaseOwnerScope, 4n, 5n, 6),
+    NnrpProtocolError,
+  );
+  assertThrows(
+    () => new CacheLease({ ...objectId, objectKind: 10 as NnrpCacheObjectKind }, 1n, 2n, 0, 4n, 5n, 6),
+    NnrpProtocolError,
+  );
+  assertThrows(() => new CacheLease(objectId, -1n, 2n, 0, 4n, 5n, 6), NnrpProtocolError);
+  assertThrows(() => new CacheLease(objectId, 1n, 2n, 0, 4n, 5n, 0x1_0000_0000), NnrpProtocolError);
+  assertThrows(() => lease.isExpiredAt(-1n), NnrpProtocolError);
 });
 
 Deno.test("@nnrp/core exposes strict standard profile checks", () => {

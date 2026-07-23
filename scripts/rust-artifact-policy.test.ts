@@ -35,7 +35,7 @@ Deno.test("native artifact manifests are scoped and normalized for npm", () => {
       transport_scope: "websocket",
       transport_slots: ["websocket"],
       protocol_version: "NNRP/1",
-      abi_version: "3.0.0",
+      abi_version: "4.0.0",
       enabled_features: ["transport-websocket"],
       os: "windows",
       arch: "x86_64",
@@ -142,7 +142,7 @@ Deno.test("native artifact manifests reject a mismatched transport scope", () =>
           transport_name: "tcp",
           transport_scope: "quic",
           transport_slots: ["tcp"],
-          abi_version: "3.0.0",
+          abi_version: "4.0.0",
           os: policy.os,
           arch: policy.arch,
           library: policy.library,
@@ -176,6 +176,6 @@ Deno.test("native artifact manifests reject the superseded Preview4 ABI", () => 
         { release: "v1", archive: "tcp-old-abi.zip", archiveSha256: "a".repeat(64) },
       ),
     Error,
-    "expected Rust ABI 3.0.0",
+    "expected Rust ABI 4.0.0",
   );
 });
