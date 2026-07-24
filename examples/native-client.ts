@@ -3,10 +3,9 @@ import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const client = await openNativeClient({
-  endpoint: "127.0.0.1:4433",
-  nativeLibrary: { artifactDir: "./native" },
+  endpoint: "nnrp://127.0.0.1:4433/session/default",
   transports: [createTcpTransportProvider(), createQuicTransportProvider()],
-  transportPolicy: "score",
+  transportPolicy: "auto",
   sessionDefaults: { inputProfile: "tensor", metadata: { app: "nnrp-native-client-example" } },
 });
 
@@ -14,6 +13,7 @@ const session = client.openSession();
 
 try {
   const result = await session.submit({
+    operationId: 1n,
     frameId: 1,
     payload: new Uint8Array([1, 2, 3, 4]),
     inputProfile: "tensor",

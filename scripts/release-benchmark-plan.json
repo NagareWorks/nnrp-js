@@ -7,13 +7,77 @@
   },
   "scenarios": [
     {
-      "id": "l4.submit_result.inline_tensor.throughput",
+      "id": "preview4.coarse_ffi.submit_result_batch",
       "category": "throughput",
       "workload": {
-        "operation": "submit_result_loop",
+        "operation": "coarse_ffi_submit_result_batch",
         "payload": "inline_tensor_1024",
-        "duration_seconds": 10,
-        "warmup_iterations": 1000
+        "iterations": 1024,
+        "duration_seconds": 3,
+        "warmup_iterations": 100
+      }
+    },
+    {
+      "id": "preview4.runtime_control.priority_update",
+      "category": "throughput",
+      "workload": {
+        "operation": "runtime_control_loop",
+        "payload": "metadata_0",
+        "duration_seconds": 1,
+        "warmup_iterations": 20
+      }
+    },
+    {
+      "id": "preview4.runtime_object.reference",
+      "category": "throughput",
+      "workload": {
+        "operation": "runtime_object_reference_loop",
+        "payload": "object_1024",
+        "duration_seconds": 1,
+        "warmup_iterations": 20
+      }
+    },
+    {
+      "id": "preview4.runtime_object.delta",
+      "category": "throughput",
+      "workload": {
+        "operation": "runtime_object_delta_loop",
+        "payload": "delta_1024",
+        "duration_seconds": 1,
+        "warmup_iterations": 20
+      }
+    },
+    {
+      "id": "preview4.transport.ipc.loopback",
+      "category": "throughput",
+      "workload": {
+        "operation": "transport_loopback",
+        "transport": "ipc",
+        "payload": "packet_40",
+        "duration_seconds": 1,
+        "warmup_iterations": 20
+      }
+    },
+    {
+      "id": "preview4.transport.websocket.native_loopback",
+      "category": "throughput",
+      "workload": {
+        "operation": "transport_loopback",
+        "transport": "websocket",
+        "payload": "packet_40",
+        "duration_seconds": 1,
+        "warmup_iterations": 20
+      }
+    },
+    {
+      "id": "preview4.browser_wasm.websocket_submit_result",
+      "category": "throughput",
+      "workload": {
+        "operation": "browser_wasm_websocket_loop",
+        "transport": "websocket",
+        "payload": "inline_tensor_1024",
+        "duration_seconds": 1,
+        "warmup_iterations": 20
       }
     }
   ]

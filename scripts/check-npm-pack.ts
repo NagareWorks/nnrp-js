@@ -1,3 +1,5 @@
+import { NATIVE_ARTIFACTS } from "./rust-artifact-policy.ts";
+
 const packages: readonly PackagePackPolicy[] = [
   {
     name: "@nnrp/core",
@@ -37,10 +39,17 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.d.ts",
       "dist/index.d.ts.map",
       "dist/index.js",
+      "dist/errors.d.ts",
+      "dist/errors.d.ts.map",
+      "dist/errors.js",
+      "dist/wasm-role.d.ts",
+      "dist/wasm-role.d.ts.map",
+      "dist/wasm-role.js",
       "package.json",
       "wasm/manifest.json",
       "wasm/nnrp_wasm.d.ts",
-      "wasm/nnrp_wasm.wasm",
+      "wasm/nnrp_wasm.js",
+      "wasm/nnrp_wasm_bg.wasm",
     ],
     forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
@@ -52,6 +61,8 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.d.ts",
       "dist/index.d.ts.map",
       "dist/index.js",
+      "dist/native.js",
+      "dist/native-node.js",
       "native/windows-x86_64/manifest.json",
       "package.json",
     ],
@@ -65,6 +76,23 @@ const packages: readonly PackagePackPolicy[] = [
       "dist/index.d.ts",
       "dist/index.d.ts.map",
       "dist/index.js",
+      "dist/native.js",
+      "dist/native-node.js",
+      "native/windows-x86_64/manifest.json",
+      "package.json",
+    ],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/transport-ipc",
+    directory: "packages/transport-ipc",
+    expectedFiles: [
+      "README.md",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "dist/native.js",
+      "dist/native-node.js",
       "native/windows-x86_64/manifest.json",
       "package.json",
     ],
@@ -73,10 +101,27 @@ const packages: readonly PackagePackPolicy[] = [
   {
     name: "@nnrp/transport-websocket",
     directory: "packages/transport-websocket",
-    expectedFiles: ["README.md", "dist/index.d.ts", "dist/index.d.ts.map", "dist/index.js", "package.json"],
-    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
+    expectedFiles: [
+      "README.md",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "dist/browser.js",
+      "dist/native.js",
+      "dist/native-node.js",
+      "native/windows-x86_64/manifest.json",
+      "package.json",
+    ],
+    forbiddenFiles: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /webtransport/i],
   },
 ];
+
+const NATIVE_TRANSPORT_PACKAGES = new Set([
+  "@nnrp/transport-tcp",
+  "@nnrp/transport-quic",
+  "@nnrp/transport-ipc",
+  "@nnrp/transport-websocket",
+]);
 
 const failures: string[] = [];
 const packageVersions = new Map<string, string>();
@@ -99,6 +144,7 @@ for (const policy of packages) {
   }
 
   const packedFiles = pack.files.map((file) => normalizePackPath(file.path)).sort();
+  await checkRelativeModuleClosure(policy, packedFiles);
   checkNativeArtifactMetadata(policy, packageJson, packedFiles);
   checkWasmArtifactMetadata(policy, packageJson, packedFiles);
   for (const expected of policy.expectedFiles) {
@@ -114,6 +160,39 @@ for (const policy of packages) {
       }
     }
   }
+}
+
+async function checkRelativeModuleClosure(
+  policy: PackagePackPolicy,
+  packedFiles: readonly string[],
+): Promise<void> {
+  const packedFileSet = new Set(packedFiles);
+  const moduleSpecifierPattern = /(?:from\s+|import\s*\(|require\s*\()\s*["'](\.\.?\/[^"']+)["']/g;
+  for (const file of packedFiles) {
+    if (!file.endsWith(".js") && !file.endsWith(".d.ts")) continue;
+    const content = await Deno.readTextFile(`${policy.directory}/${file}`);
+    for (const match of content.matchAll(moduleSpecifierPattern)) {
+      const specifier = match[1];
+      const resolved = resolveRelativePackPath(file, specifier);
+      if (!packedFileSet.has(resolved)) {
+        failures.push(`${policy.name}: ${file} imports missing packed module ${resolved}`);
+      }
+    }
+  }
+}
+
+function resolveRelativePackPath(importer: string, specifier: string): string {
+  const segments = importer.split("/");
+  segments.pop();
+  for (const segment of specifier.split("/")) {
+    if (segment === "." || segment === "") continue;
+    if (segment === "..") {
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.join("/");
 }
 
 const versions = new Set(packageVersions.values());
@@ -142,15 +221,25 @@ function checkNativeArtifactMetadata(
     return;
   }
 
-  if (policy.name !== "@nnrp/transport-tcp" && policy.name !== "@nnrp/transport-quic") {
+  if (!NATIVE_TRANSPORT_PACKAGES.has(policy.name)) {
     failures.push(
-      `${policy.name}: native artifact packaging can only be enabled on native TCP/QUIC transport packages`,
+      `${policy.name}: native artifact packaging can only be enabled on native transport packages`,
     );
     return;
   }
 
   if (!packedFiles.some((file) => nativeArtifactManifestPattern.test(file))) {
     failures.push(`${policy.name}: native artifact packaging requires native/<tag>/manifest.json in npm pack output`);
+  }
+  for (const artifact of NATIVE_ARTIFACTS) {
+    const manifest = `native/${artifact.artifactTag}/manifest.json`;
+    const library = `native/${artifact.artifactTag}/${artifact.library}`;
+    if (!packedFiles.includes(manifest)) {
+      failures.push(`${policy.name}: npm pack output is missing ${manifest}`);
+    }
+    if (!packedFiles.includes(library)) {
+      failures.push(`${policy.name}: npm pack output is missing ${library}`);
+    }
   }
 }
 

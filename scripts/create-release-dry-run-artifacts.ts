@@ -15,8 +15,17 @@ const packages: readonly PackagePolicy[] = [
   { name: "@nnrp/browser-client", directory: "packages/browser-client" },
   { name: "@nnrp/transport-tcp", directory: "packages/transport-tcp" },
   { name: "@nnrp/transport-quic", directory: "packages/transport-quic" },
+  { name: "@nnrp/transport-ipc", directory: "packages/transport-ipc" },
   { name: "@nnrp/transport-websocket", directory: "packages/transport-websocket" },
 ];
+
+const rustArtifactOwners = [
+  "packages/transport-tcp/native",
+  "packages/transport-quic/native",
+  "packages/transport-ipc/native",
+  "packages/transport-websocket/native",
+  "packages/browser-client/wasm",
+] as const;
 
 await resetOutputDir(outputDir);
 
@@ -24,9 +33,12 @@ for (const report of reports) {
   await writeCommandOutput(`${outputDir}/${report.file}`, "deno", report.args);
 }
 
+const rustArtifacts = await collectRustArtifactEvidence();
+await writeJson(`${outputDir}/rust-artifacts.json`, rustArtifacts);
+
 const packResults = await Promise.all(packages.map((policy) => npmPackDryRun(policy)));
 await writeJson(`${outputDir}/package-pack.json`, packResults);
-await writeJson(`${outputDir}/summary.json`, createSummary(packResults));
+await writeJson(`${outputDir}/summary.json`, createSummary(packResults, rustArtifacts));
 
 async function resetOutputDir(path: string): Promise<void> {
   await Deno.remove(path, { recursive: true }).catch((error) => {
@@ -108,7 +120,10 @@ async function runNpmPack(policy: PackagePolicy): Promise<NpmPackResult> {
   return parsed[0];
 }
 
-function createSummary(packResults: readonly PackagePackSummary[]): ReleaseDryRunSummary {
+function createSummary(
+  packResults: readonly PackagePackSummary[],
+  rustArtifacts: RustArtifactEvidence,
+): ReleaseDryRunSummary {
   const packageVersions = [...new Set(packResults.map((result) => result.version))];
   if (packageVersions.length !== 1) {
     throw new Error(
@@ -121,13 +136,61 @@ function createSummary(packResults: readonly PackagePackSummary[]): ReleaseDryRu
   return {
     sdk: "nnrp-js",
     packageVersion: packageVersions[0],
-    reports: reports.map((report) => report.file),
+    rustArtifactVersion: rustArtifacts.artifactVersion,
+    rustReleaseTag: rustArtifacts.releaseTag,
+    reports: [...reports.map((report) => report.file), "rust-artifacts.json"],
     packages: packResults.map((result) => ({
       name: result.name,
       version: result.version,
       fileCount: result.files.length,
     })),
   };
+}
+
+async function collectRustArtifactEvidence(): Promise<RustArtifactEvidence> {
+  const artifacts: RustArtifactRecord[] = [];
+  for (const owner of rustArtifactOwners) {
+    for (const manifestPath of await findManifestPaths(owner)) {
+      const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as Record<string, unknown>;
+      const releaseTag = readRequiredString(manifest, "source_release", manifestPath);
+      const sourceArchive = readRequiredString(manifest, "source_archive", manifestPath);
+      const sourceArchiveSha256 = readRequiredString(manifest, "source_archive_sha256", manifestPath);
+      if (!/^v1\.0\.0-preview\.4\.\d+$/.test(releaseTag)) {
+        throw new Error(`${manifestPath}: invalid Rust Preview4 source_release ${releaseTag}`);
+      }
+      if (!/^[0-9a-f]{64}$/.test(sourceArchiveSha256)) {
+        throw new Error(`${manifestPath}: source_archive_sha256 must be a lowercase SHA-256 digest`);
+      }
+      artifacts.push({
+        owner,
+        manifest: manifestPath.replaceAll("\\", "/"),
+        releaseTag,
+        sourceArchive,
+        sourceArchiveSha256,
+      });
+    }
+  }
+
+  const releaseTags = [...new Set(artifacts.map((artifact) => artifact.releaseTag))];
+  if (artifacts.length === 0 || releaseTags.length !== 1) {
+    throw new Error(`staged Rust artifacts must resolve to one release tag, got ${releaseTags.join(", ") || "none"}`);
+  }
+  artifacts.sort((left, right) => left.manifest.localeCompare(right.manifest));
+  return {
+    artifactVersion: releaseTags[0]!.slice(1),
+    releaseTag: releaseTags[0]!,
+    artifacts,
+  };
+}
+
+async function findManifestPaths(root: string): Promise<string[]> {
+  const paths: string[] = [];
+  for await (const entry of Deno.readDir(root)) {
+    const path = `${root}/${entry.name}`;
+    if (entry.isDirectory) paths.push(...await findManifestPaths(path));
+    else if (entry.isFile && entry.name === "manifest.json") paths.push(path);
+  }
+  return paths;
 }
 
 async function readPackageJson(policy: PackagePolicy): Promise<Record<string, unknown>> {
@@ -214,10 +277,26 @@ interface PackagePackSummary {
 interface ReleaseDryRunSummary {
   readonly sdk: "nnrp-js";
   readonly packageVersion: string;
+  readonly rustArtifactVersion: string;
+  readonly rustReleaseTag: string;
   readonly reports: readonly string[];
   readonly packages: readonly {
     readonly name: string;
     readonly version: string;
     readonly fileCount: number;
   }[];
+}
+
+interface RustArtifactEvidence {
+  readonly artifactVersion: string;
+  readonly releaseTag: string;
+  readonly artifacts: readonly RustArtifactRecord[];
+}
+
+interface RustArtifactRecord {
+  readonly owner: string;
+  readonly manifest: string;
+  readonly releaseTag: string;
+  readonly sourceArchive: string;
+  readonly sourceArchiveSha256: string;
 }

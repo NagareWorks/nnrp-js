@@ -8,10 +8,9 @@ interface AgentTurn {
 
 async function submitAgentTurn(turn: AgentTurn): Promise<void> {
   const client = await openNativeClient({
-    endpoint: "127.0.0.1:4433",
-    nativeLibrary: { artifactDir: "./native" },
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider()],
-    transportPolicy: "score",
+    transportPolicy: "auto",
     sessionDefaults: { inputProfile: "tool_delta", metadata: { app: "opencode-agent" } },
   });
 
@@ -19,6 +18,7 @@ async function submitAgentTurn(turn: AgentTurn): Promise<void> {
 
   try {
     await session.submitNoWait({
+      operationId: BigInt(turn.id),
       frameId: turn.id,
       payload: new TextEncoder().encode(turn.prompt),
       inputProfile: "tool_delta",

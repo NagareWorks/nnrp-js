@@ -1,0 +1,36 @@
+{
+  "name": "@nnrp/transport-ipc",
+  "version": "1.0.0-preview.4",
+  "description": "Native Unix-domain socket and Windows named-pipe carrier provider for NNRP runtimes.",
+  "keywords": ["nnrp", "ai", "runtime", "transport", "ipc", "unix-socket", "named-pipe", "typescript"],
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NagareWorks/nnrp-js.git",
+    "directory": "packages/transport-ipc"
+  },
+  "bugs": { "url": "https://github.com/NagareWorks/nnrp-js/issues" },
+  "homepage": "https://github.com/NagareWorks/nnrp-js/tree/main/packages/transport-ipc#readme",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./experimental/*": null,
+    "./internal/*": null
+  },
+  "files": [
+    "README.md",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map",
+    "dist/native.js",
+    "dist/native-node.js",
+    "native/**"
+  ],
+  "dependencies": { "@nnrp/core": "workspace:*", "koffi": "3.1.1" },
+  "nnrp": {
+    "transport": "ipc",
+    "runtimeTargets": ["node>=20.11", "deno>=2"],
+    "nativeArtifacts": { "enabled": true }
+  }
+}

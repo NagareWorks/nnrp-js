@@ -36,28 +36,96 @@ const packages: readonly PackagePolicy[] = [
   {
     name: "@nnrp/browser-client",
     directory: "packages/browser-client",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "wasm/**"],
+    requiredFiles: [
+      "README.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/errors.js",
+      "dist/errors.d.ts",
+      "dist/errors.d.ts.map",
+      "dist/wasm-role.js",
+      "dist/wasm-role.d.ts",
+      "dist/wasm-role.d.ts.map",
+      "wasm/**",
+    ],
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
   },
   {
     name: "@nnrp/transport-tcp",
     directory: "packages/transport-tcp",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**"],
+    requiredFiles: [
+      "README.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/native.js",
+      "dist/native-node.js",
+      "native/**",
+    ],
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-quic",
     directory: "packages/transport-quic",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map", "native/**"],
+    requiredFiles: [
+      "README.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/native.js",
+      "dist/native-node.js",
+      "native/**",
+    ],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
+  },
+  {
+    name: "@nnrp/transport-ipc",
+    directory: "packages/transport-ipc",
+    requiredFiles: [
+      "README.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/native.js",
+      "dist/native-node.js",
+      "native/**",
+    ],
     forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /browser/i, /websocket/i, /webtransport/i],
   },
   {
     name: "@nnrp/transport-websocket",
     directory: "packages/transport-websocket",
-    requiredFiles: ["README.md", "dist/index.js", "dist/index.d.ts", "dist/index.d.ts.map"],
-    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /native/i, /nnrp_ffi/i, /\.(?:dll|so|dylib|a)$/],
+    requiredFiles: [
+      "README.md",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/native.js",
+      "dist/native-node.js",
+      "native/**",
+    ],
+    forbiddenPatterns: [/\.tsbuildinfo$/, /\.js\.map$/, /^wasm\//, /webtransport/i],
   },
 ];
+
+const NATIVE_TRANSPORT_PACKAGES = new Set([
+  "@nnrp/transport-tcp",
+  "@nnrp/transport-quic",
+  "@nnrp/transport-ipc",
+  "@nnrp/transport-websocket",
+]);
+
+const EXPECTED_RUNTIME_TARGETS: Readonly<Record<string, readonly string[]>> = {
+  "@nnrp/core": ["node>=20.11", "deno>=2", "browser-es2022"],
+  "@nnrp/native-client": ["node>=20.11", "deno>=2"],
+  "@nnrp/native-server": ["node>=20.11", "deno>=2"],
+  "@nnrp/browser-client": ["browser-es2022"],
+  "@nnrp/transport-tcp": ["node>=20.11", "deno>=2"],
+  "@nnrp/transport-quic": ["node>=20.11", "deno>=2"],
+  "@nnrp/transport-ipc": ["node>=20.11", "deno>=2"],
+  "@nnrp/transport-websocket": ["node>=20.11", "deno>=2", "browser-es2022"],
+};
 
 const failures: string[] = [];
 const nativeArtifactManifestPattern = /^native\/[^/]+\/manifest\.json$/;
@@ -69,6 +137,9 @@ for (const policy of packages) {
   checkPackageMetadata(policy, packageJson);
   checkNativeArtifactMetadata(policy, packageJson, declaredFiles);
   checkWasmArtifactMetadata(policy, packageJson, declaredFiles);
+  if (policy.name === "@nnrp/browser-client") {
+    await checkBrowserWasmOwnership(policy);
+  }
 
   for (const required of policy.requiredFiles) {
     if (!declaredFiles.includes(required)) {
@@ -88,6 +159,69 @@ for (const policy of packages) {
   }
 }
 
+async function checkBrowserWasmOwnership(policy: PackagePolicy): Promise<void> {
+  const wasmDirectory = `${policy.directory}/wasm`;
+  let wasmFiles: string[];
+  try {
+    wasmFiles = [];
+    for await (const entry of Deno.readDir(wasmDirectory)) {
+      if (entry.isFile && entry.name.endsWith(".wasm")) {
+        wasmFiles.push(entry.name);
+      }
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      failures.push(`${policy.name}: missing wasm artifact directory`);
+      return;
+    }
+    throw error;
+  }
+
+  if (wasmFiles.length !== 1 || wasmFiles[0] !== "nnrp_wasm_bg.wasm") {
+    failures.push(
+      `${policy.name}: expected only the nnrp-wasm-browser binary nnrp_wasm_bg.wasm, found ${
+        wasmFiles.sort().join(", ") || "none"
+      }`,
+    );
+  }
+
+  const manifestPath = `${wasmDirectory}/manifest.json`;
+  try {
+    const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as Record<string, unknown>;
+    if (manifest.artifact !== "nnrp-wasm-browser") {
+      failures.push(`${policy.name}: wasm manifest artifact must be nnrp-wasm-browser`);
+    }
+    if (manifest.wasm !== "nnrp_wasm_bg.wasm") {
+      failures.push(`${policy.name}: wasm manifest must reference nnrp_wasm_bg.wasm`);
+    }
+    if (manifest.glue !== "nnrp_wasm.js") {
+      failures.push(`${policy.name}: wasm manifest must reference nnrp_wasm.js glue`);
+    }
+    try {
+      const glue = await Deno.stat(`${wasmDirectory}/nnrp_wasm.js`);
+      if (!glue.isFile) {
+        failures.push(`${policy.name}: wasm/nnrp_wasm.js must be a file`);
+      }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        failures.push(`${policy.name}: missing wasm/nnrp_wasm.js`);
+      } else {
+        throw error;
+      }
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      failures.push(`${policy.name}: missing wasm/manifest.json`);
+      return;
+    }
+    if (error instanceof SyntaxError) {
+      failures.push(`${policy.name}: wasm/manifest.json is not valid JSON`);
+      return;
+    }
+    throw error;
+  }
+}
+
 function checkNativeArtifactMetadata(
   policy: PackagePolicy,
   packageJson: Record<string, unknown>,
@@ -97,9 +231,9 @@ function checkNativeArtifactMetadata(
     return;
   }
 
-  if (policy.name !== "@nnrp/transport-tcp" && policy.name !== "@nnrp/transport-quic") {
+  if (!NATIVE_TRANSPORT_PACKAGES.has(policy.name)) {
     failures.push(
-      `${policy.name}: native artifact packaging can only be enabled on native TCP/QUIC transport packages`,
+      `${policy.name}: native artifact packaging can only be enabled on native transport packages`,
     );
     return;
   }
@@ -148,10 +282,31 @@ function checkPackageMetadata(policy: PackagePolicy, packageJson: Record<string,
   }
 
   checkKeywords(policy, packageJson.keywords);
+  checkRuntimeTargets(policy, packageJson.nnrp);
   if (isNativeArtifactPackage(policy)) {
     checkNativeArtifactExportMap(policy, packageJson.exports);
   } else {
     checkExportMap(policy, packageJson.exports);
+  }
+}
+
+function checkRuntimeTargets(policy: PackagePolicy, nnrp: unknown): void {
+  if (!nnrp || typeof nnrp !== "object" || Array.isArray(nnrp)) {
+    failures.push(`${policy.name}: package.json nnrp metadata must be an object`);
+    return;
+  }
+  const runtimeTargets = (nnrp as Record<string, unknown>).runtimeTargets;
+  const expected = EXPECTED_RUNTIME_TARGETS[policy.name];
+  if (!Array.isArray(runtimeTargets) || runtimeTargets.some((entry) => typeof entry !== "string")) {
+    failures.push(`${policy.name}: package.json nnrp.runtimeTargets must be a string array`);
+    return;
+  }
+  if (JSON.stringify(runtimeTargets) !== JSON.stringify(expected)) {
+    failures.push(
+      `${policy.name}: package.json nnrp.runtimeTargets must be ${JSON.stringify(expected)}, got ${
+        JSON.stringify(runtimeTargets)
+      }`,
+    );
   }
 }
 

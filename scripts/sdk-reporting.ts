@@ -1,6 +1,4 @@
 import {
-  createBackendNativeManifest,
-  createBrowserWasmManifest,
   createCapabilityManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
@@ -11,6 +9,32 @@ import {
   type NnrpTransportSelectionSummary,
   selectTransport,
 } from "@nnrp/core";
+
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.16";
+const PREVIEW4_RUNTIME_CAPABILITIES = [
+  "cache",
+  "schema",
+  "flow.update",
+  "result.hint",
+  "control.cancel_abort",
+  "control.supersede",
+  "control.priority_update",
+  "control.deadline_expire",
+  "control.progress_partial",
+  "control.credit_backpressure",
+  "control.capability_costs",
+  "control.route_execution_hint",
+  "control.trace_context",
+  "control.result_drop_reason",
+  "control.degrade_profile",
+  "control.budget_update",
+  "control.recoverable_error",
+  "object.lifecycle",
+  "object.delta",
+  "object.cost",
+  "object.ownership",
+  "cache.reference",
+] as const satisfies readonly NnrpCapability[];
 
 export type SdkCommandMode = NnrpBuildMode | "all";
 
@@ -98,18 +122,16 @@ export function createConformanceReport(
     sdk: "nnrp-js",
     generatedAt: new Date().toISOString(),
     buildMode,
-    artifactVersion: options.artifactVersion ?? null,
+    artifactVersion: buildManifest.artifactVersion,
     manifest: buildManifest.manifest,
     transport,
-    cases: [
-      ...buildManifest.manifest.capabilities.map((capability) => ({
-        id: `${buildMode}.${capability}`,
-        status: "passed" as const,
-        capability,
-      })),
-      unavailableArtifactCase(buildMode),
-    ],
-    diagnostics: [adapterDiagnostic(buildMode), unavailableArtifactDiagnostic(buildMode)],
+    cases: buildManifest.manifest.capabilities.map((capability) => ({
+      id: `${buildMode}.${capability}.adapter-contract`,
+      status: "skipped" as const,
+      capability,
+      diagnostic: adapterCapabilityDiagnostic(buildMode, capability),
+    })),
+    diagnostics: [adapterDiagnostic(buildMode)],
   };
 }
 
@@ -124,7 +146,7 @@ export function createBenchmarkReport(
     sdk: "nnrp-js",
     generatedAt: new Date().toISOString(),
     buildMode,
-    artifactVersion: options.artifactVersion ?? null,
+    artifactVersion: buildManifest.artifactVersion,
     manifest: buildManifest.manifest,
     transport,
     results: [
@@ -211,6 +233,17 @@ function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTran
   const candidates = createTransportCandidates({
     local: manifest,
     peer: peerManifest,
+    providers: peerManifest.transports.map((kind) => ({
+      kind,
+      metadata: {
+        id: `nnrp.transport.${kind}.benchmark`,
+        cost: { modelId: 0, units: 0n },
+        preferenceRank: 0,
+        limits: { maxFrameBytes: 67_108_864n },
+        limitations: [],
+      },
+      localAvailable: true,
+    })),
   });
 
   return createTransportSelectionSummary(selectTransport(candidates));
@@ -260,45 +293,39 @@ export function selectBuildModes(mode: SdkCommandMode): readonly NnrpBuildMode[]
 }
 
 export function writeJson(value: unknown): void {
-  console.log(JSON.stringify(value, null, 2));
+  console.log(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString(10) : entry, 2));
 }
 
 function createBuildManifest(buildMode: NnrpBuildMode, options: SdkCommandOptions): SdkBuildManifest {
   return {
     buildMode,
-    artifactVersion: options.artifactVersion ?? null,
-    manifest: buildMode === "backend-native"
-      ? createBackendNativeManifest(["transport.tcp", "transport.quic", "cache", "schema", "recovery"])
-      : createBrowserWasmManifest(["transport.websocket", "cache", "schema"]),
+    artifactVersion: options.artifactVersion ?? DEFAULT_RUST_ARTIFACT_VERSION,
+    manifest: createCapabilityManifest({
+      buildMode,
+      transports: buildMode === "backend-native" ? ["tcp", "quic", "ipc", "websocket"] : ["websocket"],
+      capabilities: buildMode === "backend-native"
+        ? ["client.session", "server.session", "recovery", ...PREVIEW4_RUNTIME_CAPABILITIES]
+        : ["client.session", "wasm.loader", ...PREVIEW4_RUNTIME_CAPABILITIES],
+    }),
   };
 }
 
 function adapterDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic {
   return {
-    code: "NNRP_JS_ADAPTER_SMOKE",
-    message: `${buildMode} adapter report covers manifest-level smoke cases; runtime execution is wired later.`,
+    code: "NNRP_JS_ADAPTER_CONTRACT_ONLY",
+    message:
+      `${buildMode} adapter smoke validates report and manifest shape; runtime wire evidence belongs to the separate wire-conformance harness.`,
     source: "runtime",
     retryable: false,
   };
 }
 
-function unavailableArtifactCase(buildMode: NnrpBuildMode): SdkConformanceCaseResult {
+function adapterCapabilityDiagnostic(buildMode: NnrpBuildMode, capability: NnrpCapability): NnrpDiagnostic {
   return {
-    id: `${buildMode}.artifact-unavailable`,
-    status: "skipped",
-    capability: buildMode === "backend-native" ? "native.loader" : "wasm.loader",
-    diagnostic: unavailableArtifactDiagnostic(buildMode),
-  };
-}
-
-function unavailableArtifactDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic {
-  const native = buildMode === "backend-native";
-  return {
-    code: native ? "NNRP_JS_NATIVE_ARTIFACT_UNAVAILABLE" : "NNRP_JS_WASM_ARTIFACT_UNAVAILABLE",
-    message: native
-      ? "Backend native conformance execution is skipped until the native FFI artifact is connected."
-      : "Browser WASM conformance execution is skipped until the WASM primitive artifact is connected.",
-    source: native ? "native" : "wasm",
+    code: "NNRP_JS_WIRE_CONFORMANCE_NOT_EXECUTED",
+    message:
+      `${buildMode} adapter smoke does not execute ${capability}; use the wire-conformance harness for runtime evidence.`,
+    source: "runtime",
     retryable: false,
   };
 }
@@ -306,7 +333,8 @@ function unavailableArtifactDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic
 function benchmarkDiagnostic(buildMode: NnrpBuildMode): NnrpDiagnostic {
   return {
     code: "NNRP_JS_BENCHMARK_SMOKE",
-    message: `${buildMode} benchmark report is a command-shape smoke until runtime execution is wired.`,
+    message:
+      `${buildMode} command-shape smoke does not execute benchmark workloads; use benchmark:conformance with an execution plan for measured runtime results.`,
     source: "runtime",
     retryable: false,
   };

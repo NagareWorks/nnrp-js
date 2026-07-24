@@ -2,12 +2,11 @@ import { NnrpNativeBindingUnavailableError, openBackendRuntime } from "@nnrp/nat
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const runtime = await openBackendRuntime({
-  nativeLibrary: { artifactDir: "./native" },
   transports: [createTcpTransportProvider()],
-  transportPolicy: "score",
+  transportPolicy: "auto",
 });
 
-const server = runtime.listen({ endpoint: "0.0.0.0:4433" });
+const server = runtime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default" });
 
 try {
   const session = await server.accept();

@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/native-server",
-  "version": "1.0.0-preview.3.5",
+  "version": "1.0.0-preview.4",
   "description": "Node.js and Deno native server SDK for NNRP.",
   "keywords": [
     "nnrp",
@@ -40,15 +40,26 @@
     "@nnrp/core": "workspace:*"
   },
   "peerDependencies": {
+    "@nnrp/transport-ipc": "workspace:*",
     "@nnrp/transport-quic": "workspace:*",
-    "@nnrp/transport-tcp": "workspace:*"
+    "@nnrp/transport-tcp": "workspace:*",
+    "@nnrp/transport-websocket": "workspace:*"
   },
   "peerDependenciesMeta": {
+    "@nnrp/transport-ipc": {
+      "optional": true
+    },
     "@nnrp/transport-quic": {
       "optional": true
     },
     "@nnrp/transport-tcp": {
       "optional": true
+    },
+    "@nnrp/transport-websocket": {
+      "optional": true
     }
+  },
+  "nnrp": {
+    "runtimeTargets": ["node>=20.11", "deno>=2"]
   }
 }

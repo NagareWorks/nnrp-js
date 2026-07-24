@@ -4,16 +4,16 @@ import {
   NnrpProtocolError,
   NnrpTimeoutError,
   NnrpTransportError,
-  normalizeCancelRequest,
   normalizeSubmitRequest,
 } from "@nnrp/core";
 import { NnrpBrowserClientSession } from "@nnrp/browser-client";
 import { NnrpClientSession } from "@nnrp/native-client";
+import { NnrpServerSession } from "@nnrp/native-server";
 
 const failures: string[] = [];
 
 checkSessionMethodParity();
-checkOperationIdNormalization();
+checkServerControlSurface();
 checkBinaryPayloadOwnership();
 checkDiagnosticErrorFamilies();
 
@@ -30,6 +30,26 @@ function checkSessionMethodParity(): void {
     "submit",
     "submitNoWait",
     "cancel",
+    "abort",
+    "updatePriority",
+    "updateDeadline",
+    "expireAt",
+    "supersede",
+    "updateBudget",
+    "negotiateCapabilities",
+    "degradeProfile",
+    "sendRouteHint",
+    "sendExecutionHint",
+    "sendTraceContext",
+    "sendControl",
+    "declareObject",
+    "referenceObject",
+    "releaseObject",
+    "patchObject",
+    "sendObjectDelta",
+    "referenceCache",
+    "reportCacheMiss",
+    "invalidateCache",
     "patch",
     "inFlightFrames",
     "completeEvent",
@@ -50,17 +70,36 @@ function checkSessionMethodParity(): void {
   }
 }
 
-function checkOperationIdNormalization(): void {
-  const largeOperationId = 9_007_199_254_740_993n;
-  const normalized = normalizeCancelRequest(largeOperationId);
-  if (normalized.operation !== largeOperationId) {
-    failures.push("operation ids beyond Number.MAX_SAFE_INTEGER must remain bigint values");
+function checkServerControlSurface(): void {
+  const methods = [
+    "sendProgress",
+    "sendPartialResult",
+    "sendBackpressure",
+    "sendCreditUpdate",
+    "sendResultDropReason",
+    "sendTraceContext",
+    "sendRecoverableError",
+    "sendRetryAfter",
+    "sendControl",
+    "declareObject",
+    "referenceObject",
+    "releaseObject",
+    "patchObject",
+    "sendObjectDelta",
+    "referenceCache",
+    "reportCacheMiss",
+    "invalidateCache",
+  ];
+  for (const method of methods) {
+    if (typeof NnrpServerSession.prototype[method as keyof NnrpServerSession] !== "function") {
+      failures.push(`@nnrp/native-server NnrpServerSession is missing ${method}()`);
+    }
   }
 }
 
 function checkBinaryPayloadOwnership(): void {
   const retained = new Uint8Array([1, 2, 3]);
-  const retainedSubmit = normalizeSubmitRequest({ frameId: 1, payload: retained });
+  const retainedSubmit = normalizeSubmitRequest({ operationId: 1n, frameId: 1, payload: retained });
   retained[0] = 99;
   if (retainedSubmit.payload === retained || retainedSubmit.payload?.[0] !== 1) {
     failures.push("retained submit payloads must be copied by default");
@@ -69,7 +108,7 @@ function checkBinaryPayloadOwnership(): void {
   const buffer = new ArrayBuffer(4);
   const view = new DataView(buffer, 1, 2);
   view.setUint8(0, 7);
-  const viewSubmit = normalizeSubmitRequest({ frameId: 2, payload: view });
+  const viewSubmit = normalizeSubmitRequest({ operationId: 2n, frameId: 2, payload: view });
   view.setUint8(0, 8);
   if (viewSubmit.payload?.[0] !== 7) {
     failures.push("ArrayBufferView submit payloads must be normalized and copied by default");
@@ -77,7 +116,7 @@ function checkBinaryPayloadOwnership(): void {
 
   const transferred = new Uint8Array([4, 5, 6]);
   const transferredSubmit = normalizeSubmitRequest(
-    { frameId: 3, payload: transferred },
+    { operationId: 3n, frameId: 3, payload: transferred },
     { copyPayloads: false },
   );
   if (transferredSubmit.payload !== transferred) {

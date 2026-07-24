@@ -52,6 +52,24 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
       { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
       {
+        label: "transport artifact loader surface",
+        pattern:
+          /\b(?:nativeLibrary|resolveNativeArtifact|resolveNativeLibraryPath|readNativeArtifactManifest|validateNativeArtifactManifest)\b/,
+      },
+      {
+        label: "server accept binding",
+        pattern: /\bNnrpNativeAccept(?:Request|edSession)\b/,
+      },
+      {
+        label: "server receive binding",
+        pattern: /\bNnrpNativeServerReceiveRequest\b/,
+      },
+      {
+        label: "server role class",
+        pattern: /\bclass\s+NnrpServer(?:Session)?\b/,
+      },
+      { label: "server listener method", pattern: /\bpublic\s+listen\s*\(/ },
+      {
         label: "implicit native finalizer",
         pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
       },
@@ -64,6 +82,21 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
       { label: "browser client package import", pattern: /\bfrom\s+["']@nnrp\/browser-client["']/ },
       { label: "browser transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-websocket["']/ },
+      {
+        label: "transport artifact loader surface",
+        pattern:
+          /\b(?:nativeLibrary|resolveNativeArtifact|resolveNativeLibraryPath|readNativeArtifactManifest|validateNativeArtifactManifest)\b/,
+      },
+      { label: "client top-level helper", pattern: /\bexport\s+(?:async\s+)?function\s+openNativeClient\b/ },
+      {
+        label: "client submit binding",
+        pattern: /\bNnrpNativeSubmit(?:ResultCompact|NoWait|Validation)Request\b/,
+      },
+      {
+        label: "client role class",
+        pattern: /\bclass\s+NnrpClient(?:Session)?\b/,
+      },
+      { label: "client connect method", pattern: /\bpublic\s+connect\s*\(/ },
       {
         label: "implicit native finalizer",
         pattern: /\b(?:FinalizationRegistry|WeakRef|Symbol\.dispose|Symbol\.asyncDispose)\b/,
@@ -79,6 +112,11 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
       { label: "native package import", pattern: /\bfrom\s+["']@nnrp\/(?:native|native-client|native-server)["']/ },
       { label: "native transport package import", pattern: /\bfrom\s+["']@nnrp\/transport-(?:tcp|quic)["']/ },
       { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
+      {
+        label: "server role class",
+        pattern: /\bclass\s+NnrpServer(?:Session)?\b/,
+      },
+      { label: "server listener method", pattern: /\bpublic\s+listen\s*\(/ },
     ],
   },
   {
@@ -104,6 +142,18 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
     ],
   },
   {
+    packageName: "@nnrp/transport-ipc",
+    prefix: "packages/transport-ipc/src/",
+    bannedPatterns: [
+      { label: "DOM global", pattern: /\b(?:window|document|navigator|HTMLElement|WebSocket|WebTransport)\b/ },
+      {
+        label: "role package import",
+        pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
+      },
+      { label: "other transport import", pattern: /\bfrom\s+["']@nnrp\/transport-(?:tcp|quic|websocket)["']/ },
+    ],
+  },
+  {
     packageName: "@nnrp/transport-websocket",
     prefix: "packages/transport-websocket/src/",
     bannedPatterns: [
@@ -115,7 +165,6 @@ const packageBoundaryRules: readonly PackageBoundaryRule[] = [
         label: "role package import",
         pattern: /\bfrom\s+["']@nnrp\/(?:native-client|native-server|browser-client)["']/,
       },
-      { label: "native loader surface", pattern: /\b(?:dlopen|ffi|nativeLibrary|NNRP_NATIVE_LIBRARY|process\.env)\b/ },
     ],
   },
 ];
@@ -229,6 +278,12 @@ function checkPackageBoundaryText(path: string, text: string): void {
     }
 
     for (const { label, pattern } of rule.bannedPatterns) {
+      if (
+        path === "packages/transport-websocket/src/native-node.ts" &&
+        (label === "Node built-in import" || label === "dynamic Node built-in import")
+      ) {
+        continue;
+      }
       if (pattern.test(text)) {
         violations.push(`${path}: ${rule.packageName} boundary violation: ${label}`);
       }

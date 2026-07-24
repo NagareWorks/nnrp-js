@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "@nnrp/core": "../packages/core/src/index.ts",
+    "@nnrp/browser-client": "../packages/browser-client/src/index.ts",
+    "@nnrp/transport-websocket": "../packages/transport-websocket/src/browser.ts"
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/transport-tcp",
-  "version": "1.0.0-preview.3.5",
+  "version": "1.0.0-preview.4",
   "description": "TCP transport adapter with native artifacts for NNRP runtimes.",
   "keywords": [
     "nnrp",
@@ -35,13 +35,17 @@
     "dist/index.js",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
+    "dist/native.js",
+    "dist/native-node.js",
     "native/**"
   ],
   "dependencies": {
-    "@nnrp/core": "workspace:*"
+    "@nnrp/core": "workspace:*",
+    "koffi": "3.1.1"
   },
   "nnrp": {
     "transport": "tcp",
+    "runtimeTargets": ["node>=20.11", "deno>=2"],
     "nativeArtifacts": {
       "enabled": true
     }

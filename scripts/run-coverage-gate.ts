@@ -2,8 +2,15 @@ const coverageDir = "artifacts/coverage";
 const lcovPath = `${coverageDir}/lcov.info`;
 const lineThreshold = parseLineThreshold(Deno.args);
 const excludedSources = new Set([
+  "packages/browser-client/src/index.ts",
+  "packages/browser-client/src/wasm-role.ts",
+  "packages/browser-client/wasm/nnrp_wasm.js",
   "packages/native-client/src/index.ts",
   "packages/native-server/src/index.ts",
+  "packages/transport-ipc/src/native.ts",
+  "packages/transport-quic/src/native.ts",
+  "packages/transport-tcp/src/native.ts",
+  "packages/transport-websocket/src/native.ts",
 ]);
 
 await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
@@ -14,13 +21,25 @@ await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
 
 await run(Deno.execPath(), [
   "test",
+  "--unstable-sloppy-imports",
   "--allow-env",
+  "--allow-ffi",
   "--allow-net=127.0.0.1",
   "--allow-read",
   "--allow-write",
   `--coverage=${coverageDir}`,
   "packages/*/test/*.test.ts",
   "scripts/*.test.ts",
+]);
+
+await run(Deno.execPath(), [
+  "run",
+  "--unstable-sloppy-imports",
+  "--allow-ffi",
+  "--allow-net=127.0.0.1",
+  "--allow-read",
+  "--allow-write",
+  "scripts/check-native-transport-loopback.ts",
 ]);
 
 await run(Deno.execPath(), [
@@ -33,7 +52,11 @@ await run(Deno.execPath(), [
 const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath), excludedSources);
 const linePercent = percentage(coverage.lines.hit, coverage.lines.found);
 
-console.log(`Coverage gate excludes native role facade sources: ${[...excludedSources].join(", ")}.`);
+console.log(
+  `Coverage gate excludes role facades, generated WASM glue, and platform FFI adapters covered by real loopback smoke: ${
+    [...excludedSources].join(", ")
+  }.`,
+);
 console.log(
   `Coverage line rate ${linePercent.toFixed(1)}% (${coverage.lines.hit}/${coverage.lines.found}), threshold ${
     lineThreshold.toFixed(1)
@@ -115,8 +138,8 @@ async function run(command: string, args: readonly string[]): Promise<void> {
     stdout: "inherit",
     stderr: "inherit",
   });
-  const status = await child.output();
+  const status = await child.spawn().status;
   if (!status.success) {
-    Deno.exit(status.code);
+    throw new Error(`${command} exited with code ${status.code}`);
   }
 }

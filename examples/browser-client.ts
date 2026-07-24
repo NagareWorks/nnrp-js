@@ -4,7 +4,7 @@ import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 const runtime = await openBrowserRuntime({
   moduleUrl: "/assets/nnrp_wasm_bg.wasm",
   transportProviders: [createWebSocketTransportProvider()],
-  transportPolicy: "score",
+  transportPolicy: "auto",
 });
 
 const client = runtime.connect({
@@ -16,6 +16,7 @@ const session = client.openSession();
 
 try {
   const result = await session.submit({
+    operationId: 1n,
     frameId: 1,
     payload: new TextEncoder().encode("hello"),
     inputProfile: "token",
