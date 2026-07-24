@@ -39,6 +39,8 @@
   - [x] Validate package dependency direction.
   - [x] Validate artifact placement.
   - [x] Validate that every public API snapshot is linked from one frozen workstream.
+  - [x] Preserve multi-commit history only for `develop`-to-`main` integration PRs while validating every commit
+        subject.
 
 ## Acceptance Evidence
 
