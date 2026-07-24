@@ -16,7 +16,11 @@ const serverRuntime = await openBackendRuntime({
   transports: [provider],
   transportPolicy: "force-tcp",
 });
-const server = serverRuntime.listen({ endpoint, providerEndpoint, transportPolicy: "force-tcp" });
+const server = serverRuntime.listen({
+  endpoint,
+  providerEndpoints: { tcp: providerEndpoint },
+  transportPolicy: "force-tcp",
+});
 const accepting = server.accept();
 let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
 let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;

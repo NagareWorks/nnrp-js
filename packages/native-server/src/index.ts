@@ -264,10 +264,8 @@ const EVENT_KIND_SUBMIT_ACCEPTED = 5;
 const EVENT_KIND_RUNTIME_FRAME = 13;
 
 const serverRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (sessionId: string) => Promise<void>>();
-const serverRoleAcceptors = new WeakMap<
-  NnrpBackendRuntime,
-  (request: NnrpNativeAcceptRequest) => Promise<NnrpNativeAcceptedSession>
->();
+const serverAcceptors = new WeakMap<NnrpServer, () => Promise<NnrpNativeAcceptedSession>>();
+const serverClosers = new WeakMap<NnrpServer, () => Promise<void>>();
 const serverRoleEventReceivers = new WeakMap<
   NnrpBackendRuntime,
   (request: NnrpNativeServerReceiveRequest) => Promise<NnrpRuntimeEvent>
@@ -311,6 +309,89 @@ interface InternalServerRole {
   close(): Promise<void>;
 }
 
+interface InternalServerRoleEntry {
+  readonly role: InternalServerRole;
+  pending: Promise<void> | undefined;
+}
+
+interface InternalServerRoleSettlement {
+  readonly session?: InternalServerRoleSession;
+  readonly error?: unknown;
+}
+
+interface InternalServerRoleWaiter {
+  readonly resolve: (session: InternalServerRoleSession) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+class InternalServerRoleGroup implements InternalServerRole {
+  readonly #entries: InternalServerRoleEntry[];
+  readonly #ready: InternalServerRoleSettlement[] = [];
+  readonly #waiters: InternalServerRoleWaiter[] = [];
+  readonly #sessionHandleIds: bigint[] = [];
+  #closed = false;
+
+  public constructor(roles: readonly InternalServerRole[]) {
+    this.#entries = roles.map((role) => ({ role, pending: undefined }));
+  }
+
+  public accept(
+    sessionHandleId: bigint,
+    generation: number,
+    timeoutMillis: number,
+  ): Promise<InternalServerRoleSession> {
+    if (this.#closed) return Promise.reject(closedError("server listener"));
+    this.#sessionHandleIds.push(sessionHandleId);
+    return new Promise((resolve, reject) => {
+      this.#waiters.push({ resolve, reject });
+      this.#drain(generation, timeoutMillis);
+    });
+  }
+
+  public async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    const error = closedError("server listener");
+    for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
+    const readySessions = this.#ready.splice(0).flatMap(({ session }) => session === undefined ? [] : [session]);
+    await Promise.all([
+      ...readySessions.map(async (session) => await session.close()),
+      ...this.#entries.map(async ({ role }) => await role.close()),
+    ]);
+    await Promise.allSettled(this.#entries.flatMap(({ pending }) => pending === undefined ? [] : [pending]));
+  }
+
+  #drain(generation: number, timeoutMillis: number): void {
+    while (this.#waiters.length > 0 && this.#ready.length > 0) {
+      const waiter = this.#waiters.shift()!;
+      const settlement = this.#ready.shift()!;
+      if (settlement.session !== undefined) waiter.resolve(settlement.session);
+      else waiter.reject(settlement.error);
+    }
+    if (this.#waiters.length === 0 || this.#closed) return;
+    for (const entry of this.#entries) {
+      if (entry.pending !== undefined) continue;
+      const handleId = this.#sessionHandleIds.shift() ?? allocateNativeRoleId("session");
+      const pending = entry.role.accept(handleId, generation, timeoutMillis).then(
+        async (session) => {
+          if (this.#closed) {
+            await session.close();
+            return;
+          }
+          this.#ready.push({ session });
+        },
+        (error) => {
+          if (!this.#closed) this.#ready.push({ error });
+        },
+      ).finally(() => {
+        if (entry.pending === pending) entry.pending = undefined;
+        this.#drain(generation, timeoutMillis);
+      });
+      entry.pending = pending;
+    }
+  }
+}
+
 interface InternalServerRoleCarrier {
   [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<InternalServerRole>;
 }
@@ -344,7 +425,7 @@ export interface NnrpNativeRuntimeFrameSendRequest {
 
 export interface NnrpNativeAcceptRequest {
   readonly endpoint: string;
-  readonly providerEndpoint?: string | URL;
+  readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
   readonly security?: NnrpTransportServerSecurity;
   readonly transportPolicy: NnrpTransportPolicy;
 }
@@ -385,7 +466,7 @@ export interface NnrpBackendRuntimeOptions {
 
 export interface NnrpListenOptions {
   readonly endpoint: string | URL;
-  readonly providerEndpoint?: string | URL;
+  readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
   readonly security?: NnrpTransportServerSecurity;
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
@@ -440,11 +521,9 @@ export class NnrpBackendRuntime {
   readonly #transportPolicy: NnrpTransportPolicy;
   readonly #transportProviders: readonly NnrpNativeTransportProvider[];
   #closed = false;
-  readonly #roleServers = new Map<string, Promise<InternalServerRole>>();
+  readonly #roleServers = new Map<object, Promise<InternalServerRole>>();
   readonly #roleSessions = new Map<string, InternalServerRoleSession>();
   readonly #roleOperations = new Map<string, InternalNativeHandle>();
-  readonly #securityIds = new WeakMap<NnrpTransportServerSecurity, number>();
-  #nextSecurityId = 1;
 
   public constructor(
     binding: NnrpNativeRuntimeBinding,
@@ -455,7 +534,6 @@ export class NnrpBackendRuntime {
     this.#transportPolicy = transportPolicy;
     this.#transportProviders = [...transportProviders];
     serverRoleSessionClosers.set(this, (sessionId) => this.#closeRoleSession(sessionId));
-    serverRoleAcceptors.set(this, (request) => this.#acceptServerSession(request));
     serverRoleEventReceivers.set(this, (request) => this.#receiveServerEvent(request));
     serverRoleFrameSenders.set(this, (request) => this.#sendRuntimeFrame(request));
     serverRoleResultSenders.set(this, (sessionOptions, result) => this.#sendServerResult(sessionOptions, result));
@@ -486,17 +564,23 @@ export class NnrpBackendRuntime {
     return session.sendRuntimeFrame(request.messageType, request.frameId, request.payload);
   }
 
-  async #acceptServerSession(request: NnrpNativeAcceptRequest): Promise<NnrpNativeAcceptedSession> {
+  async #acceptServerSession(
+    listenerKey: object,
+    request: NnrpNativeAcceptRequest,
+    providers: readonly NnrpNativeTransportProvider[],
+  ): Promise<NnrpNativeAcceptedSession> {
     this.#ensureOpen();
     const accept = this.#binding.ffi?.accept;
     if (accept !== undefined) {
       return await accept(request) ?? {};
     }
     const server = await this.#roleServer(
+      listenerKey,
       request.endpoint,
-      request.providerEndpoint,
+      request.providerEndpoints,
       request.security,
       request.transportPolicy,
+      providers,
     );
     const nativeSession = await server.accept(allocateNativeRoleId("session"), 1, 0);
     const sessionId = `native-server-session-${nativeSession.handle.id.toString()}`;
@@ -560,14 +644,34 @@ export class NnrpBackendRuntime {
       options.transportPolicy ?? this.#transportPolicy,
     );
 
-    return new NnrpServer({
+    const providers = options.transports ?? this.#transportProviders;
+    const listenerKey = {};
+    const providerEndpoints = copyProviderEndpoints(options.providerEndpoints);
+    const state: NnrpServerState = {
       endpoint: normalizeEndpoint(options.endpoint),
-      ...(options.providerEndpoint === undefined ? {} : { providerEndpoint: options.providerEndpoint }),
+      ...(providerEndpoints === undefined ? {} : { providerEndpoints }),
       ...(options.security === undefined ? {} : { security: options.security }),
       runtime: this,
-      transports: options.transports ?? this.#transportProviders,
+      transports: providers,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
-    });
+    };
+    const server = new NnrpServer(state);
+    serverAcceptors.set(
+      server,
+      () =>
+        this.#acceptServerSession(
+          listenerKey,
+          {
+            endpoint: state.endpoint,
+            ...(state.providerEndpoints === undefined ? {} : { providerEndpoints: state.providerEndpoints }),
+            ...(state.security === undefined ? {} : { security: state.security }),
+            transportPolicy: state.transportPolicy,
+          },
+          providers,
+        ),
+    );
+    serverClosers.set(server, () => this.#closeRoleServer(listenerKey));
+    return server;
   }
 
   public selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary {
@@ -618,36 +722,42 @@ export class NnrpBackendRuntime {
   }
 
   #roleServer(
+    listenerKey: object,
     endpoint: string,
-    providerEndpoint: string | URL | undefined,
+    providerEndpoints: Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined,
     security: NnrpTransportServerSecurity | undefined,
     policy: NnrpTransportPolicy,
+    providers: readonly NnrpNativeTransportProvider[],
   ): Promise<InternalServerRole> {
-    const key = `${policy}:${endpoint}:${providerEndpoint ?? ""}:${this.#securityIdentity(security)}`;
-    let server = this.#roleServers.get(key);
+    let server = this.#roleServers.get(listenerKey);
     if (server !== undefined) return server;
-    server = listenServerRole(
+    server = listenServerRoles(
       endpoint,
-      providerEndpoint,
+      providerEndpoints,
       security,
-      this.#transportProviders,
+      providers,
       policy,
       allocateNativeRoleId("connection"),
     );
-    this.#roleServers.set(key, server);
+    this.#roleServers.set(listenerKey, server);
     void server.catch(() => {
-      if (this.#roleServers.get(key) === server) this.#roleServers.delete(key);
+      if (this.#roleServers.get(listenerKey) === server) this.#roleServers.delete(listenerKey);
     });
     return server;
   }
 
-  #securityIdentity(security: NnrpTransportServerSecurity | undefined): number {
-    if (security === undefined) return 0;
-    let identity = this.#securityIds.get(security);
-    if (identity !== undefined) return identity;
-    identity = this.#nextSecurityId++;
-    this.#securityIds.set(security, identity);
-    return identity;
+  async #closeRoleServer(listenerKey: object): Promise<void> {
+    const server = this.#roleServers.get(listenerKey);
+    this.#roleServers.delete(listenerKey);
+    if (server === undefined) return;
+    let role: InternalServerRole;
+    try {
+      role = await server;
+    } catch {
+      // A failed atomic open has already closed every listener it created.
+      return;
+    }
+    await role.close();
   }
 
   #createTransportCandidates(options: NnrpTransportSelectionOptions): readonly NnrpTransportCandidate[] {
@@ -723,14 +833,38 @@ function validateTransportProvidersForPolicy(
     });
   }
 
+  const duplicateKind = providers.find((provider, index) =>
+    providers.findIndex((candidate) => candidate.kind === provider.kind) !== index
+  )?.kind;
+  if (duplicateKind !== undefined) {
+    throw new NnrpTransportError({
+      code: "NNRP_NATIVE_TRANSPORT_PROVIDER_DUPLICATE",
+      message: `Only one ${duplicateKind} provider can own a carrier listener in one logical server.`,
+      source: "transport",
+      retryable: false,
+      transport: duplicateKind,
+    });
+  }
+
   const forcedKind = forcedTransportKind(policy);
-  if (forcedKind !== undefined && !providers.some((provider) => provider.kind === forcedKind)) {
+  if (
+    forcedKind !== undefined &&
+    !providers.some((provider) => provider.kind === forcedKind && provider.localAvailable)
+  ) {
     throw new NnrpTransportError({
       code: "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED",
-      message: `${policy} transport policy requires an installed or explicit ${forcedKind} provider.`,
+      message: `${policy} transport policy requires an available installed or explicit ${forcedKind} provider.`,
       source: "transport",
       retryable: false,
       transport: forcedKind,
+    });
+  }
+  if (forcedKind === undefined && !providers.some((provider) => provider.localAvailable)) {
+    throw new NnrpCapabilityError({
+      code: "NNRP_NATIVE_TRANSPORT_PROVIDER_UNAVAILABLE",
+      message: "At least one native transport provider must be locally available for listen.",
+      source: "transport",
+      retryable: false,
     });
   }
 }
@@ -739,47 +873,56 @@ function forcedTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | u
   return policy.startsWith("force-") ? policy.slice("force-".length) as NnrpTransportKind : undefined;
 }
 
-async function listenServerRole(
+async function listenServerRoles(
   endpoint: string,
-  providerEndpoint: string | URL | undefined,
+  providerEndpoints: Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined,
   security: NnrpTransportServerSecurity | undefined,
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
-  serverId: bigint,
+  firstServerId: bigint,
 ): Promise<InternalServerRole> {
-  const provider = selectServerProvider(providers, policy);
-  const listener = await provider.listen({
-    endpoint: resolveProviderEndpoint(endpoint, provider.kind, providerEndpoint),
-    ...(security === undefined ? {} : { security }),
-  });
-  const adoption = (listener as NnrpTransportServer & Partial<InternalServerRoleCarrier>)[SERVER_ROLE_ADOPT];
-  if (typeof adoption !== "function") {
-    await listener.close();
-    throw new NnrpCapabilityError({
-      code: "NNRP_NATIVE_ROLE_ADOPTION_UNAVAILABLE",
-      message: `${provider.kind} provider does not expose its package-owned server role adoption path.`,
-      source: "native",
-      retryable: false,
-      transport: provider.kind,
-    });
-  }
+  const roles: InternalServerRole[] = [];
+  let nextServerId = firstServerId;
   try {
-    return await adoption.call(listener, serverId, 1);
+    for (const provider of orderedServerProviders(providers, policy)) {
+      const listener = await provider.listen({
+        endpoint: resolveProviderEndpoint(endpoint, provider.kind, providerEndpoints?.[provider.kind]),
+        ...(security === undefined ? {} : { security }),
+      });
+      const adoption = (listener as NnrpTransportServer & Partial<InternalServerRoleCarrier>)[SERVER_ROLE_ADOPT];
+      if (typeof adoption !== "function") {
+        await listener.close();
+        throw new NnrpCapabilityError({
+          code: "NNRP_NATIVE_ROLE_ADOPTION_UNAVAILABLE",
+          message: `${provider.kind} provider does not expose its package-owned server role adoption path.`,
+          source: "native",
+          retryable: false,
+          transport: provider.kind,
+        });
+      }
+      try {
+        roles.push(await adoption.call(listener, nextServerId, 1));
+      } catch (error) {
+        await listener.close();
+        throw error;
+      }
+      nextServerId = allocateNativeRoleId("connection");
+    }
+    return new InternalServerRoleGroup(roles);
   } catch (error) {
-    await listener.close();
+    await Promise.allSettled(roles.map(async (role) => await role.close()));
     throw error;
   }
 }
 
-function selectServerProvider(
+function orderedServerProviders(
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
-): NnrpNativeTransportProvider {
+): readonly NnrpNativeTransportProvider[] {
   const available = providers.filter((provider) => provider.localAvailable);
   const forced = forcedTransportKind(policy);
   if (forced !== undefined) {
-    const selected = available.find((provider) => provider.kind === forced);
-    if (selected !== undefined) return selected;
+    return available.filter((provider) => provider.kind === forced);
   }
   const preferred = policy.startsWith("prefer-") ? policy.slice("prefer-".length) as NnrpTransportKind : undefined;
   return [...available].sort((left, right) => {
@@ -787,10 +930,45 @@ function selectServerProvider(
       if (left.kind === preferred) return -1;
       if (right.kind === preferred) return 1;
     }
-    return left.metadata.preferenceRank - right.metadata.preferenceRank;
-  })[0] ?? (() => {
-    throw bindingNotConnectedError("transportSelection");
-  })();
+    return left.metadata.preferenceRank - right.metadata.preferenceRank ||
+      transportKindOrder(left.kind) - transportKindOrder(right.kind) ||
+      left.metadata.id.localeCompare(right.metadata.id);
+  });
+}
+
+function transportKindOrder(kind: NnrpTransportKind): number {
+  switch (kind) {
+    case "quic":
+      return 1;
+    case "tcp":
+      return 2;
+    case "ipc":
+      return 3;
+    case "websocket":
+      return 4;
+  }
+}
+
+function copyProviderEndpoints(
+  providerEndpoints: Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined,
+): Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined {
+  if (providerEndpoints === undefined) return undefined;
+  const kinds = ["tcp", "quic", "ipc", "websocket"] as const;
+  const unknownKind = Object.keys(providerEndpoints).find((kind) => !kinds.includes(kind as NnrpTransportKind));
+  if (unknownKind !== undefined) {
+    throw new NnrpProtocolError({
+      code: "NNRP_PROVIDER_ENDPOINT_KIND_INVALID",
+      message: `Unknown server provider endpoint kind ${unknownKind}.`,
+      source: "transport",
+      retryable: false,
+    });
+  }
+  const copy: Partial<Record<NnrpTransportKind, string | URL>> = {};
+  for (const kind of kinds) {
+    const endpoint = providerEndpoints[kind];
+    if (endpoint !== undefined) copy[kind] = endpoint instanceof URL ? new URL(endpoint.toString()) : endpoint;
+  }
+  return copy;
 }
 
 function decodeServerSubmitEvent(event: InternalRoleEvent, sessionId: string): NnrpRuntimeEvent {
@@ -997,7 +1175,7 @@ const RUNTIME_OBJECT_EVENT_MAPPINGS: Readonly<
 
 export interface NnrpServerState {
   readonly endpoint: string;
-  readonly providerEndpoint?: string | URL;
+  readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
   readonly security?: NnrpTransportServerSecurity;
   readonly runtime: NnrpBackendRuntime;
   readonly transports: readonly NnrpNativeTransportProvider[];
@@ -1006,6 +1184,7 @@ export interface NnrpServerState {
 
 export class NnrpServer {
   readonly #state: NnrpServerState;
+  readonly #sessions = new Set<NnrpServerSession>();
   #closed = false;
 
   public constructor(state: NnrpServerState) {
@@ -1027,24 +1206,28 @@ export class NnrpServer {
       return Promise.reject(error);
     }
 
-    const accept = serverRoleAcceptors.get(this.#state.runtime);
+    const accept = serverAcceptors.get(this);
     if (accept === undefined) return Promise.reject(bindingNotConnectedError("accept"));
-    return accept({
-      endpoint: this.#state.endpoint,
-      ...(this.#state.providerEndpoint === undefined ? {} : { providerEndpoint: this.#state.providerEndpoint }),
-      ...(this.#state.security === undefined ? {} : { security: this.#state.security }),
-      transportPolicy: this.#state.transportPolicy,
-    }).then((accepted) =>
-      new NnrpServerSession({
+    return accept().then(async (accepted) => {
+      const session = new NnrpServerSession({
         runtime: this.#state.runtime,
         options: accepted.sessionOptions ?? {},
-      })
-    );
+      });
+      if (this.closed) {
+        await session.close();
+        throw closedError("server");
+      }
+      this.#sessions.add(session);
+      return session;
+    });
   }
 
-  public close(): Promise<void> {
+  public async close(): Promise<void> {
+    if (this.#closed) return;
     this.#closed = true;
-    return Promise.resolve();
+    await Promise.all([...this.#sessions].map(async (session) => await session.close()));
+    this.#sessions.clear();
+    await serverClosers.get(this)?.();
   }
 
   public get closed(): boolean {

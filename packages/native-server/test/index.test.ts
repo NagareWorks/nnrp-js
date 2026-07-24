@@ -14,6 +14,7 @@ import {
   NnrpProtocolError,
   type NnrpTransportEndpoint,
   NnrpTransportError,
+  type NnrpTransportKind,
   type NnrpTransportServer,
   ObjectReleaseReason,
   OwnershipHint,
@@ -23,6 +24,7 @@ import {
 import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   type NnrpNativeRuntimeCapabilities,
+  type NnrpNativeTransportProvider,
   openBackendRuntime,
   validateNativeRuntimeCapabilities,
 } from "../src/index.ts";
@@ -136,6 +138,26 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
 
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_TRANSPORT_POLICY_UNSATISFIED");
   assertEquals(error.diagnostic.transport, "quic");
+
+  const endpointError = assertThrows(
+    () =>
+      runtime.listen({
+        endpoint: "nnrp://0.0.0.0:4433/session/default",
+        providerEndpoints: { udp: "127.0.0.1:4433" } as never,
+      }),
+    NnrpProtocolError,
+  );
+  assertEquals(endpointError.diagnostic.code, "NNRP_PROVIDER_ENDPOINT_KIND_INVALID");
+
+  const duplicateRuntime = await openBackendRuntime({
+    transports: [fakeRoleProvider("tcp"), fakeRoleProvider("tcp")],
+  });
+  const duplicateError = assertThrows(
+    () => duplicateRuntime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default" }),
+    NnrpTransportError,
+  );
+  assertEquals(duplicateError.diagnostic.code, "NNRP_NATIVE_TRANSPORT_PROVIDER_DUPLICATE");
+  await duplicateRuntime.close();
 });
 
 Deno.test("@nnrp/native-server passes server security to the selected provider role listener", async () => {
@@ -176,7 +198,7 @@ Deno.test("@nnrp/native-server passes server security to the selected provider r
   });
   const server = runtime.listen({
     endpoint: "nnrps://runtime.example/session/default",
-    providerEndpoint: "127.0.0.1:45443",
+    providerEndpoints: { quic: "127.0.0.1:45443" },
     security,
   });
   const session = await server.accept();
@@ -184,6 +206,73 @@ Deno.test("@nnrp/native-server passes server security to the selected provider r
   assertEquals(listened, { endpoint: "127.0.0.1:45443", security });
   await session.close();
   await server.close();
+  await runtime.close();
+});
+
+Deno.test("@nnrp/native-server opens every eligible listener and preserves preference order", async () => {
+  const listened: NnrpTransportKind[] = [];
+  const accepted: NnrpTransportKind[] = [];
+  const closed: NnrpTransportKind[] = [];
+  const runtime = await openBackendRuntime({
+    transports: [
+      fakeRoleProvider("tcp", { listened, accepted, closed, preferenceRank: 1 }),
+      fakeRoleProvider("quic", { listened, accepted, closed, preferenceRank: 100 }),
+    ],
+    transportPolicy: "prefer-quic",
+  });
+  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+
+  const first = await server.accept();
+  const second = await server.accept();
+
+  assertEquals(listened, ["quic", "tcp"]);
+  assertEquals(accepted, ["quic", "tcp"]);
+  assertEquals(first.sessionId, "native-server-session-1");
+  assertEquals(second.sessionId, "native-server-session-2");
+
+  await server.close();
+  assertEquals(first.closed, true);
+  assertEquals(second.closed, true);
+  assertEquals(closed, ["quic", "tcp"]);
+  await runtime.close();
+  assertEquals(closed, ["quic", "tcp"]);
+});
+
+Deno.test("@nnrp/native-server rolls back an atomic listener set when one provider fails", async () => {
+  const closed: NnrpTransportKind[] = [];
+  const runtime = await openBackendRuntime({
+    transports: [
+      fakeRoleProvider("tcp", { closed, preferenceRank: 1 }),
+      fakeRoleProvider("quic", { closeError: new Error("quic listen failed"), preferenceRank: 2 }),
+    ],
+  });
+  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+
+  await assertRejects(() => server.accept(), Error, "quic listen failed");
+  assertEquals(closed, ["tcp"]);
+
+  await server.close();
+  await runtime.close();
+});
+
+Deno.test("@nnrp/native-server force policy opens only the named eligible listener", async () => {
+  const listened: NnrpTransportKind[] = [];
+  const closed: NnrpTransportKind[] = [];
+  const runtime = await openBackendRuntime({
+    transports: [
+      fakeRoleProvider("tcp", { listened, closed }),
+      fakeRoleProvider("quic", { listened, closed }),
+    ],
+  });
+  const server = runtime.listen({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transportPolicy: "force-tcp",
+  });
+
+  await server.accept();
+  assertEquals(listened, ["tcp"]);
+  await server.close();
+  assertEquals(closed, ["tcp"]);
   await runtime.close();
 });
 
@@ -720,6 +809,65 @@ function roleSubmitEvent(operationId: bigint, frameId: number) {
     ...roleRuntimeEvent(NnrpMessageType.FrameSubmit, payload),
     kind: 5,
     frameId,
+  };
+}
+
+function fakeRoleProvider(
+  kind: Extract<NnrpTransportKind, "tcp" | "quic">,
+  options: {
+    readonly listened?: NnrpTransportKind[];
+    readonly accepted?: NnrpTransportKind[];
+    readonly closed?: NnrpTransportKind[];
+    readonly closeError?: Error;
+    readonly preferenceRank?: number;
+  } = {},
+): NnrpNativeTransportProvider {
+  return {
+    kind,
+    endpointSchemes: ["nnrp", "nnrps"],
+    localAvailable: true,
+    metadata: {
+      id: `test-${kind}`,
+      cost: { modelId: 0, units: 0n },
+      preferenceRank: options.preferenceRank ?? 0,
+      limits: { maxFrameBytes: 64n * 1024n * 1024n },
+      limitations: [],
+    },
+    probe: () =>
+      Promise.resolve({
+        sampleCount: 1,
+        successCount: 1,
+        medianRttMicroseconds: 1n,
+        medianThroughputBytesPerSecond: 1n,
+      }),
+    listen: ({ endpoint }) => {
+      options.listened?.push(kind);
+      if (options.closeError !== undefined) return Promise.reject(options.closeError);
+      return Promise.resolve({
+        kind,
+        endpoint: String(endpoint),
+        listening: true,
+        accept: () => Promise.reject(new Error("carrier accept must be transferred to the server role")),
+        close: () => {},
+        [SERVER_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            accept: () => {
+              options.accepted?.push(kind);
+              return Promise.resolve({
+                handle: { kind: 3, id: kind === "quic" ? 1n : 2n, generation: 1, flags: 0 },
+                poll: () => Promise.resolve([]),
+                sendResult: () => Promise.resolve(),
+                sendRuntimeFrame: () => Promise.resolve(),
+                close: () => Promise.resolve(),
+              });
+            },
+            close: () => {
+              options.closed?.push(kind);
+              return Promise.resolve();
+            },
+          }),
+      } as NnrpTransportServer);
+    },
   };
 }
 

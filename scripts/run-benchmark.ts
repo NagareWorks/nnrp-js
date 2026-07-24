@@ -294,7 +294,7 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
   });
   const server = serverRuntime.listen({
     endpoint: "nnrp://localhost/benchmark-browser",
-    providerEndpoint,
+    providerEndpoints: { websocket: providerEndpoint },
     transportPolicy: "force-websocket",
   });
   const accepting = server.accept();
@@ -343,7 +343,11 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   const policy = `force-${transport}` as const;
   const endpoint = `nnrp://localhost/benchmark-${transport}`;
   const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: policy });
-  const server = serverRuntime.listen({ endpoint, providerEndpoint, transportPolicy: policy });
+  const server = serverRuntime.listen({
+    endpoint,
+    providerEndpoints: { [transport]: providerEndpoint },
+    transportPolicy: policy,
+  });
   const accepting = server.accept();
   await delay(25);
   const client = await openNativeClient({

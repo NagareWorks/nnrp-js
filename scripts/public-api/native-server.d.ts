@@ -21,7 +21,7 @@ export interface NnrpNativeRuntimeFrameSendRequest {
 }
 export interface NnrpNativeAcceptRequest {
     readonly endpoint: string;
-    readonly providerEndpoint?: string | URL;
+    readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
     readonly security?: NnrpTransportServerSecurity;
     readonly transportPolicy: NnrpTransportPolicy;
 }
@@ -54,7 +54,7 @@ export interface NnrpBackendRuntimeOptions {
 }
 export interface NnrpListenOptions {
     readonly endpoint: string | URL;
-    readonly providerEndpoint?: string | URL;
+    readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
     readonly security?: NnrpTransportServerSecurity;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
@@ -93,7 +93,7 @@ export declare class NnrpBackendRuntime {
 }
 export interface NnrpServerState {
     readonly endpoint: string;
-    readonly providerEndpoint?: string | URL;
+    readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
     readonly security?: NnrpTransportServerSecurity;
     readonly runtime: NnrpBackendRuntime;
     readonly transports: readonly NnrpNativeTransportProvider[];

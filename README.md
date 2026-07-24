@@ -79,9 +79,9 @@ three roles.
 ## Endpoints
 
 Role APIs receive an NNRP application endpoint such as `nnrp://host:4433/session/default`. A carrier-local endpoint is
-separate and optional: TCP/QUIC can derive one, while IPC (`unix://`, `npipe://`) and WebSocket (`ws://`, `wss://`)
-require an explicit `providerEndpoint` when the application endpoint cannot determine it. Provider-local addresses are
-never serialized into operation payloads.
+separate: clients use one optional `providerEndpoint`, while server listener sets use `providerEndpoints` keyed by
+transport kind. TCP/QUIC can derive a locator; IPC (`unix://`, `npipe://`) and WebSocket (`ws://`, `wss://`) require an
+explicit locator. Provider-local addresses are never serialized into operation payloads.
 
 ## Runtime Surface
 

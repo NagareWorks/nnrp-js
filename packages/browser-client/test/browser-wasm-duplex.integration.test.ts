@@ -19,7 +19,7 @@ Deno.test({
     });
     const server = serverRuntime.listen({
       endpoint: "nnrp://127.0.0.1/browser-wasm-duplex",
-      providerEndpoint,
+      providerEndpoints: { websocket: providerEndpoint },
       transportPolicy: "force-websocket",
     });
     const accepting = server.accept();

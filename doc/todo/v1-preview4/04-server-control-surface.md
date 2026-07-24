@@ -32,10 +32,10 @@
   - [x] Validate message direction before dispatch.
   - [x] Validate body/diagnostic length before dispatch.
   - [x] Map native status and diagnostics to typed errors.
-- [ ] Keep listener lifecycle provider-neutral.
-  - [ ] The server role receives a selected provider from `@nnrp/core` policy resolution.
+- [x] Keep listener lifecycle provider-neutral.
+  - [x] `auto` and `prefer-*` open every eligible installed provider listener without synthetic peer probes.
   - [x] The server role does not import provider implementation internals.
-  - [x] Forced and automatic provider selection use the same listener lifecycle.
+  - [x] `force-*` restricts the same atomic listener lifecycle to the named provider.
 - [x] Bind the selected provider listener to the native server role runtime.
   - [x] Transfer listener ownership inside the same transport-scoped library.
   - [x] Accept a real carrier connection and complete `SESSION_OPEN` handling in Rust.
@@ -45,7 +45,7 @@
 
 ## Acceptance Evidence
 
-- [x] Server tests cover every receive and send method.
+- [x] Server tests cover every receive and send method plus multi-listener ordering, rollback, and ownership.
 - [x] State-machine tests cover partial, terminal, duplicate-terminal, and post-terminal behavior.
 - [x] Direction tests reject client-only messages from server send helpers.
 - [x] Public API snapshot `scripts/public-api/native-server.d.ts` matches the frozen JavaScript server page in

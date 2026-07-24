@@ -239,7 +239,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
   });
   const server = serverRuntime.listen({
     endpoint: options.endpoint,
-    providerEndpoint: options.providerEndpoint,
+    providerEndpoints: { [options.provider.kind]: options.providerEndpoint },
     transportPolicy: options.policy,
     ...(options.security === undefined ? {} : { security: options.security.server }),
   });
