@@ -72,3 +72,16 @@ Deno.test("publish automation stages dependency order and rejects mismatched exi
   assertStringIncludes(publishPackages, 'stderr.includes("E404")');
   assertStringIncludes(publishPackages, "npm registry inspection failed");
 });
+
+Deno.test("trusted publishing applies one canonical tag and verifies it after every package exists", () => {
+  const publishLoopIndex = publishPackages.indexOf("for (const entry of publicationPlan)");
+  const verifyPackagesIndex = publishPackages.indexOf("await verifyPublishedPackages(stagedPackages)");
+  const verifyTagsIndex = publishPackages.indexOf("await verifyDistTags(stagedPackages");
+  assertEquals(publishLoopIndex >= 0, true);
+  assertEquals(verifyPackagesIndex > publishLoopIndex, true);
+  assertEquals(verifyTagsIndex > verifyPackagesIndex, true);
+  assertStringIncludes(publishPackages, '"--tag",\n    options.tag');
+  assertStringIncludes(publishPackages, "Additional npm dist-tags cannot be assigned during Trusted Publishing.");
+  assertStringIncludes(releaseWorkflow, 'args=(--tag "$NPM_TAG")');
+  assertEquals(releaseWorkflow.includes("NPM_TOKEN"), false);
+});

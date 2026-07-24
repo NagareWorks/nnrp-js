@@ -125,7 +125,10 @@ Preview package versions are synchronized across the role, transport, and core p
 
 The release workflow uses npm Trusted Publishing with GitHub OIDC. Configure trusted publishers for all npm packages
 with repository `NagareWorks/nnrp-js`, workflow `release.yml`, and GitHub environment `npm`; no `NPM_TOKEN` secret is
-required for the default path.
+required for the default path. A release selects one canonical npm dist-tag. Each new package version receives that tag
+through `npm publish --tag`, and the workflow verifies the tag across the complete package set only after every version
+exists. Trusted Publishing does not authorize post-publish `npm dist-tag` mutations, so reruns fail explicitly rather
+than falling back to a long-lived token when an existing version has a different tag.
 
 TCP, QUIC, IPC, and WebSocket transport packages each bundle their own supported native platform artifacts. Role
 packages contain no native libraries. The browser client is the only package carrying browser WASM; the WebSocket
