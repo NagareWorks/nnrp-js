@@ -11,6 +11,7 @@ import {
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
+  encodeRuntimeObjectMetadataSegments,
   NNRP_PROTOCOL_VERSION,
   type NnrpAbortSignalLike,
   NnrpCapabilityError,
@@ -785,12 +786,20 @@ export class NnrpBrowserClientSession {
     return this.#sendRuntimeObject(NnrpMessageType.ObjectRelease, metadata, diagnostic);
   }
 
-  public patchObject(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void> {
-    return this.#sendRuntimeObject(NnrpMessageType.ObjectPatch, metadata, delta);
+  public patchObject(
+    metadata: ObjectDeltaMetadata,
+    delta: Uint8Array,
+    metadataBody: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectPatch, metadata, delta, metadataBody);
   }
 
-  public sendObjectDelta(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void> {
-    return this.#sendRuntimeObject(NnrpMessageType.ObjectDelta, metadata, delta);
+  public sendObjectDelta(
+    metadata: ObjectDeltaMetadata,
+    delta: Uint8Array,
+    metadataBody: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    return this.#sendRuntimeObject(NnrpMessageType.ObjectDelta, metadata, delta, metadataBody);
   }
 
   public referenceCache(metadata: CacheReferenceMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
@@ -1244,10 +1253,13 @@ export class NnrpBrowserClientSession {
     messageType: NnrpMessageType,
     metadata: RuntimeObjectSendMetadata,
     tail: Uint8Array,
+    metadataBody?: Uint8Array,
   ): Promise<void> {
     const send = this.#runtimeObjectQueue.then(async () => {
       this.#runtimeObjects.validate(messageType, metadata);
-      const payload = encodeRuntimeObjectMetadata(messageType, metadata, tail);
+      const payload = metadataBody === undefined
+        ? encodeRuntimeObjectMetadata(messageType, metadata, tail)
+        : encodeRuntimeObjectMetadataSegments(messageType, metadata, [metadataBody, tail]);
       await this.#sendRuntimeFrame(messageType, payload);
       this.#runtimeObjects.commit(messageType, metadata);
     });

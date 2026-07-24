@@ -134,8 +134,8 @@ export declare class NnrpBrowserClientSession {
     declareObject(metadata: ObjectDescriptorMetadata, body?: Uint8Array): Promise<void>;
     referenceObject(metadata: ObjectReferenceMetadata, body?: Uint8Array): Promise<void>;
     releaseObject(metadata: ObjectReleaseMetadata, diagnostic?: Uint8Array): Promise<void>;
-    patchObject(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void>;
-    sendObjectDelta(metadata: ObjectDeltaMetadata, delta: Uint8Array): Promise<void>;
+    patchObject(metadata: ObjectDeltaMetadata, delta: Uint8Array, metadataBody?: Uint8Array): Promise<void>;
+    sendObjectDelta(metadata: ObjectDeltaMetadata, delta: Uint8Array, metadataBody?: Uint8Array): Promise<void>;
     referenceCache(metadata: CacheReferenceMetadata, body?: Uint8Array): Promise<void>;
     reportCacheMiss(metadata: CacheMissMetadata, diagnostic?: Uint8Array): Promise<void>;
     invalidateCache(metadata: CacheInvalidateMetadata): Promise<void>;

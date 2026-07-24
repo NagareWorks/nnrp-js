@@ -351,12 +351,46 @@ Deno.test({
         regionBytes: 2,
         deltaBytes: 2,
         flags: 0,
-        metadataBytes: 0,
+        metadataBytes: 1,
       } as const;
-      await session.patchObject(delta, new Uint8Array([11, 12]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-patch");
-      await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, new Uint8Array([13, 14]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-delta");
+      await session.patchObject(delta, new Uint8Array([11, 12]), new Uint8Array([21]));
+      const patch = await serverSession.receive({ timeoutMillis: 5_000 });
+      assertEquals(patch.type, "object-patch");
+      if (patch.type === "object-patch") {
+        assertEquals(patch.metadataBody, new Uint8Array([21]));
+        assertEquals(patch.delta, new Uint8Array([11, 12]));
+      }
+      await session.sendObjectDelta(
+        { ...delta, deltaSequence: 3n },
+        new Uint8Array([13, 14]),
+        new Uint8Array([22]),
+      );
+      const objectDelta = await serverSession.receive({ timeoutMillis: 5_000 });
+      assertEquals(objectDelta.type, "object-delta");
+      if (objectDelta.type === "object-delta") {
+        assertEquals(objectDelta.metadataBody, new Uint8Array([22]));
+        assertEquals(objectDelta.delta, new Uint8Array([13, 14]));
+      }
+      await assertRejects(
+        () =>
+          session.patchObject(
+            { ...delta, deltaSequence: 4n },
+            new Uint8Array(),
+            new Uint8Array([23, 24]),
+          ),
+        Error,
+        "metadataBody declares 1 bytes but received 2",
+      );
+      await assertRejects(
+        () =>
+          session.patchObject(
+            { ...delta, deltaSequence: 4n, deltaBytes: 3 },
+            new Uint8Array([15, 16]),
+            new Uint8Array([23]),
+          ),
+        Error,
+        "delta declares 3 bytes but received 2",
+      );
 
       await session.referenceCache({
         cacheNamespace: 5,

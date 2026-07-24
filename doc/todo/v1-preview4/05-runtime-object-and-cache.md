@@ -6,8 +6,8 @@
   - [x] `declareObject(metadata, body?)`.
   - [x] `referenceObject(metadata, body?)`.
   - [x] `releaseObject(metadata, diagnostic?)`.
-  - [x] `patchObject(metadata, delta)`.
-  - [x] `sendObjectDelta(metadata, delta)`.
+  - [x] `patchObject(metadata, delta, metadataBody?)` with `metadataBody || delta` wire ordering.
+  - [x] `sendObjectDelta(metadata, delta, metadataBody?)` with independent declared-length validation.
   - [x] `referenceCache(metadata, body?)`.
   - [x] `reportCacheMiss(metadata, diagnostic?)`.
   - [x] `invalidateCache(metadata)`.
@@ -45,6 +45,8 @@
 ## Acceptance Evidence
 
 - [x] Lifecycle tests cover declare, ref, patch/delta, release, cancellation, and supersession.
+- [x] Patch/delta tests cover ordered metadata and delta tails, equal-total swapped segments, and independent length
+      errors.
 - [x] Cache tests cover hit-reference, miss, invalidate, lease expiry, and no-implicit-lookup behavior.
 - [x] Structured-clone tests cover every public object/cache type.
 - [x] Public API snapshots match the frozen JavaScript client, server, and runtime pages in `nnrp-doc`.

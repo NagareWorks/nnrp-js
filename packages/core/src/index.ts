@@ -1149,23 +1149,74 @@ export function encodeRuntimeObjectMetadata(
   metadata: RuntimeObjectMetadata,
   tail: Uint8Array = new Uint8Array(),
 ): Uint8Array {
+  return encodeRuntimeObjectMetadataTailSegments(messageType, metadata, [tail], false);
+}
+
+export function encodeRuntimeObjectMetadataSegments(
+  messageType: NnrpMessageType,
+  metadata: RuntimeObjectMetadata,
+  tailSegments: readonly Uint8Array[],
+): Uint8Array {
+  return encodeRuntimeObjectMetadataTailSegments(messageType, metadata, tailSegments, true);
+}
+
+function encodeRuntimeObjectMetadataTailSegments(
+  messageType: NnrpMessageType,
+  metadata: RuntimeObjectMetadata,
+  tailSegments: readonly Uint8Array[],
+  validateSemanticSegments: boolean,
+): Uint8Array {
   const layout = getRuntimeObjectLayout(messageType);
-  if (!(tail instanceof Uint8Array)) {
-    throw runtimeObjectError("NNRP_OBJECT_TAIL_INVALID", "Runtime object tail must be a Uint8Array.");
+  if (!Array.isArray(tailSegments)) {
+    throw runtimeObjectError("NNRP_OBJECT_TAIL_INVALID", "Runtime object tail segments must be an array.");
+  }
+
+  let tailBytes = 0;
+  for (const segment of tailSegments) {
+    if (!(segment instanceof Uint8Array)) {
+      throw runtimeObjectError("NNRP_OBJECT_TAIL_INVALID", "Every runtime object tail segment must be a Uint8Array.");
+    }
+    tailBytes += segment.byteLength;
   }
 
   validateRuntimeObjectMetadata(layout, metadata);
-  const ownedTail = tail.slice();
-  validateRuntimeObjectTail(layout, metadata, ownedTail.byteLength);
+  if (
+    validateSemanticSegments &&
+    (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta)
+  ) {
+    if (tailSegments.length !== 2) {
+      throw runtimeObjectError(
+        "NNRP_OBJECT_TAIL_INVALID",
+        "Object patch and delta segmented tails require [metadataBody, delta].",
+      );
+    }
+    const deltaMetadata = metadata as ObjectDeltaMetadata;
+    validateRuntimeObjectTailSegment("metadataBody", deltaMetadata.metadataBytes, tailSegments[0]);
+    validateRuntimeObjectTailSegment("delta", deltaMetadata.deltaBytes, tailSegments[1]);
+  }
+  validateRuntimeObjectTail(layout, metadata, tailBytes);
 
-  const encoded = new Uint8Array(layout.length + ownedTail.byteLength);
+  const encoded = new Uint8Array(layout.length + tailBytes);
   const view = new DataView(encoded.buffer);
   const values = metadata as unknown as Record<string, unknown>;
   for (const field of layout.fields) {
     writeRuntimeInteger(view, field, values[field.name]);
   }
-  encoded.set(ownedTail, layout.length);
+  let offset = layout.length;
+  for (const segment of tailSegments) {
+    encoded.set(segment, offset);
+    offset += segment.byteLength;
+  }
   return encoded;
+}
+
+function validateRuntimeObjectTailSegment(name: string, declaredBytes: number, segment: Uint8Array): void {
+  if (segment.byteLength !== declaredBytes) {
+    throw runtimeObjectError(
+      "NNRP_OBJECT_TAIL_LENGTH_INVALID",
+      `Object delta ${name} declares ${declaredBytes} bytes but received ${segment.byteLength}.`,
+    );
+  }
 }
 
 export function decodeRuntimeObjectMetadata(

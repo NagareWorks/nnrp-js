@@ -20,6 +20,7 @@ import {
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
+  encodeRuntimeObjectMetadataSegments,
   ErrorScope,
   isStandardInputProfile,
   MemoryLocationHint,
@@ -804,6 +805,50 @@ Deno.test("@nnrp/core round-trips every Preview4 runtime object metadata layout"
       assertEquals(decoded.tail, testCase.tail);
     }
   }
+});
+
+Deno.test("@nnrp/core encodes ordered runtime object tail segments without an intermediate tail", () => {
+  const metadataBody = new Uint8Array([0x51, 0x52]);
+  const delta = new Uint8Array([0x61, 0x62, 0x63]);
+  const encoded = encodeRuntimeObjectMetadataSegments(
+    NnrpMessageType.ObjectDelta,
+    RUNTIME_OBJECT_CODEC_CASES[3].metadata,
+    [metadataBody, delta],
+  );
+
+  metadataBody.fill(0xff);
+  delta.fill(0xee);
+  assertEquals(
+    decodeRuntimeObjectMetadata(NnrpMessageType.ObjectDelta, encoded).tail,
+    new Uint8Array([0x51, 0x52, 0x61, 0x62, 0x63]),
+  );
+  assertRuntimeObjectError(
+    () =>
+      encodeRuntimeObjectMetadataSegments(
+        NnrpMessageType.ObjectDelta,
+        RUNTIME_OBJECT_CODEC_CASES[3].metadata,
+        [new Uint8Array(5), null as unknown as Uint8Array],
+      ),
+    "NNRP_OBJECT_TAIL_INVALID",
+  );
+  assertRuntimeObjectError(
+    () =>
+      encodeRuntimeObjectMetadataSegments(
+        NnrpMessageType.ObjectDelta,
+        RUNTIME_OBJECT_CODEC_CASES[3].metadata,
+        [new Uint8Array(3), new Uint8Array(2)],
+      ),
+    "NNRP_OBJECT_TAIL_LENGTH_INVALID",
+  );
+  assertRuntimeObjectError(
+    () =>
+      encodeRuntimeObjectMetadataSegments(
+        NnrpMessageType.ObjectDelta,
+        RUNTIME_OBJECT_CODEC_CASES[3].metadata,
+        [new Uint8Array(5)],
+      ),
+    "NNRP_OBJECT_TAIL_INVALID",
+  );
 });
 
 Deno.test("@nnrp/core uses frozen little-endian runtime object offsets", () => {

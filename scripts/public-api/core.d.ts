@@ -728,6 +728,7 @@ export declare class NnrpProtocolError extends NnrpError {
 export declare function encodeRuntimeControlMetadata(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Uint8Array;
 export declare function decodeRuntimeControlMetadata(messageType: NnrpMessageType, payload: Uint8Array): DecodedRuntimeControlMetadata;
 export declare function encodeRuntimeObjectMetadata(messageType: NnrpMessageType, metadata: RuntimeObjectMetadata, tail?: Uint8Array): Uint8Array;
+export declare function encodeRuntimeObjectMetadataSegments(messageType: NnrpMessageType, metadata: RuntimeObjectMetadata, tailSegments: readonly Uint8Array[]): Uint8Array;
 export declare function decodeRuntimeObjectMetadata(messageType: NnrpMessageType, payload: Uint8Array): DecodedRuntimeObjectMetadata;
 export declare function encodeCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): Uint8Array;
 export declare function decodeCacheInvalidateMetadata(payload: Uint8Array): CacheInvalidateMetadata;

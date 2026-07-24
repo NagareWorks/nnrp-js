@@ -10,6 +10,7 @@ import {
   NnrpCapabilityError,
   NnrpMessageType,
   type NnrpNativeTransportBinding,
+  NnrpProtocolError,
   NnrpTimeoutError,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
@@ -740,10 +741,20 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     regionBytes: 1,
     deltaBytes: 1,
     flags: 0,
-    metadataBytes: 0,
+    metadataBytes: 1,
   } as const;
-  await session.patchObject(delta, one);
-  await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, one);
+  await session.patchObject(delta, one, new Uint8Array([2]));
+  await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, one, new Uint8Array([3]));
+  await assertRejects(
+    () => session.patchObject({ ...delta, deltaSequence: 4n }, new Uint8Array(), new Uint8Array([4, 5])),
+    NnrpProtocolError,
+    "metadataBody declares 1 bytes but received 2",
+  );
+  await assertRejects(
+    () => session.patchObject({ ...delta, deltaSequence: 4n, deltaBytes: 2 }, one, new Uint8Array([4])),
+    NnrpProtocolError,
+    "delta declares 2 bytes but received 1",
+  );
   await session.referenceCache({
     cacheNamespace: 0,
     cacheKeyHi: 1n,
@@ -797,6 +808,20 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   ]);
   assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 21 }, (_, index) => index + 1));
   assertEquals(seen.every(({ payload }) => payload.byteLength > 0), true);
+  assertEquals(
+    decodeRuntimeObjectMetadata(
+      NnrpMessageType.ObjectPatch,
+      seen.find(({ messageType }) => messageType === NnrpMessageType.ObjectPatch)!.payload,
+    ).tail,
+    new Uint8Array([2, 1]),
+  );
+  assertEquals(
+    decodeRuntimeObjectMetadata(
+      NnrpMessageType.ObjectDelta,
+      seen.find(({ messageType }) => messageType === NnrpMessageType.ObjectDelta)!.payload,
+    ).tail,
+    new Uint8Array([3, 1]),
+  );
 });
 
 Deno.test("@nnrp/native-client enforces operation-owned runtime object lifecycles", async () => {

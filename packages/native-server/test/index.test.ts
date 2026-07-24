@@ -507,14 +507,18 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
 });
 
 Deno.test("@nnrp/native-server exposes frozen high-level response controls", async () => {
-  const seen: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number }> = [];
+  const seen: Array<{
+    readonly messageType: NnrpMessageType;
+    readonly frameId: number;
+    readonly payload: Uint8Array;
+  }> = [];
   const runtime = await openBackendRuntime({
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
       accept: () => ({ sessionOptions: { sessionId: "server-runtime" } }),
-      sendRuntimeFrame: ({ messageType, frameId }) => {
-        seen.push({ messageType, frameId });
+      sendRuntimeFrame: ({ messageType, frameId, payload }) => {
+        seen.push({ messageType, frameId, payload: payload.slice() });
       },
     },
   });
@@ -629,10 +633,20 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     regionBytes: 1,
     deltaBytes: 1,
     flags: 0,
-    metadataBytes: 0,
+    metadataBytes: 1,
   } as const;
-  await session.patchObject(delta, one);
-  await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, one);
+  await session.patchObject(delta, one, new Uint8Array([2]));
+  await session.sendObjectDelta({ ...delta, deltaSequence: 3n }, one, new Uint8Array([3]));
+  await assertRejects(
+    () => session.patchObject({ ...delta, deltaSequence: 4n }, new Uint8Array(), new Uint8Array([4, 5])),
+    NnrpProtocolError,
+    "metadataBody declares 1 bytes but received 2",
+  );
+  await assertRejects(
+    () => session.patchObject({ ...delta, deltaSequence: 4n, deltaBytes: 2 }, one, new Uint8Array([4])),
+    NnrpProtocolError,
+    "delta declares 2 bytes but received 1",
+  );
   await session.referenceCache({
     cacheNamespace: 0,
     cacheKeyHi: 1n,
@@ -681,6 +695,20 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpMessageType.CacheInvalidate,
   ]);
   assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 17 }, (_, index) => index + 1));
+  assertEquals(
+    decodeRuntimeObjectMetadata(
+      NnrpMessageType.ObjectPatch,
+      seen.find(({ messageType }) => messageType === NnrpMessageType.ObjectPatch)!.payload,
+    ).tail,
+    new Uint8Array([2, 1]),
+  );
+  assertEquals(
+    decodeRuntimeObjectMetadata(
+      NnrpMessageType.ObjectDelta,
+      seen.find(({ messageType }) => messageType === NnrpMessageType.ObjectDelta)!.payload,
+    ).tail,
+    new Uint8Array([3, 1]),
+  );
 });
 
 Deno.test("@nnrp/native-server releases operation-owned objects on peer cancellation", async () => {
