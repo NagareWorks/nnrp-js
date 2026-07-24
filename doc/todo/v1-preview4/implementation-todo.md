@@ -29,12 +29,12 @@ and scenarios.
 - [x] [06 - IPC carrier provider](06-ipc-provider.md)
 - [x] [07 - WebSocket carrier provider](07-websocket-provider.md)
 - [x] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
-- [ ] [09 - Artifacts, release, and docs](09-artifacts-release-docs.md)
+- [x] [09 - Artifacts, release, and docs](09-artifacts-release-docs.md)
 
 ## Release Closure
 
-- [ ] All workstream files contain zero unchecked boxes.
+- [x] All workstream files contain zero unchecked boxes.
 - [x] `deno task lint`, `deno task test`, `deno task coverage`, and `deno task package-check` pass.
 - [x] Native and browser wire-conformance target manifests validate against the released suite schema.
 - [x] Release dry-run tarballs pass the ownership checks in workstream 09.
-- [ ] The develop-to-main pull request is green before Preview4 publishing starts.
+- [x] The develop-to-main pull request is green before Preview4 publishing starts.

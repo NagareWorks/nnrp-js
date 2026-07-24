@@ -69,4 +69,4 @@
 - [x] Run `deno task package-check` and `deno task release-dry-run`.
 - [x] Inspect every generated npm tarball and GitHub release archive.
 - [x] Validate installed-package smoke tests on Node, Deno, and a browser runner.
-- [ ] Confirm all Preview4 todo files contain zero unchecked boxes before release.
+- [x] Confirm all Preview4 todo files contain zero unchecked boxes before release.
