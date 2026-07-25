@@ -43,6 +43,28 @@
   - [x] Send partial/terminal/drop/trace output over the accepted carrier.
   - [x] Close accepted sessions and the listener exactly once.
 
+## Route-Local Listener Set
+
+- [ ] Replace `providerEndpoints` and role-wide security with `NnrpServerProviderRoutes`.
+  - [ ] Resolve every policy-allowed installed provider independently.
+  - [ ] Filter security-incompatible routes while preserving their diagnostics.
+  - [ ] Treat a missing locator for an otherwise eligible provider as a hard configuration error.
+  - [ ] Pass each route's own security handle only to its provider artifact.
+- [ ] Complete atomic multi-listener ownership.
+  - [ ] Bind every eligible Auto/Prefer route before exposing the logical server.
+  - [ ] Restrict Force to the named route.
+  - [ ] Roll back every opened listener after any bind or adoption failure.
+  - [ ] Accept sessions from each listener and report the active transport.
+  - [ ] Expose `boundProviderEndpoints` with every actual bound listener endpoint.
+  - [ ] Expose the actual listener transport as `NnrpServerSession.activeTransport`.
+  - [ ] Fail and close the complete logical server after a terminal provider-listener failure.
+  - [ ] Close every listener and accepted session exactly once.
+- [ ] Add TCP TLS and mixed-security listener-set tests.
+  - [ ] Cover TCP TLS plus QUIC.
+  - [ ] Cover IPC plus plain WebSocket under `nnrp://`.
+  - [ ] Cover exclusion of IPC, plain TCP, and WS under `nnrps://`.
+  - [ ] Cover route-local credentials that cannot leak between providers.
+
 ## Acceptance Evidence
 
 - [x] Server tests cover every receive and send method plus multi-listener ordering, rollback, and ownership.

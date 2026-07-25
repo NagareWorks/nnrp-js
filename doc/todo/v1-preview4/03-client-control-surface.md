@@ -68,3 +68,20 @@
   - [x] Assert role traffic reaches a peer process or peer runtime instance.
   - [x] Assert a standalone provider loopback cannot satisfy role E2E by itself.
   - [x] Assert a provider without role adoption symbols is rejected before connect.
+
+## Multi-Route Client Host
+
+- [ ] Replace singular client routing with `NnrpClientProviderRoutes`.
+  - [ ] Resolve every installed provider against its own route.
+  - [ ] Keep unresolved and security-incompatible candidates in ordered diagnostics.
+  - [ ] Probe every eligible Auto/Prefer candidate.
+  - [ ] Make Force fail without fallback.
+  - [ ] Adopt only the selected carrier into the native runtime.
+- [ ] Keep browser routing aligned without exposing native credentials.
+  - [ ] Accept only the WebSocket entry from `NnrpClientProviderRoutes`.
+  - [ ] Require WSS for `nnrps://` and use browser-owned TLS verification.
+  - [ ] Reject native DER security fields in browser routes.
+- [ ] Add two-provider E2E tests against suite-owned endpoints.
+  - [ ] Verify selection diagnostics and active transport identity.
+  - [ ] Verify no connection is adopted from a rejected candidate.
+  - [ ] Verify close ownership for selected and unselected candidates.
