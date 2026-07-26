@@ -33,10 +33,12 @@ import {
   type NnrpCachePutRequest,
   type NnrpCachePutResult,
   NnrpCapabilityError,
+  type NnrpClientProviderRoutes,
   NnrpMessageType,
   NnrpProtocolError,
   NnrpRecoveryError,
   NnrpResultDropError,
+  type NnrpServerProviderRoutes,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
@@ -1358,6 +1360,60 @@ Deno.test("@nnrp/core reports policy-disallowed transport candidates", () => {
   assertEquals(summary.rejected[0]?.reason, "policy-disallowed");
 });
 
+Deno.test("@nnrp/core keeps provider locators and role security isolated by route", () => {
+  const clientRoutes: NnrpClientProviderRoutes = {
+    tcp: {
+      endpoint: "tcp://runtime.example:7443",
+      security: {
+        mode: "client",
+        serverName: "runtime.example",
+        trustedCertificateDer: new Uint8Array([1, 2, 3]),
+      },
+    },
+    ipc: { endpoint: "unix:///run/nnrp.sock" },
+  };
+  const serverRoutes: NnrpServerProviderRoutes = {
+    quic: {
+      endpoint: new URL("quic://0.0.0.0:7443"),
+      security: {
+        mode: "server",
+        certificateDer: new Uint8Array([4, 5, 6]),
+        privateKeyPkcs8Der: new Uint8Array([7, 8, 9]),
+      },
+    },
+    websocket: { endpoint: "wss://0.0.0.0:8443/nnrp" },
+  };
+
+  assertEquals(clientRoutes.tcp?.security?.mode, "client");
+  assertEquals(clientRoutes.ipc?.endpoint, "unix:///run/nnrp.sock");
+  assertEquals(serverRoutes.quic?.security?.mode, "server");
+  assertEquals(serverRoutes.websocket?.endpoint, "wss://0.0.0.0:8443/nnrp");
+});
+
+Deno.test("@nnrp/core applies frozen route and security rejection precedence", () => {
+  const routeFailure = transportCandidate("tcp", { rejectionReason: "route-unresolved" });
+  const securityFailure = transportCandidate("quic", { rejectionReason: "security-unsatisfied" });
+
+  assertEquals(selectTransport([routeFailure]).candidates[0]?.rejectionReason, "route-unresolved");
+  assertEquals(selectTransport([securityFailure]).candidates[0]?.rejectionReason, "security-unsatisfied");
+  assertEquals(
+    selectTransport([{ ...routeFailure, localAvailable: false }]).candidates[0]?.rejectionReason,
+    "local-unavailable",
+  );
+  assertEquals(
+    selectTransport([{ ...routeFailure, peerSupported: false }]).candidates[0]?.rejectionReason,
+    "peer-unsupported",
+  );
+  assertEquals(
+    selectTransport([{ ...securityFailure, withinLimits: false }]).candidates[0]?.rejectionReason,
+    "limit-exceeded",
+  );
+  assertEquals(
+    selectTransport([routeFailure], "force-quic").candidates[0]?.rejectionReason,
+    "policy-disallowed",
+  );
+});
+
 Deno.test("@nnrp/core rejects over-limit and missing-probe candidates", () => {
   const local = createBackendNativeManifest();
   const peer = createCapabilityManifest({
@@ -1482,6 +1538,10 @@ Deno.test("@nnrp/core validates provider-local endpoint schemes and security int
   );
   assertEquals(
     resolveProviderEndpoint("nnrps://runtime.example/session", "websocket", "wss://runtime.example/nnrp"),
+    "wss://runtime.example/nnrp",
+  );
+  assertEquals(
+    resolveProviderEndpoint("nnrp://runtime.example/session", "websocket", "wss://runtime.example/nnrp"),
     "wss://runtime.example/nnrp",
   );
 

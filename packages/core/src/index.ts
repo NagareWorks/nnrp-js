@@ -659,6 +659,8 @@ export type NnrpTransportRejectionReason =
   | "local-unavailable"
   | "peer-unsupported"
   | "limit-exceeded"
+  | "route-unresolved"
+  | "security-unsatisfied"
   | "probe-missing"
   | "probe-failed";
 
@@ -717,6 +719,20 @@ export interface NnrpTransportServerSecurity {
 }
 
 export type NnrpTransportSecurity = NnrpTransportClientSecurity | NnrpTransportServerSecurity;
+
+export interface NnrpClientProviderRoute {
+  readonly endpoint?: string | URL;
+  readonly security?: NnrpTransportClientSecurity;
+}
+
+export interface NnrpServerProviderRoute {
+  readonly endpoint?: string | URL;
+  readonly security?: NnrpTransportServerSecurity;
+}
+
+export type NnrpClientProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpClientProviderRoute>>>;
+
+export type NnrpServerProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpServerProviderRoute>>>;
 
 export interface NnrpTransportCandidate {
   readonly kind: NnrpTransportKind;
@@ -1714,6 +1730,12 @@ function transportRejectionReason(
   if (!candidate.withinLimits) {
     return "limit-exceeded";
   }
+  if (
+    candidate.rejectionReason === "route-unresolved" ||
+    candidate.rejectionReason === "security-unsatisfied"
+  ) {
+    return candidate.rejectionReason;
+  }
 
   return undefined;
 }
@@ -1986,10 +2008,7 @@ function parseWebsocketProviderEndpoint(
   if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
     throw invalidProviderEndpoint(transport, "websocket provider endpoint must use ws:// or wss://.");
   }
-  if (
-    (applicationEndpoint.protocol === "nnrps:" && parsed.protocol !== "wss:") ||
-    (applicationEndpoint.protocol === "nnrp:" && parsed.protocol !== "ws:")
-  ) {
+  if (applicationEndpoint.protocol === "nnrps:" && parsed.protocol !== "wss:") {
     throw invalidProviderEndpoint(transport, "websocket provider endpoint must preserve application security intent.");
   }
 
