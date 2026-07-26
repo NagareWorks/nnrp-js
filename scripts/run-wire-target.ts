@@ -302,10 +302,14 @@ async function connectWithRetry(options: Parameters<typeof handleProgressClient>
     try {
       return await openNativeClient({
         endpoint: options.endpoint,
-        providerEndpoint: options.providerEndpoint,
+        providerRoutes: {
+          [options.provider.kind]: {
+            endpoint: options.providerEndpoint,
+            ...(options.security === undefined ? {} : { security: options.security }),
+          },
+        },
         transports: [options.provider],
         transportPolicy: options.transportPolicy,
-        ...(options.security === undefined ? {} : { security: options.security }),
       });
     } catch (error) {
       lastError = error;

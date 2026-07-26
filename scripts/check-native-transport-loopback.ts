@@ -253,10 +253,14 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
     client = await withTimeout(
       openNativeClient({
         endpoint: options.endpoint,
-        providerEndpoint: options.providerEndpoint,
+        providerRoutes: {
+          [options.provider.kind]: {
+            endpoint: options.providerEndpoint,
+            ...(options.security === undefined ? {} : { security: options.security.client }),
+          },
+        },
         transports: [options.provider],
         transportPolicy: options.policy,
-        ...(options.security === undefined ? {} : { security: options.security.client }),
       }),
       timeoutMillis,
       `${options.provider.kind} client connect`,

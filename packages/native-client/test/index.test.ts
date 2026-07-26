@@ -15,6 +15,7 @@ import {
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
+  type NnrpTransportSelectionSummary,
   ObjectReleaseReason,
   OwnershipHint,
   RuntimeObjectKind,
@@ -28,6 +29,7 @@ import {
 } from "../src/index.ts";
 import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
+import { createIpcTransportProvider } from "@nnrp/transport-ipc";
 
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 
@@ -237,6 +239,15 @@ Deno.test("@nnrp/native-client probes every candidate before applying preference
 
   const client = await openNativeClient({
     endpoint: "nnrp://127.0.0.1:4433/session/default",
+    providerRoutes: {
+      quic: {
+        security: {
+          mode: "client",
+          serverName: "127.0.0.1",
+          trustedCertificateDer: new Uint8Array([1]),
+        },
+      },
+    },
     transports: [
       createTcpTransportProvider({ binding: binding("tcp", 1_000n, 10n) }),
       createQuicTransportProvider({ binding: binding("quic", 2_000n, 100n) }),
@@ -278,14 +289,97 @@ Deno.test("@nnrp/native-client passes client security to the selected provider r
 
   const client = await openNativeClient({
     endpoint: "nnrps://runtime.example/session/default",
-    providerEndpoint: "127.0.0.1:45443",
-    security,
+    providerRoutes: { quic: { endpoint: "127.0.0.1:45443", security } },
     transports: [createQuicTransportProvider({ binding })],
     transportPolicy: "force-quic",
   });
 
   assertEquals(connected, { endpoint: "127.0.0.1:45443", security });
   await client.close();
+});
+
+Deno.test("@nnrp/native-client continues past unresolved Auto routes and adopts only the viable carrier", async () => {
+  const connected: string[] = [];
+  const tcpBinding = {
+    ...fakeTransportBinding("tcp"),
+    connect: (options: NnrpTransportEndpoint) => {
+      connected.push("tcp");
+      return Promise.resolve(roleCarrier("tcp", options.endpoint));
+    },
+  } satisfies NnrpNativeTransportBinding;
+
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    providerRoutes: { ipc: {} },
+    transports: [
+      createTcpTransportProvider({ binding: tcpBinding }),
+      createIpcTransportProvider({ binding: fakeTransportBinding("ipc") }),
+    ],
+  });
+
+  assertEquals(connected, ["tcp"]);
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client reports route and security failures with frozen precedence", async () => {
+  const unresolved = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrps://runtime.example/session/default",
+        providerRoutes: { ipc: {} },
+        transports: [createIpcTransportProvider({ binding: fakeTransportBinding("ipc") })],
+        transportPolicy: "force-ipc",
+      }),
+    NnrpTransportError,
+  );
+  const unresolvedSummary = unresolved.diagnostic.cause as NnrpTransportSelectionSummary;
+  assertEquals(unresolvedSummary.rejected[0]?.reason, "route-unresolved");
+
+  const security = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrps://runtime.example/session/default",
+        transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+        transportPolicy: "force-tcp",
+      }),
+    NnrpTransportError,
+  );
+  const securitySummary = security.diagnostic.cause as NnrpTransportSelectionSummary;
+  assertEquals(securitySummary.rejected[0]?.reason, "security-unsatisfied");
+});
+
+Deno.test("@nnrp/native-client rejects unknown provider route keys", async () => {
+  const error = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrp://127.0.0.1:4433/session/default",
+        providerRoutes: { udp: {} } as never,
+        transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+      }),
+    NnrpTransportError,
+  );
+
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_PROVIDER_ROUTE_KEY_INVALID");
+});
+
+Deno.test("@nnrp/native-client diagnoses configured routes whose providers are not installed", async () => {
+  const error = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrp://127.0.0.1:4433/session/default",
+        providerRoutes: { websocket: { endpoint: "ws://127.0.0.1:8080/nnrp" } },
+        transports: [
+          createTcpTransportProvider({ available: false, binding: fakeTransportBinding("tcp") }),
+        ],
+      }),
+    NnrpTransportError,
+  );
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_TRANSPORT_SELECTION_FAILED");
+  const summary = error.diagnostic.cause as NnrpTransportSelectionSummary;
+  assertEquals(summary.rejected.map((candidate) => [candidate.kind, candidate.reason]), [
+    ["tcp", "local-unavailable"],
+    ["websocket", "local-unavailable"],
+  ]);
 });
 
 Deno.test("@nnrp/native-client rejects carriers without client role adoption", async () => {
@@ -953,7 +1047,23 @@ function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
   return fakeTransportBinding("quic");
 }
 
-function fakeTransportBinding(kind: "tcp" | "quic"): NnrpNativeTransportBinding {
+function roleCarrier(kind: "tcp" | "quic", endpoint: string | URL): NnrpTransportConnection {
+  return {
+    kind,
+    endpoint: String(endpoint),
+    connected: true,
+    send: () => Promise.resolve(),
+    receive: () => Promise.resolve([]),
+    close: () => {},
+    [CLIENT_ROLE_ADOPT]: () =>
+      Promise.resolve({
+        openSession: () => Promise.reject(new Error("session open is outside route selection")),
+        close: () => Promise.resolve(),
+      }),
+  } as NnrpTransportConnection;
+}
+
+function fakeTransportBinding(kind: "tcp" | "quic" | "ipc"): NnrpNativeTransportBinding {
   return {
     mode: "test",
     probe: () =>

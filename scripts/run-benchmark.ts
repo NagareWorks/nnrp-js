@@ -352,7 +352,7 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   await delay(25);
   const client = await openNativeClient({
     endpoint,
-    providerEndpoint,
+    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
     transports: [provider],
     transportPolicy: policy,
   });

@@ -30,7 +30,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 50));
   client = await openNativeClient({
     endpoint,
-    providerEndpoint,
+    providerRoutes: { tcp: { endpoint: providerEndpoint } },
     transports: [provider],
     transportPolicy: "force-tcp",
   });

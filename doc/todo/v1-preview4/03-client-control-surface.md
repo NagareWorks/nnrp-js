@@ -71,12 +71,12 @@
 
 ## Multi-Route Client Host
 
-- [ ] Replace singular client routing with `NnrpClientProviderRoutes`.
-  - [ ] Resolve every installed provider against its own route.
-  - [ ] Keep unresolved and security-incompatible candidates in ordered diagnostics.
-  - [ ] Probe every eligible Auto/Prefer candidate.
-  - [ ] Make Force fail without fallback.
-  - [ ] Adopt only the selected carrier into the native runtime.
+- [x] Replace singular client routing with `NnrpClientProviderRoutes`.
+  - [x] Resolve every installed provider against its own route.
+  - [x] Keep unresolved and security-incompatible candidates in ordered diagnostics.
+  - [x] Probe every eligible Auto/Prefer candidate.
+  - [x] Make Force fail without fallback.
+  - [x] Adopt only the selected carrier into the native runtime.
 - [ ] Keep browser routing aligned without exposing native credentials.
   - [ ] Accept only the WebSocket entry from `NnrpClientProviderRoutes`.
   - [ ] Require WSS for `nnrps://` and use browser-owned TLS verification.
