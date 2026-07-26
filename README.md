@@ -78,10 +78,11 @@ three roles.
 
 ## Endpoints
 
-Role APIs receive an NNRP application endpoint such as `nnrp://host:4433/session/default`. A carrier-local endpoint is
-separate: clients use one optional `providerEndpoint`, while server listener sets use `providerEndpoints` keyed by
-transport kind. TCP/QUIC can derive a locator; IPC (`unix://`, `npipe://`) and WebSocket (`ws://`, `wss://`) require an
-explicit locator. Provider-local addresses are never serialized into operation payloads.
+Role APIs receive an NNRP application endpoint such as `nnrp://host:4433/session/default`. Carrier-local locators and
+role-specific security live in `providerRoutes`, keyed by transport kind. A native client adopts one eligible route; a
+native server opens every eligible Auto/Prefer route as one atomic listener set. TCP and QUIC can derive locators, while
+IPC (`unix://`, `npipe://`) and WebSocket (`ws://`, `wss://`) accept explicit carrier locators. Provider-local addresses
+are never serialized into operation payloads.
 
 ## Runtime Surface
 

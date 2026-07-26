@@ -18,7 +18,7 @@ const serverRuntime = await openBackendRuntime({
 });
 const server = serverRuntime.listen({
   endpoint,
-  providerEndpoints: { tcp: providerEndpoint },
+  providerRoutes: { tcp: { endpoint: providerEndpoint } },
   transportPolicy: "force-tcp",
 });
 const accepting = server.accept();

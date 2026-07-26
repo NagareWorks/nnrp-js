@@ -46,14 +46,14 @@
   - [x] Add `NnrpClientProviderRoute` and `NnrpClientProviderRoutes`.
   - [x] Add `NnrpServerProviderRoute` and `NnrpServerProviderRoutes`.
   - [x] Keep provider endpoint and role-specific security isolated per transport key.
-  - [ ] Remove singular role-level `providerEndpoint`, `providerEndpoints`, and shared `security` options.
-  - [ ] Keep singular `providerEndpoint` only on low-level one-provider APIs and browser WebSocket carrier internals.
+  - [x] Remove singular role-level `providerEndpoint`, `providerEndpoints`, and shared `security` options.
+  - [x] Keep singular `providerEndpoint` only on low-level one-provider APIs and browser WebSocket carrier internals.
   - [ ] Reject unknown route keys and report known-but-uninstalled routes as `local-unavailable`.
   - [ ] Apply the exact rejection precedence when multiple checks fail.
 - [ ] Enforce application security intent during candidate validation.
   - [x] Add `route-unresolved` and `security-unsatisfied` rejection reasons.
-  - [ ] Require TCP TLS, QUIC TLS, or native WSS for native `nnrps://` routes.
-  - [ ] Reject IPC, plain TCP, and WS for `nnrps://`.
+  - [x] Require TCP TLS, QUIC TLS, or native WSS for native `nnrps://` routes.
+  - [x] Reject IPC, plain TCP, and WS for `nnrps://`.
   - [ ] Require browser WSS while keeping certificate trust host-owned.
   - [x] Permit secure routes under `nnrp://` without requiring them.
 

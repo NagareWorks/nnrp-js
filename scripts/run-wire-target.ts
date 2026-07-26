@@ -187,9 +187,13 @@ async function startServer(
   const runtime = await openBackendRuntime({ transports: [provider], transportPolicy });
   const server = runtime.listen({
     endpoint,
-    providerEndpoints: { [provider.kind]: providerEndpoint },
+    providerRoutes: {
+      [provider.kind]: {
+        endpoint: providerEndpoint,
+        ...(security === undefined ? {} : { security }),
+      },
+    },
     transportPolicy,
-    ...(security === undefined ? {} : { security }),
   });
   return { runtime, server };
 }
