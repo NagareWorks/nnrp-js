@@ -24,7 +24,7 @@
   - [x] Add `prefer-quic`, `prefer-tcp`, `prefer-ipc`, and `prefer-websocket`.
   - [x] Add `force-quic`, `force-tcp`, `force-ipc`, and `force-websocket`.
   - [x] Remove `score`, `tcp-only`, and `quic-only` policy values.
-- [x] Implement deterministic selection.
+- [x] Implement deterministic selection from complete provider readiness and aggregate probe observations.
   - [x] Select the only installed and compatible provider without probing unrelated packages.
   - [x] Probe all installed compatible providers for `auto` and `prefer-*`.
   - [x] Reject a missing or incompatible forced provider without fallback.
@@ -42,19 +42,19 @@
   - [x] Resolve WebSocket `ws://` and `wss://` endpoints from an explicit `providerEndpoint` override.
   - [x] Reject a provider override whose scheme does not match the selected provider.
   - [x] Keep provider-local endpoint strings out of operation metadata and public request payloads.
-- [ ] Add the frozen host route values.
+- [x] Add the frozen host route values.
   - [x] Add `NnrpClientProviderRoute` and `NnrpClientProviderRoutes`.
   - [x] Add `NnrpServerProviderRoute` and `NnrpServerProviderRoutes`.
   - [x] Keep provider endpoint and role-specific security isolated per transport key.
   - [x] Remove singular role-level `providerEndpoint`, `providerEndpoints`, and shared `security` options.
   - [x] Keep singular `providerEndpoint` only on low-level one-provider APIs and browser WebSocket carrier internals.
-  - [ ] Reject unknown route keys and report known-but-uninstalled routes as `local-unavailable`.
-  - [ ] Apply the exact rejection precedence when multiple checks fail.
-- [ ] Enforce application security intent during candidate validation.
+  - [x] Reject unknown route keys and report known-but-uninstalled routes as `local-unavailable`.
+  - [x] Apply the exact rejection precedence when multiple checks fail.
+- [x] Enforce application security intent during candidate validation.
   - [x] Add `route-unresolved` and `security-unsatisfied` rejection reasons.
   - [x] Require TCP TLS, QUIC TLS, or native WSS for native `nnrps://` routes.
   - [x] Reject IPC, plain TCP, and WS for `nnrps://`.
-  - [ ] Require browser WSS while keeping certificate trust host-owned.
+  - [x] Require browser WSS while keeping certificate trust host-owned.
   - [x] Permit secure routes under `nnrp://` without requiring them.
 
 ## Public Types and Tests
@@ -68,14 +68,14 @@
   - [x] Cover single-provider, multi-provider, preference, and force behavior.
   - [x] Cover application and provider endpoint validation.
   - [x] Cover capability token serialization and rejection.
-- [ ] Add route-set contract tests.
-  - [ ] Cover independent locators and security for all four transport keys.
-  - [ ] Cover route-key/provider-kind mismatch.
-  - [ ] Cover a configured route whose known provider is not installed.
-  - [ ] Cover client unresolved-route continuation and forced failure.
-  - [ ] Cover server unresolved-route hard failure.
-  - [ ] Cover combined failures and exact rejection precedence.
-  - [ ] Cover the complete application-security matrix.
+- [x] Add route-set contract tests.
+  - [x] Cover independent locators and security for all four transport keys.
+  - [x] Cover route-key/provider-kind mismatch.
+  - [x] Cover a configured route whose known provider is not installed.
+  - [x] Cover client unresolved-route continuation and forced failure.
+  - [x] Cover server unresolved-route hard failure.
+  - [x] Cover combined failures and exact rejection precedence.
+  - [x] Cover the complete application-security matrix.
 
 ## Acceptance Evidence
 

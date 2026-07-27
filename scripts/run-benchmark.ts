@@ -305,7 +305,10 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     transportProviders: [createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket })],
     transportPolicy: "force-websocket",
   });
-  const client = browserRuntime.connect({ endpoint: "nnrp://localhost/benchmark-browser", providerEndpoint });
+  const client = browserRuntime.connect({
+    endpoint: "nnrp://localhost/benchmark-browser",
+    providerRoutes: { websocket: { endpoint: providerEndpoint } },
+  });
   const session = client.openSession({ sessionId: "benchmark-browser", inputProfile: "token" });
   const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
   const serverSessionPromise = accepting;

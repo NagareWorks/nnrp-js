@@ -244,6 +244,12 @@ function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTran
       },
       localAvailable: true,
     })),
+    candidateReadiness: peerManifest.transports.map((kind) => ({
+      kind,
+      providerId: `nnrp.transport.${kind}.benchmark`,
+      routeResolved: true,
+      securitySatisfied: true,
+    })),
   });
 
   return createTransportSelectionSummary(selectTransport(candidates));

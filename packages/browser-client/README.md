@@ -24,7 +24,7 @@ const runtime = await openBrowserRuntime({
 
 const client = runtime.connect({
   endpoint: "nnrps://example.test/session/default",
-  providerEndpoint: "wss://example.test/nnrp",
+  providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
 });
 const session = client.openSession({ inputProfile: "structured_event" });
 

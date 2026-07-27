@@ -108,7 +108,7 @@ async function connectAndSubmit(
   for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt++) {
     const client = runtime.connect({
       endpoint: "nnrp://localhost/session/default",
-      providerEndpoint,
+      providerRoutes: { websocket: { endpoint: providerEndpoint } },
       transportPolicy: "force-websocket",
     });
     const session = client.openSession({ sessionId: `wire-browser-${attempt}`, inputProfile: "token" });

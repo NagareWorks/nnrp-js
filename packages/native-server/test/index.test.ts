@@ -115,6 +115,12 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
   });
   const tcpSummary = tcpRuntime.selectTransport({
     peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
+    candidateReadiness: [{
+      kind: "tcp",
+      providerId: "nnrp.transport.tcp.native",
+      routeResolved: true,
+      securitySatisfied: true,
+    }],
   });
 
   assertEquals(tcpSummary.selected, "tcp");
@@ -123,12 +129,15 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
   const noProviderRuntime = await openBackendRuntime({
     transports: [],
   });
-  const noProviderSummary = noProviderRuntime.selectTransport({
-    peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
-  });
-
-  assertEquals(noProviderSummary.selected, null);
-  assertEquals(noProviderSummary.rejected, []);
+  const noProviderError = assertThrows(
+    () =>
+      noProviderRuntime.selectTransport({
+        peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
+        candidateReadiness: [],
+      }),
+    NnrpTransportError,
+  );
+  assertEquals(noProviderError.diagnostic.code, "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT");
 });
 
 Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed providers", async () => {
@@ -283,7 +292,7 @@ Deno.test("@nnrp/native-server rejects insecure listener routes under nnrps", as
     {
       kind: "websocket",
       route: { endpoint: "ws://127.0.0.1:45445/nnrp" },
-      code: "NNRP_NATIVE_PROVIDER_ROUTE_UNRESOLVED",
+      code: "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
     },
   ] as const;
 
@@ -299,6 +308,20 @@ Deno.test("@nnrp/native-server rejects insecure listener routes under nnrps", as
     assertEquals(error.diagnostic.transport, kind);
     await runtime.close();
   }
+});
+
+Deno.test("@nnrp/native-server rejects configured routes whose providers are not installed", async () => {
+  const runtime = await openBackendRuntime({ transports: [fakeRoleProvider("tcp")] });
+  const server = runtime.listen({
+    endpoint: "nnrp://runtime.example/session/default",
+    providerRoutes: { websocket: { endpoint: "ws://runtime.example/nnrp" } },
+  });
+
+  const error = await assertRejects(() => server.accept(), NnrpTransportError);
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_PROVIDER_ROUTE_LOCAL_UNAVAILABLE");
+  assertEquals(error.diagnostic.transport, "websocket");
+  await server.close();
+  await runtime.close();
 });
 
 Deno.test("@nnrp/native-server opens every eligible listener and preserves preference order", async () => {

@@ -418,6 +418,20 @@ export interface NnrpTransportProbeMetrics {
     readonly medianThroughputBytesPerSecond: bigint;
     readonly medianRttMicroseconds: bigint;
 }
+export interface NnrpTransportCandidateReadiness {
+    readonly kind: NnrpTransportKind;
+    readonly providerId: string;
+    readonly routeResolved: boolean;
+    readonly securitySatisfied: boolean;
+    readonly diagnostic?: NnrpDiagnostic;
+}
+export interface NnrpTransportProbeObservation {
+    readonly kind: NnrpTransportKind;
+    readonly providerId: string;
+    readonly state: "succeeded" | "failed";
+    readonly metrics?: NnrpTransportProbeMetrics;
+    readonly diagnostic?: NnrpDiagnostic;
+}
 export interface NnrpTransportClientSecurity {
     readonly mode: "client";
     readonly serverName: string;
@@ -506,8 +520,10 @@ export interface NnrpTransportCandidateOptions {
     readonly peer: NnrpCapabilityManifest;
     readonly providers: readonly NnrpTransportProviderObservation[];
     readonly requestedMaxFrameBytes?: bigint;
-    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
+export type NnrpTransportSelectionErrorCode = "INVALID_EVIDENCE" | "FORCED_TRANSPORT_UNAVAILABLE" | "NO_VIABLE_TRANSPORT";
 export interface NnrpTransportSelectionSummary {
     readonly policy: NnrpTransportPolicy;
     readonly selected: NnrpTransportKind | null;
@@ -728,6 +744,11 @@ export declare class NnrpCapabilityError extends NnrpError {
 }
 export declare class NnrpTransportError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
+}
+export declare class NnrpTransportSelectionError extends NnrpTransportError {
+    readonly code: NnrpTransportSelectionErrorCode;
+    readonly selection?: NnrpTransportSelection;
+    constructor(code: NnrpTransportSelectionErrorCode, diagnostic: NnrpDiagnostic, selection?: NnrpTransportSelection);
 }
 export declare class NnrpTimeoutError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);

@@ -42,11 +42,13 @@ import {
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  type NnrpTransportCandidateReadiness,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportProbeMetrics,
   type NnrpTransportProviderObservation,
+  NnrpTransportSelectionError,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
   normalizeSessionMigrationRequest,
@@ -144,6 +146,17 @@ function transportCandidate(
     ...(overrides.rejectionReason === undefined ? {} : { rejectionReason: overrides.rejectionReason }),
     ...(overrides.diagnostic === undefined ? {} : { diagnostic: overrides.diagnostic }),
   };
+}
+
+function readyCandidates(
+  providers: readonly NnrpTransportProviderObservation[],
+): readonly NnrpTransportCandidateReadiness[] {
+  return providers.map((provider) => ({
+    kind: provider.kind,
+    providerId: provider.metadata.id,
+    routeResolved: true,
+    securitySatisfied: true,
+  }));
 }
 
 const NNRP_MESSAGE_TYPES = [
@@ -1254,22 +1267,15 @@ Deno.test("@nnrp/core orders probes by success count, throughput, and RTT", () =
   assertEquals(selection.candidates.map((candidate) => candidate.selectionRank), [0, 1, 2]);
 });
 
-Deno.test("@nnrp/core uses numeric transport id and bytewise provider id as final ties", () => {
+Deno.test("@nnrp/core uses numeric transport id as the final cross-transport tie", () => {
   const selection = selectTransport([
-    transportCandidate("websocket", { probe: DEFAULT_PROBE, id: "provider-z" }),
-    transportCandidate("tcp", { probe: DEFAULT_PROBE, id: "provider-z" }),
-    transportCandidate("quic", { probe: DEFAULT_PROBE, id: "provider-z" }),
-    transportCandidate("ipc", { probe: DEFAULT_PROBE, id: "provider-z" }),
-    transportCandidate("quic", { probe: DEFAULT_PROBE, id: "provider-a" }),
+    transportCandidate("websocket", { probe: DEFAULT_PROBE, id: "provider-websocket" }),
+    transportCandidate("tcp", { probe: DEFAULT_PROBE, id: "provider-tcp" }),
+    transportCandidate("quic", { probe: DEFAULT_PROBE, id: "provider-quic" }),
+    transportCandidate("ipc", { probe: DEFAULT_PROBE, id: "provider-ipc" }),
   ]);
 
-  assertEquals(selection.candidates.map((candidate) => `${candidate.kind}:${candidate.provider.id}`), [
-    "quic:provider-a",
-    "quic:provider-z",
-    "tcp:provider-z",
-    "ipc:provider-z",
-    "websocket:provider-z",
-  ]);
+  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["quic", "tcp", "ipc", "websocket"]);
 });
 
 Deno.test("@nnrp/core applies every preferred transport policy", () => {
@@ -1314,14 +1320,15 @@ Deno.test("@nnrp/core applies every forced transport policy", () => {
   assertEquals(selectTransport(candidates, "force-websocket").selected?.kind, "websocket");
 });
 
-Deno.test("@nnrp/core reports no selected transport when a forced provider is unavailable", () => {
-  const selection = selectTransport(
-    [transportCandidate("tcp")],
-    "force-ipc",
+Deno.test("@nnrp/core throws typed evidence for an unavailable forced provider", () => {
+  const error = assertThrows(
+    () => selectTransport([transportCandidate("tcp")], "force-ipc"),
+    NnrpTransportSelectionError,
   );
 
-  assertEquals(selection.selected, null);
-  assertEquals(selection.candidates[0]?.rejectionReason, "policy-disallowed");
+  assertEquals(error.code, "FORCED_TRANSPORT_UNAVAILABLE");
+  assertEquals(error.selection?.selected, null);
+  assertEquals(error.selection?.candidates[0]?.rejectionReason, "policy-disallowed");
 });
 
 Deno.test("@nnrp/core creates transport candidates from local and peer manifests", () => {
@@ -1332,10 +1339,12 @@ Deno.test("@nnrp/core creates transport candidates from local and peer manifests
     capabilities: ["client.session"],
   });
 
+  const providers = [transportProvider("tcp"), transportProvider("quic")];
   const candidates = createTransportCandidates({
     local,
     peer,
-    providers: [transportProvider("tcp"), transportProvider("quic")],
+    providers,
+    candidateReadiness: readyCandidates(providers),
   });
   const selection = selectTransport(candidates);
   const summary = createTransportSelectionSummary(selection);
@@ -1394,49 +1403,48 @@ Deno.test("@nnrp/core applies frozen route and security rejection precedence", (
   const routeFailure = transportCandidate("tcp", { rejectionReason: "route-unresolved" });
   const securityFailure = transportCandidate("quic", { rejectionReason: "security-unsatisfied" });
 
-  assertEquals(selectTransport([routeFailure]).candidates[0]?.rejectionReason, "route-unresolved");
-  assertEquals(selectTransport([securityFailure]).candidates[0]?.rejectionReason, "security-unsatisfied");
-  assertEquals(
-    selectTransport([{ ...routeFailure, localAvailable: false }]).candidates[0]?.rejectionReason,
-    "local-unavailable",
-  );
-  assertEquals(
-    selectTransport([{ ...routeFailure, peerSupported: false }]).candidates[0]?.rejectionReason,
-    "peer-unsupported",
-  );
-  assertEquals(
-    selectTransport([{ ...securityFailure, withinLimits: false }]).candidates[0]?.rejectionReason,
-    "limit-exceeded",
-  );
-  assertEquals(
-    selectTransport([routeFailure], "force-quic").candidates[0]?.rejectionReason,
-    "policy-disallowed",
-  );
+  const reason = (candidate: NnrpTransportCandidate, policy: NnrpTransportPolicy = "auto") => {
+    const error = assertThrows(() => selectTransport([candidate], policy), NnrpTransportSelectionError);
+    return error.selection?.candidates[0]?.rejectionReason;
+  };
+
+  assertEquals(reason(routeFailure), "route-unresolved");
+  assertEquals(reason(securityFailure), "security-unsatisfied");
+  assertEquals(reason({ ...routeFailure, localAvailable: false }), "local-unavailable");
+  assertEquals(reason({ ...routeFailure, peerSupported: false }), "peer-unsupported");
+  assertEquals(reason({ ...securityFailure, withinLimits: false }), "limit-exceeded");
+  assertEquals(reason(routeFailure, "force-quic"), "policy-disallowed");
 });
 
 Deno.test("@nnrp/core rejects over-limit and missing-probe candidates", () => {
-  const local = createBackendNativeManifest();
+  const local = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: ["tcp", "quic", "ipc"],
+  });
   const peer = createCapabilityManifest({
     buildMode: "backend-native",
-    transports: ["tcp", "quic"],
+    transports: ["tcp", "quic", "ipc"],
     capabilities: ["client.session"],
   });
-  const selection = selectTransport(createTransportCandidates({
-    local,
-    peer,
-    requestedMaxFrameBytes: 2_048n,
-    providers: [
-      transportProvider("tcp", { maxFrameBytes: 1_024n }),
-      transportProvider("quic", { maxFrameBytes: 4_096n }),
-      transportProvider("quic", { id: "quic-second", maxFrameBytes: 4_096n }),
-    ],
-  }));
+  const providers = [
+    transportProvider("tcp", { maxFrameBytes: 1_024n }),
+    transportProvider("quic", { maxFrameBytes: 4_096n }),
+    transportProvider("ipc", { maxFrameBytes: 4_096n }),
+  ];
+  const error = assertThrows(() =>
+    selectTransport(createTransportCandidates({
+      local,
+      peer,
+      requestedMaxFrameBytes: 2_048n,
+      providers,
+      candidateReadiness: readyCandidates(providers),
+    })), NnrpTransportSelectionError);
 
-  assertEquals(selection.selected, null);
-  assertEquals(selection.candidates.map((candidate) => candidate.rejectionReason), [
-    "probe-missing",
-    "probe-missing",
-    "limit-exceeded",
+  assertEquals(error.code, "NO_VIABLE_TRANSPORT");
+  assertEquals(error.selection?.candidates.map((candidate) => [candidate.kind, candidate.rejectionReason]), [
+    ["quic", "probe-missing"],
+    ["tcp", "limit-exceeded"],
+    ["ipc", "probe-missing"],
   ]);
 });
 
@@ -1470,6 +1478,7 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
         local,
         peer,
         providers: [transportProvider("tcp", { preferenceRank: 0x1_0000 })],
+        candidateReadiness: [],
       }),
     NnrpTransportError,
   );
@@ -1481,24 +1490,155 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
         local,
         peer,
         providers: [transportProvider("tcp", { costModelId: 0x1_0000 })],
+        candidateReadiness: [],
       }),
     NnrpTransportError,
   );
   assertEquals(costModelError.diagnostic.code, "NNRP_TRANSPORT_PROVIDER_METADATA_INVALID");
 
+  const provider = transportProvider("tcp");
   const metricsError = assertThrows(
     () =>
       createTransportCandidates({
         local,
         peer,
-        providers: [transportProvider("tcp")],
-        probeMetricsByProviderId: {
-          "nnrp.transport.tcp.test": { ...DEFAULT_PROBE, successCount: 4 },
-        },
+        providers: [provider],
+        candidateReadiness: readyCandidates([provider]),
+        probeObservations: [{
+          kind: "tcp",
+          providerId: provider.metadata.id,
+          state: "succeeded",
+          metrics: { ...DEFAULT_PROBE, successCount: 4 },
+        }],
       }),
     NnrpTransportError,
   );
   assertEquals(metricsError.diagnostic.code, "NNRP_TRANSPORT_PROBE_METRICS_INVALID");
+});
+
+Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evidence", () => {
+  const local = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: ["tcp", "quic"],
+  });
+  const peer = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: ["tcp", "quic"],
+  });
+  const providers = [transportProvider("tcp"), transportProvider("quic")];
+  const readiness = readyCandidates(providers);
+  const assertInvalidEvidence = (operation: () => unknown) => {
+    const error = assertThrows(operation, NnrpTransportSelectionError);
+    assertEquals(error.code, "INVALID_EVIDENCE");
+    assertEquals(error.selection, undefined);
+  };
+
+  assertInvalidEvidence(() => createTransportCandidates({ local, peer, providers, candidateReadiness: [] }));
+  assertInvalidEvidence(() =>
+    createTransportCandidates({ local, peer, providers, candidateReadiness: [readiness[0]!, readiness[0]!] })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: [
+        readiness[0]!,
+        { ...readiness[1]!, providerId: "nnrp.transport.unknown" },
+      ],
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: readiness,
+      probeObservations: [{ kind: "tcp", providerId: "nnrp.transport.unknown", state: "failed" }],
+    })
+  );
+  const failedProbe = { kind: "tcp", providerId: providers[0]!.metadata.id, state: "failed" } as const;
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: readiness,
+      probeObservations: [failedProbe, failedProbe],
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: readiness,
+      probeObservations: [{ ...failedProbe, metrics: DEFAULT_PROBE }],
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: readiness,
+      probeObservations: [{ ...failedProbe, state: "succeeded" }],
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers: [providers[0]!, transportProvider("tcp", { id: "nnrp.transport.tcp.other" })],
+      candidateReadiness: readiness,
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers: [providers[0]!, transportProvider("quic", { id: providers[0]!.metadata.id })],
+      candidateReadiness: readiness,
+    })
+  );
+  assertInvalidEvidence(() =>
+    selectTransport([
+      transportCandidate("tcp", { id: "nnrp.transport.tcp.first" }),
+      transportCandidate("tcp", { id: "nnrp.transport.tcp.second" }),
+    ])
+  );
+});
+
+Deno.test("@nnrp/core preserves failed and missing probe evidence as distinct diagnostics", () => {
+  const local = createCapabilityManifest({ buildMode: "backend-native", transports: ["tcp", "quic"] });
+  const peer = createCapabilityManifest({ buildMode: "backend-native", transports: ["tcp", "quic"] });
+  const providers = [transportProvider("tcp"), transportProvider("quic")];
+  const error = assertThrows(
+    () =>
+      selectTransport(createTransportCandidates({
+        local,
+        peer,
+        providers,
+        candidateReadiness: readyCandidates(providers),
+        probeObservations: [{
+          kind: "tcp",
+          providerId: providers[0]!.metadata.id,
+          state: "failed",
+          diagnostic: {
+            code: "NNRP_TEST_PROBE_FAILED",
+            message: "tcp probe failed",
+            source: "transport",
+          },
+        }],
+      })),
+    NnrpTransportSelectionError,
+  );
+
+  assertEquals(error.code, "NO_VIABLE_TRANSPORT");
+  assertEquals(error.selection?.candidates.map((candidate) => [candidate.kind, candidate.rejectionReason]), [
+    ["quic", "probe-missing"],
+    ["tcp", "probe-failed"],
+  ]);
 });
 
 Deno.test("@nnrp/core parses application endpoints without losing URL semantics", () => {

@@ -77,10 +77,10 @@
   - [x] Probe every eligible Auto/Prefer candidate.
   - [x] Make Force fail without fallback.
   - [x] Adopt only the selected carrier into the native runtime.
-- [ ] Keep browser routing aligned without exposing native credentials.
-  - [ ] Accept only the WebSocket entry from `NnrpClientProviderRoutes`.
-  - [ ] Require WSS for `nnrps://` and use browser-owned TLS verification.
-  - [ ] Reject native DER security fields in browser routes.
+- [x] Keep browser routing aligned without exposing native credentials.
+  - [x] Accept only the WebSocket entry from `NnrpClientProviderRoutes`.
+  - [x] Require WSS for `nnrps://` and use browser-owned TLS verification.
+  - [x] Reject native DER security fields in browser routes.
 - [ ] Add two-provider E2E tests against suite-owned endpoints.
   - [ ] Verify selection diagnostics and active transport identity.
   - [ ] Verify no connection is adopted from a rejected candidate.

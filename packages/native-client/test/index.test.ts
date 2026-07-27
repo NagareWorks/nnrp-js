@@ -15,7 +15,7 @@ import {
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
-  type NnrpTransportSelectionSummary,
+  NnrpTransportSelectionError,
   ObjectReleaseReason,
   OwnershipHint,
   RuntimeObjectKind,
@@ -30,6 +30,7 @@ import {
 import { createQuicTransportProvider, type NnrpQuicNativeBinding } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createIpcTransportProvider } from "@nnrp/transport-ipc";
+import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 
@@ -170,20 +171,44 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
 
   const summary = client.runtime.selectTransport({
     peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
-    probeMetricsByProviderId: {
-      "nnrp.transport.tcp.native": {
-        sampleCount: 3,
-        successCount: 3,
-        medianThroughputBytesPerSecond: 1_000n,
-        medianRttMicroseconds: 100n,
+    candidateReadiness: [
+      {
+        kind: "tcp",
+        providerId: "nnrp.transport.tcp.native",
+        routeResolved: true,
+        securitySatisfied: true,
       },
-      "nnrp.transport.quic.native": {
-        sampleCount: 3,
-        successCount: 3,
-        medianThroughputBytesPerSecond: 2_000n,
-        medianRttMicroseconds: 100n,
+      {
+        kind: "quic",
+        providerId: "nnrp.transport.quic.native",
+        routeResolved: true,
+        securitySatisfied: true,
       },
-    },
+    ],
+    probeObservations: [
+      {
+        kind: "tcp",
+        providerId: "nnrp.transport.tcp.native",
+        state: "succeeded",
+        metrics: {
+          sampleCount: 3,
+          successCount: 3,
+          medianThroughputBytesPerSecond: 1_000n,
+          medianRttMicroseconds: 100n,
+        },
+      },
+      {
+        kind: "quic",
+        providerId: "nnrp.transport.quic.native",
+        state: "succeeded",
+        metrics: {
+          sampleCount: 3,
+          successCount: 3,
+          medianThroughputBytesPerSecond: 2_000n,
+          medianRttMicroseconds: 100n,
+        },
+      },
+    ],
   });
 
   assertEquals(summary.selected, "quic");
@@ -332,8 +357,11 @@ Deno.test("@nnrp/native-client reports route and security failures with frozen p
       }),
     NnrpTransportError,
   );
-  const unresolvedSummary = unresolved.diagnostic.cause as NnrpTransportSelectionSummary;
-  assertEquals(unresolvedSummary.rejected[0]?.reason, "route-unresolved");
+  assertEquals(unresolved instanceof NnrpTransportSelectionError, true);
+  assertEquals(
+    (unresolved as NnrpTransportSelectionError).selection?.candidates[0]?.rejectionReason,
+    "route-unresolved",
+  );
 
   const security = await assertRejects(
     () =>
@@ -344,8 +372,23 @@ Deno.test("@nnrp/native-client reports route and security failures with frozen p
       }),
     NnrpTransportError,
   );
-  const securitySummary = security.diagnostic.cause as NnrpTransportSelectionSummary;
-  assertEquals(securitySummary.rejected[0]?.reason, "security-unsatisfied");
+  assertEquals(security instanceof NnrpTransportSelectionError, true);
+  assertEquals(
+    (security as NnrpTransportSelectionError).selection?.candidates[0]?.rejectionReason,
+    "security-unsatisfied",
+  );
+
+  const websocketSecurity = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrps://runtime.example/session/default",
+        providerRoutes: { websocket: { endpoint: "ws://runtime.example/nnrp" } },
+        transports: [createWebSocketTransportProvider({ binding: fakeTransportBinding("websocket") })],
+        transportPolicy: "force-websocket",
+      }),
+    NnrpTransportSelectionError,
+  );
+  assertEquals(websocketSecurity.selection?.candidates[0]?.rejectionReason, "security-unsatisfied");
 });
 
 Deno.test("@nnrp/native-client rejects unknown provider route keys", async () => {
@@ -374,12 +417,18 @@ Deno.test("@nnrp/native-client diagnoses configured routes whose providers are n
       }),
     NnrpTransportError,
   );
-  assertEquals(error.diagnostic.code, "NNRP_NATIVE_TRANSPORT_SELECTION_FAILED");
-  const summary = error.diagnostic.cause as NnrpTransportSelectionSummary;
-  assertEquals(summary.rejected.map((candidate) => [candidate.kind, candidate.reason]), [
-    ["tcp", "local-unavailable"],
-    ["websocket", "local-unavailable"],
-  ]);
+  assertEquals(error.diagnostic.code, "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT");
+  assertEquals(error instanceof NnrpTransportSelectionError, true);
+  assertEquals(
+    (error as NnrpTransportSelectionError).selection?.candidates.map((candidate) => [
+      candidate.kind,
+      candidate.rejectionReason,
+    ]),
+    [
+      ["tcp", "local-unavailable"],
+      ["websocket", "local-unavailable"],
+    ],
+  );
 });
 
 Deno.test("@nnrp/native-client rejects carriers without client role adoption", async () => {
@@ -1063,7 +1112,7 @@ function roleCarrier(kind: "tcp" | "quic", endpoint: string | URL): NnrpTranspor
   } as NnrpTransportConnection;
 }
 
-function fakeTransportBinding(kind: "tcp" | "quic" | "ipc"): NnrpNativeTransportBinding {
+function fakeTransportBinding(kind: "tcp" | "quic" | "ipc" | "websocket"): NnrpNativeTransportBinding {
   return {
     mode: "test",
     probe: () =>

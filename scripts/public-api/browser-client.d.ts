@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, type NnrpCapabilityManifest, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, type NnrpCapabilityManifest, type NnrpClientProviderRoutes, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidateReadiness, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeObservation, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 import { NnrpWasmBindingUnavailableError } from "./errors.js";
 export { NnrpWasmBindingUnavailableError };
 export interface NnrpBrowserRuntimeOptions {
@@ -10,7 +10,7 @@ export interface NnrpBrowserRuntimeOptions {
 }
 export interface NnrpBrowserConnectOptions {
     readonly endpoint: string;
-    readonly providerEndpoint?: string | URL;
+    readonly providerRoutes?: NnrpClientProviderRoutes;
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
     readonly sessionDefaults?: NnrpBrowserSessionOptions;
@@ -20,7 +20,8 @@ export interface NnrpBrowserTransportSelectionOptions {
     readonly providers?: readonly NnrpBrowserTransportProvider[];
     readonly policy?: NnrpTransportPolicy;
     readonly requestedMaxFrameBytes?: bigint;
-    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {

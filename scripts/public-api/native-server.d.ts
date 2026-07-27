@@ -1,4 +1,4 @@
-import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpServerProviderRoutes, type NnrpSessionFlowControlOptions, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpServerProviderRoutes, type NnrpSessionFlowControlOptions, type NnrpTransportCandidateReadiness, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -68,7 +68,8 @@ export interface NnrpTransportSelectionOptions {
     readonly providers?: readonly NnrpNativeTransportProvider[];
     readonly policy?: NnrpTransportPolicy;
     readonly requestedMaxFrameBytes?: bigint;
-    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;

@@ -30,11 +30,13 @@ import {
   type NnrpSessionFlowControlOptions,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  type NnrpTransportCandidateReadiness,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeObservation,
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportRejectionReason,
@@ -534,7 +536,8 @@ export interface NnrpTransportSelectionOptions {
   readonly providers?: readonly NnrpNativeTransportProvider[];
   readonly policy?: NnrpTransportPolicy;
   readonly requestedMaxFrameBytes?: bigint;
-  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export interface NnrpNativeRuntimeBinding {
@@ -835,9 +838,8 @@ export class NnrpBackendRuntime {
       ...(options.requestedMaxFrameBytes === undefined
         ? {}
         : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      ...(options.probeMetricsByProviderId === undefined
-        ? {}
-        : { probeMetricsByProviderId: options.probeMetricsByProviderId }),
+      candidateReadiness: options.candidateReadiness,
+      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
     });
   }
 }
@@ -1036,11 +1038,20 @@ function resolveServerProviderRoutes(
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
 ): readonly ResolvedServerProviderRoute[] {
+  const installedKinds = new Set(providers.map((provider) => provider.kind));
+  const uninstalledKind = (Object.keys(providerRoutes ?? {}) as NnrpTransportKind[]).find((kind) =>
+    !installedKinds.has(kind)
+  );
+  if (uninstalledKind !== undefined) {
+    throw serverRouteError(uninstalledKind, "local-unavailable");
+  }
   return orderedServerProviders(providers, policy).map((provider) => {
     const route = providerRoutes?.[provider.kind];
     let resolvedEndpoint: string;
     try {
-      resolvedEndpoint = resolveProviderEndpoint(endpoint, provider.kind, route?.endpoint);
+      resolvedEndpoint = provider.kind === "websocket"
+        ? resolveNativeWebSocketEndpoint(route?.endpoint)
+        : resolveProviderEndpoint(endpoint, provider.kind, route?.endpoint);
     } catch (cause) {
       throw serverRouteError(provider.kind, "route-unresolved", cause);
     }
@@ -1065,19 +1076,36 @@ function serverRouteSecuritySatisfied(
   if (kind === "tcp") return !secureApplication || hasSecurity;
   if (kind === "quic") return hasSecurity;
   if (kind === "ipc") return !secureApplication && !hasSecurity;
-  return (new URL(providerEndpoint).protocol === "wss:") === hasSecurity;
+  const secureWebSocket = new URL(providerEndpoint).protocol === "wss:";
+  return (!secureApplication || secureWebSocket) && secureWebSocket === hasSecurity;
+}
+
+function resolveNativeWebSocketEndpoint(endpoint: string | URL | undefined): string {
+  if (endpoint === undefined) throw new TypeError("Native ws/wss routes require an explicit endpoint.");
+  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
+    throw new TypeError("Native ws/wss routes require a ws:// or wss:// endpoint.");
+  }
+  return parsed.toString();
 }
 
 function serverRouteError(
   kind: NnrpTransportKind,
-  reason: Extract<NnrpTransportRejectionReason, "route-unresolved" | "security-unsatisfied">,
+  reason: Extract<
+    NnrpTransportRejectionReason,
+    "local-unavailable" | "route-unresolved" | "security-unsatisfied"
+  >,
   cause?: unknown,
 ): NnrpTransportError {
   return new NnrpTransportError({
-    code: reason === "route-unresolved"
+    code: reason === "local-unavailable"
+      ? "NNRP_NATIVE_PROVIDER_ROUTE_LOCAL_UNAVAILABLE"
+      : reason === "route-unresolved"
       ? "NNRP_NATIVE_PROVIDER_ROUTE_UNRESOLVED"
       : "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
-    message: reason === "route-unresolved"
+    message: reason === "local-unavailable"
+      ? `${kind} server provider route is configured but its provider is not installed.`
+      : reason === "route-unresolved"
       ? `${kind} server provider route is unresolved.`
       : `${kind} server provider route cannot satisfy the application endpoint security intent.`,
     source: "transport",
