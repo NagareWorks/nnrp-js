@@ -5,62 +5,15 @@ import {
   validatePlanCoverage,
   type WireConformanceOptions,
 } from "./wire-conformance-plan.ts";
-import { createHostRouteTargetManifest, type HostRouteProviderDeclaration } from "./host-route-conformance.ts";
+import {
+  BROWSER_HOST_ROUTE_PROFILE,
+  createHostRouteTargetManifest,
+  type HostRouteProfile,
+  NATIVE_HOST_ROUTE_PROFILES,
+} from "./host-route-conformance.ts";
 
 const MANIFEST_WAIT_MILLIS = 15_000;
 const TARGET_EXIT_WAIT_MILLIS = 10_000;
-const HOST_ROUTE_PROFILES: readonly {
-  readonly name: string;
-  readonly expected: number;
-  readonly providers: readonly HostRouteProviderDeclaration[];
-}[] = [
-  {
-    name: "installed-native",
-    expected: 9,
-    providers: [
-      {
-        transport: "tcp",
-        provider_id: "nnrp.transport.tcp.native",
-        installed: true,
-        platforms: ["native"],
-        security_modes: ["plain", "tls_server_auth"],
-      },
-      {
-        transport: "quic",
-        provider_id: "nnrp.transport.quic.native",
-        installed: true,
-        platforms: ["native"],
-        security_modes: ["tls_server_auth"],
-      },
-      {
-        transport: "ipc",
-        provider_id: "nnrp.transport.ipc.native",
-        installed: true,
-        platforms: ["native"],
-        security_modes: ["plain"],
-      },
-      {
-        transport: "websocket",
-        provider_id: "nnrp.transport.websocket.native",
-        installed: true,
-        platforms: ["native"],
-        security_modes: ["plain", "wss"],
-      },
-    ],
-  },
-  {
-    name: "known-uninstalled",
-    expected: 1,
-    providers: [{
-      transport: "quic",
-      provider_id: "example.transport.quic.uninstalled",
-      installed: false,
-      platforms: ["native"],
-      security_modes: ["tls_server_auth"],
-    }],
-  },
-];
-
 if (import.meta.main) {
   await runWireConformance(
     parseWireConformanceOptions(Deno.args, { NNRP_CONFORMANCE_ROOT: Deno.env.get("NNRP_CONFORMANCE_ROOT") }),
@@ -153,6 +106,22 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
 }
 
 export async function runHostRouteConformance(options: WireConformanceOptions, suitePath: string): Promise<void> {
+  await runHostRouteProfiles(options, suitePath, NATIVE_HOST_ROUTE_PROFILES, 10);
+}
+
+export async function runBrowserHostRouteConformance(
+  options: WireConformanceOptions,
+  suitePath: string,
+): Promise<void> {
+  await runHostRouteProfiles(options, suitePath, [BROWSER_HOST_ROUTE_PROFILE], 1);
+}
+
+async function runHostRouteProfiles(
+  options: WireConformanceOptions,
+  suitePath: string,
+  profiles: readonly HostRouteProfile[],
+  expectedTotal: number,
+): Promise<void> {
   const suite = JSON.parse(await Deno.readTextFile(suitePath)) as { readonly suite_version?: unknown };
   if (typeof suite.suite_version !== "string" || suite.suite_version.length === 0) {
     throw new Error("wire suite manifest does not declare suite_version");
@@ -165,7 +134,7 @@ export async function runHostRouteConformance(options: WireConformanceOptions, s
   await requireFile(targetExecutable, "host-route target executable");
 
   let totalPassed = 0;
-  for (const profile of HOST_ROUTE_PROFILES) {
+  for (const profile of profiles) {
     const profileDirectory = resolve(options.artifactDirectory, `host-route-${profile.name}`);
     await Deno.mkdir(profileDirectory, { recursive: true });
     const targetPath = resolve(profileDirectory, "target.json");
@@ -175,7 +144,13 @@ export async function runHostRouteConformance(options: WireConformanceOptions, s
     const targetName = `nnrp-js-host-route-${profile.name}`;
     await Deno.writeTextFile(
       targetPath,
-      `${JSON.stringify(createHostRouteTargetManifest(targetName, suite.suite_version, profile.providers), null, 2)}\n`,
+      `${
+        JSON.stringify(
+          createHostRouteTargetManifest(targetName, suite.suite_version, profile.providers, profile.modes),
+          null,
+          2,
+        )
+      }\n`,
     );
     await runCargo(options.conformanceRoot, [
       "wire-plan",
@@ -222,7 +197,9 @@ export async function runHostRouteConformance(options: WireConformanceOptions, s
     }
     totalPassed += results.length;
   }
-  if (totalPassed !== 10) throw new Error(`Expected ten Preview4 host-route scenarios, got ${totalPassed}.`);
+  if (totalPassed !== expectedTotal) {
+    throw new Error(`Expected ${expectedTotal} Preview4 host-route scenarios, got ${totalPassed}.`);
+  }
 }
 
 export async function runCargo(conformanceRoot: string, runnerArgs: readonly string[]): Promise<void> {

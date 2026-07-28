@@ -16,13 +16,83 @@ export interface HostRouteProviderDeclaration {
   readonly security_modes: readonly ("plain" | "tls_server_auth" | "mutual_tls" | "wss" | "browser_host")[];
 }
 
+export interface HostRouteProfile {
+  readonly name: string;
+  readonly expected: number;
+  readonly modes: readonly ("suite_as_client" | "suite_as_server")[];
+  readonly providers: readonly HostRouteProviderDeclaration[];
+}
+
+export const NATIVE_HOST_ROUTE_PROFILES: readonly HostRouteProfile[] = [
+  {
+    name: "installed-native",
+    expected: 9,
+    modes: ["suite_as_client", "suite_as_server"],
+    providers: [
+      {
+        transport: "tcp",
+        provider_id: "nnrp.transport.tcp.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["plain", "tls_server_auth"],
+      },
+      {
+        transport: "quic",
+        provider_id: "nnrp.transport.quic.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["tls_server_auth"],
+      },
+      {
+        transport: "ipc",
+        provider_id: "nnrp.transport.ipc.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["plain"],
+      },
+      {
+        transport: "websocket",
+        provider_id: "nnrp.transport.websocket.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["plain", "wss"],
+      },
+    ],
+  },
+  {
+    name: "known-uninstalled",
+    expected: 1,
+    modes: ["suite_as_client", "suite_as_server"],
+    providers: [{
+      transport: "quic",
+      provider_id: "example.transport.quic.uninstalled",
+      installed: false,
+      platforms: ["native"],
+      security_modes: ["tls_server_auth"],
+    }],
+  },
+];
+
+export const BROWSER_HOST_ROUTE_PROFILE: HostRouteProfile = {
+  name: "browser-wss",
+  expected: 1,
+  modes: ["suite_as_server"],
+  providers: [{
+    transport: "websocket",
+    provider_id: "nnrp.transport.websocket.browser-wasm",
+    installed: true,
+    platforms: ["browser"],
+    security_modes: ["browser_host"],
+  }],
+};
+
 export interface HostRouteTargetManifest {
   readonly $schema: typeof HOST_ROUTE_TARGET_SCHEMA;
   readonly target_name: string;
   readonly protocol_version: typeof HOST_ROUTE_PROTOCOL_VERSION;
   readonly suite_version: string;
   readonly wire_conformance: {
-    readonly modes: readonly ["suite_as_client", "suite_as_server"];
+    readonly modes: readonly ("suite_as_client" | "suite_as_server")[];
     readonly transports: readonly [];
     readonly host_route_providers: readonly HostRouteProviderDeclaration[];
     readonly capabilities: readonly ["host.routes"];
@@ -107,10 +177,12 @@ export function createHostRouteTargetManifest(
   targetName: string,
   suiteVersion: string,
   providers: readonly HostRouteProviderDeclaration[],
+  modes: readonly ("suite_as_client" | "suite_as_server")[] = ["suite_as_client", "suite_as_server"],
 ): HostRouteTargetManifest {
-  if (targetName.length === 0 || suiteVersion.length === 0 || providers.length === 0) {
+  if (targetName.length === 0 || suiteVersion.length === 0 || providers.length === 0 || modes.length === 0) {
     throw new Error("Host-route target identity and provider declarations must be non-empty.");
   }
+  if (new Set(modes).size !== modes.length) throw new Error("Host-route target modes must not repeat.");
   const identities = new Set<string>();
   const transports = new Set<NnrpTransportKind>();
   for (const provider of providers) {
@@ -129,7 +201,7 @@ export function createHostRouteTargetManifest(
     protocol_version: HOST_ROUTE_PROTOCOL_VERSION,
     suite_version: suiteVersion,
     wire_conformance: {
-      modes: ["suite_as_client", "suite_as_server"],
+      modes: [...modes],
       transports: [],
       host_route_providers: providers.map((provider) => ({ ...provider })),
       capabilities: ["host.routes"],

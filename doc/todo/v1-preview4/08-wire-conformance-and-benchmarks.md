@@ -39,7 +39,7 @@
   - [x] Run browser WebSocket/WASM scenarios in the browser job.
   - [x] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
   - [x] Fail when a declared capability, mode, or transport has no selected scenario.
-- [ ] Add host-route cardinality coverage against suite-owned endpoints.
+- [x] Add host-route cardinality coverage against suite-owned endpoints.
   - [x] Run a native client with at least two resolved routes and verify deterministic selection.
   - [x] Run forced unresolved and security-incompatible client routes without fallback.
   - [x] Run a native server with at least two simultaneously bound listeners.
@@ -47,7 +47,7 @@
   - [x] Accept one real session through every listener and verify active transport identity.
   - [x] Inject a bind failure and verify atomic rollback.
   - [x] Inject a terminal listener failure and verify the logical set closes instead of shrinking.
-  - [ ] Run the native and browser `nnrps://` security matrix.
+  - [x] Run the native and browser `nnrps://` security matrix.
   - [x] Verify known-but-uninstalled routes and combined failures use exact rejection precedence.
   - [x] Reject self-adapter-only evidence for these scenarios.
 

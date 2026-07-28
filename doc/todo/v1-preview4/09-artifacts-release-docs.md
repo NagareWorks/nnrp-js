@@ -2,10 +2,10 @@
 
 ## Coordinated Route-Contract Release Gate
 
-- [ ] Do not publish another JavaScript Preview4 package until the full route-cardinality correction is complete.
+- [x] Do not publish another JavaScript Preview4 package until the full route-cardinality correction is complete.
   - [x] Native client multi-route selection passes suite-owned E2E.
   - [x] Native server multi-listener ownership and rollback pass suite-owned E2E.
-  - [ ] Native and browser security-intent matrices pass.
+  - [x] Native and browser security-intent matrices pass.
   - [x] Public declarations contain route sets and no production singular route overrides.
 - [x] Pin reviewed Rust artifact `1.0.0-preview.4.17`, containing the complete route/security ABI.
 - [ ] Reinspect every npm tarball for role, transport-native, and browser-WASM ownership boundaries.

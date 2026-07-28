@@ -132,3 +132,11 @@ Deno.test("browser wire evidence is emitted as typed JSON lines", () => {
   }).trimEnd().split("\n").map((line) => JSON.parse(line));
   assertEquals(lines.map((entry) => entry.kind), ["console", "frame", "timing"]);
 });
+
+Deno.test("browser host-route WSS trusts only the suite certificate pin", async () => {
+  const targetSource = await Deno.readTextFile("scripts/run-host-route-target.ts");
+  const runnerSource = await Deno.readTextFile("scripts/run-browser-wire-conformance.ts");
+  assertMatch(targetSource, /--ignore-certificate-errors-spki-list=/);
+  assertEquals(targetSource.includes('"--ignore-certificate-errors"'), false);
+  assertMatch(runnerSource, /runBrowserHostRouteConformance/);
+});

@@ -20,7 +20,10 @@ import { createIpcTransportProvider } from "@nnrp/transport-ipc";
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
+import { createHash, X509Certificate } from "node:crypto";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveBrowserExecutable } from "./browser-wire-runtime.ts";
 import {
   createClientRouteEvidence,
   createRollbackEvidence,
@@ -52,6 +55,8 @@ interface TargetOptions {
 
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const CLIENT_ACCEPT_OBSERVATION_MILLISECONDS = 250;
+const BROWSER_RESULT_TIMEOUT_MILLISECONDS = 15_000;
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OFFICIAL_PROVIDER_IDS: Readonly<Record<NnrpTransportKind, string>> = {
   tcp: "nnrp.transport.tcp.native",
   quic: "nnrp.transport.quic.native",
@@ -100,8 +105,189 @@ async function runCase(
   if (identities.join("\n") !== resolvedIdentities.join("\n")) {
     throw new Error("Resolved host-route scenario changes provider identities.");
   }
+  if (fixture.platform === "browser") return await runBrowserClientCase(scenario, resolvedScenario, options);
   if (fixture.role === "client") return await runClientCase(scenario, fixture, resolvedFixture, options.artifacts);
   return await runServerCase(scenario, fixture, resolvedFixture, options);
+}
+
+async function runBrowserClientCase(
+  scenario: HostRouteScenario,
+  resolvedScenario: HostRouteScenario,
+  options: TargetOptions,
+): Promise<HostRouteCaseResult> {
+  if (scenario.host_route.role !== "client") throw new Error("Browser host-route target cannot host a server role.");
+  const browserDirectory = resolve(options.artifacts, "browser-host-route");
+  await Deno.mkdir(browserDirectory, { recursive: true });
+  const bundlePath = resolve(browserDirectory, "target.js");
+  await buildBrowserHostRouteBundle(bundlePath);
+
+  let resolveResult: (result: HostRouteCaseResult) => void = () => undefined;
+  let rejectResult: (error: Error) => void = () => undefined;
+  const resultPromise = new Promise<HostRouteCaseResult>((resolvePromise, rejectPromise) => {
+    resolveResult = resolvePromise;
+    rejectResult = rejectPromise;
+  });
+  const abortController = new AbortController();
+  const server = Deno.serve(
+    { hostname: "127.0.0.1", port: 0, signal: abortController.signal, onListen: () => undefined },
+    async (request) => {
+      const url = new URL(request.url);
+      if (request.method === "POST" && url.pathname === "/report") {
+        try {
+          resolveResult(validateBrowserResult(await request.json(), scenario.id));
+          return new Response(null, { status: 204 });
+        } catch (error) {
+          rejectResult(error instanceof Error ? error : new Error(String(error)));
+          return new Response("invalid browser host-route report", { status: 400 });
+        }
+      }
+      if (request.method !== "GET") return new Response("method not allowed", { status: 405 });
+      if (url.pathname === "/") {
+        return new Response(
+          '<!doctype html><html><head><meta charset="utf-8"><title>NNRP browser host route</title></head>' +
+            '<body><main>NNRP browser host route</main><script type="module" src="/target.js"></script></body></html>',
+          { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+        );
+      }
+      if (url.pathname === "/scenario") return jsonResponse(scenario);
+      if (url.pathname === "/resolved-scenario") return jsonResponse(resolvedScenario);
+      const files: Readonly<Record<string, { readonly path: string; readonly contentType: string }>> = {
+        "/target.js": { path: bundlePath, contentType: "text/javascript" },
+        "/wasm/nnrp_wasm.js": {
+          path: resolve(REPOSITORY_ROOT, "packages/browser-client/wasm/nnrp_wasm.js"),
+          contentType: "text/javascript",
+        },
+        "/wasm/nnrp_wasm_bg.wasm": {
+          path: resolve(REPOSITORY_ROOT, "packages/browser-client/wasm/nnrp_wasm_bg.wasm"),
+          contentType: "application/wasm",
+        },
+      };
+      const file = files[url.pathname];
+      if (file === undefined) return new Response("not found", { status: 404 });
+      return new Response(await Deno.readFile(file.path), {
+        headers: { "content-type": file.contentType, "cache-control": "no-store" },
+      });
+    },
+  );
+  const address = server.addr as Deno.NetAddr;
+  const origin = `http://127.0.0.1:${address.port}`;
+  const targetUrl = new URL("/", origin);
+  targetUrl.searchParams.set("scenarioId", scenario.id);
+  targetUrl.searchParams.set("scenario", `${origin}/scenario`);
+  targetUrl.searchParams.set("resolvedScenario", `${origin}/resolved-scenario`);
+  targetUrl.searchParams.set("report", `${origin}/report`);
+  const browserExecutable = await resolveBrowserExecutable(Deno.env.get("NNRP_BROWSER_EXECUTABLE"));
+  const spkiPin = certificateSpkiPin(await Deno.readFile(resolve(options.artifacts, "server.der")));
+  const browser = launchBrowser(
+    browserExecutable,
+    targetUrl.href,
+    resolve(browserDirectory, "chrome-profile"),
+    spkiPin,
+  );
+  const browserOutput = browser.output();
+  try {
+    return await withTimeout(resultPromise, BROWSER_RESULT_TIMEOUT_MILLISECONDS, "browser host-route result");
+  } finally {
+    abortController.abort();
+    await server.finished.catch(() => undefined);
+    try {
+      browser.kill("SIGTERM");
+    } catch {
+      // The page may close after publishing its result.
+    }
+    const output = await browserOutput.catch(() => undefined);
+    if (output !== undefined) {
+      await Deno.writeFile(resolve(browserDirectory, "stdout.log"), output.stdout);
+      await Deno.writeFile(resolve(browserDirectory, "stderr.log"), output.stderr);
+    }
+  }
+}
+
+async function buildBrowserHostRouteBundle(outputPath: string): Promise<void> {
+  const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+  const status = await new Deno.Command("deno", {
+    args: [
+      "bundle",
+      "--no-config",
+      "--import-map",
+      resolve(scriptDirectory, "browser-wire-import-map.json"),
+      "--platform=browser",
+      "--output",
+      outputPath,
+      resolve(scriptDirectory, "run-browser-host-route-target.ts"),
+    ],
+    stdin: "null",
+    stdout: "inherit",
+    stderr: "inherit",
+  }).spawn().status;
+  if (!status.success) throw new Error(`browser host-route target bundle failed with code ${status.code}`);
+}
+
+export function validateBrowserResult(value: unknown, scenarioId: string): HostRouteCaseResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Browser host-route result must be an object.");
+  }
+  const result = value as Record<string, unknown>;
+  if (result.id !== scenarioId) throw new Error("Browser host-route result changes the scenario id.");
+  if (result.outcome !== "passed" && result.outcome !== "failed") {
+    throw new Error("Browser host-route result has an invalid outcome.");
+  }
+  if (result.terminal !== "success" && result.terminal !== "error") {
+    throw new Error("Browser host-route result has an invalid terminal state.");
+  }
+  if (typeof result.message !== "string" || result.message.length === 0) {
+    throw new Error("Browser host-route result must include a message.");
+  }
+  return value as HostRouteCaseResult;
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(`${JSON.stringify(value)}\n`, {
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+  });
+}
+
+export function certificateSpkiPin(certificateDer: Uint8Array): string {
+  const certificate = new X509Certificate(certificateDer);
+  const subjectPublicKeyInfo = certificate.publicKey.export({ type: "spki", format: "der" });
+  return createHash("sha256").update(subjectPublicKeyInfo).digest("base64");
+}
+
+function launchBrowser(
+  executable: string,
+  url: string,
+  profileDirectory: string,
+  certificatePin: string,
+): Deno.ChildProcess {
+  return new Deno.Command(executable, {
+    args: [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--enable-logging=stderr",
+      `--ignore-certificate-errors-spki-list=${certificatePin}`,
+      `--user-data-dir=${profileDirectory}`,
+      url,
+    ],
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMillis: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMillis} ms`)), timeoutMillis);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 async function runClientCase(

@@ -1,6 +1,10 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { resolve } from "node:path";
-import { createHostRouteTargetManifest } from "./host-route-conformance.ts";
+import {
+  BROWSER_HOST_ROUTE_PROFILE,
+  createHostRouteTargetManifest,
+  NATIVE_HOST_ROUTE_PROFILES,
+} from "./host-route-conformance.ts";
 import { parseWireConformanceOptions, validatePlanCoverage } from "./wire-conformance-plan.ts";
 
 Deno.test("wire conformance options select explicit and environment roots", () => {
@@ -67,4 +71,17 @@ Deno.test("native wire host-route profiles use suite-owned provider declarations
   assertEquals(manifest.wire_conformance.modes, ["suite_as_client", "suite_as_server"]);
   assertEquals(manifest.wire_conformance.transports, []);
   assertEquals(manifest.wire_conformance.host_route_providers.length, 2);
+  assertEquals(NATIVE_HOST_ROUTE_PROFILES.map((profile) => profile.expected), [9, 1]);
+});
+
+Deno.test("browser host-route profile declares only the real browser client role", () => {
+  assertEquals(BROWSER_HOST_ROUTE_PROFILE.modes, ["suite_as_server"]);
+  assertEquals(BROWSER_HOST_ROUTE_PROFILE.expected, 1);
+  assertEquals(BROWSER_HOST_ROUTE_PROFILE.providers, [{
+    transport: "websocket",
+    provider_id: "nnrp.transport.websocket.browser-wasm",
+    installed: true,
+    platforms: ["browser"],
+    security_modes: ["browser_host"],
+  }]);
 });

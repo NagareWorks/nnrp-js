@@ -12,7 +12,7 @@ import {
   reserveWebSocketEndpoint,
   resolveBrowserExecutable,
 } from "./browser-wire-runtime.ts";
-import { buildRunner, requireFile, runCargo } from "./run-wire-conformance.ts";
+import { buildRunner, requireFile, runBrowserHostRouteConformance, runCargo } from "./run-wire-conformance.ts";
 import { createWireConformanceTargetManifest } from "./wire-target-manifest.ts";
 import { validatePlanCoverage } from "./wire-conformance-plan.ts";
 
@@ -160,6 +160,13 @@ export async function runBrowserWireConformance(options: BrowserWireOptions): Pr
       await Deno.writeFile(resolve(options.artifactDirectory, "browser-stderr.log"), output.stderr);
     }
   }
+  await runBrowserHostRouteConformance(
+    {
+      conformanceRoot: options.conformanceRoot,
+      artifactDirectory: resolve(options.artifactDirectory, "host-route"),
+    },
+    suitePath,
+  );
 }
 
 async function serveBrowserRequest(

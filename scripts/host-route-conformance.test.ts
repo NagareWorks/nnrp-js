@@ -3,9 +3,10 @@ import {
   createHostRouteTargetManifest,
   createRollbackEvidence,
   createSuccessfulClientRouteEvidence,
+  type HostRouteCaseResult,
   validateHostRouteScenario,
 } from "./host-route-conformance.ts";
-import { clientLocator, providerRouteLocator, serverPolicy } from "./run-host-route-target.ts";
+import { clientLocator, providerRouteLocator, serverPolicy, validateBrowserResult } from "./run-host-route-target.ts";
 
 const clientScenario = {
   id: "wire.host-route.client.multi-route",
@@ -46,6 +47,30 @@ Deno.test("host-route manifest declares an independent host-only provider surfac
       ...manifest.wire_conformance.host_route_providers,
       { ...manifest.wire_conformance.host_route_providers[0]! },
     ])
+  );
+  const browserManifest = createHostRouteTargetManifest(
+    "nnrp-js-browser-host",
+    "0.1.0",
+    [{
+      transport: "websocket",
+      provider_id: "nnrp.transport.websocket.browser-wasm",
+      installed: true,
+      platforms: ["browser"],
+      security_modes: ["browser_host"],
+    }],
+    ["suite_as_server"],
+  );
+  assertEquals(browserManifest.wire_conformance.modes, ["suite_as_server"]);
+  assertThrows(() =>
+    createHostRouteTargetManifest("target", "0.1.0", browserManifest.wire_conformance.host_route_providers, [])
+  );
+  assertThrows(() =>
+    createHostRouteTargetManifest(
+      "target",
+      "0.1.0",
+      browserManifest.wire_conformance.host_route_providers,
+      ["suite_as_server", "suite_as_server"],
+    )
   );
 });
 
@@ -106,4 +131,19 @@ Deno.test("host-route target observes an injected terminal listener before healt
     },
   });
   assertEquals(serverPolicy(scenario.host_route.routes), "prefer-tcp");
+});
+
+Deno.test("browser host-route results preserve the suite scenario identity", () => {
+  const result: HostRouteCaseResult = {
+    id: "wire.host-route.browser.wss",
+    outcome: "passed",
+    terminal: "success",
+    observed_frames: [],
+    message: "browser completed",
+    evidence_paths: [],
+  };
+  assertEquals(validateBrowserResult(result, result.id), result);
+  assertThrows(() => validateBrowserResult({ ...result, id: "other" }, result.id));
+  assertThrows(() => validateBrowserResult({ ...result, outcome: "unknown" }, result.id));
+  assertThrows(() => validateBrowserResult({ ...result, terminal: "unknown" }, result.id));
 });
