@@ -172,9 +172,9 @@ async function verifyNativeTransportLoopbacks() {
           throw new Error(provider.kind + ": Node managed FFI loopback returned an invalid packet batch");
         }
       } finally {
-        client.close();
-        peer.close();
-        server.close();
+        await client.close();
+        await peer.close();
+        await server.close();
       }
     }
 
