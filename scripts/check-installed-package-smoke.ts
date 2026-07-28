@@ -38,6 +38,8 @@ await Deno.mkdir(installRoot, { recursive: true });
 await writeConsumerProject(packed);
 await runNpm(["install", "--ignore-scripts", "--package-lock=false", "--no-audit", "--no-fund"], installRoot);
 await run("node", ["package-smoke.mjs"], installRoot);
+await Deno.copyFile("scripts/check-node-import-smoke.mjs", `${installRoot}/native-role-smoke.mjs`);
+await run("node", ["native-role-smoke.mjs", "--installed"], installRoot);
 await run(Deno.execPath(), ["run", "--node-modules-dir=manual", "package-smoke.mjs"], installRoot);
 await runBrowserSmoke(installRoot);
 
@@ -51,7 +53,7 @@ await Deno.writeTextFile(
           const result = packed.get(name)!;
           return { name, version: result.version, filename: result.filename, integrity: result.integrity };
         }),
-        runtimes: { node: "passed", deno: "passed", browser: "passed" },
+        runtimes: { node: "passed", nodeNativeRole: "passed", deno: "passed", browser: "passed" },
       },
       null,
       2,

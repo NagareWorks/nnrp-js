@@ -7,11 +7,12 @@ const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
 
-Deno.test("release workflow and local preparation pin Rust preview4.18", () => {
-  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.18/g)?.length ?? 0) >= 3, true);
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.18"');
-  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.18"');
+Deno.test("release workflow and local preparation pin Rust preview4.19", () => {
+  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.19/g)?.length ?? 0) >= 3, true);
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.19"');
+  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.19"');
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.17"), false);
+  assertEquals(releaseWorkflow.includes("1.0.0-preview.4.18"), false);
   assertEquals(artifactPreparation.includes("1.0.0-preview.4.17"), false);
   assertEquals(sdkReporting.includes("1.0.0-preview.4.17"), false);
   assertStringIncludes(dryRunArtifacts, "await writeJson(`${outputDir}/rust-artifacts.json`, rustArtifacts)");

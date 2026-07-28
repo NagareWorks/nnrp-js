@@ -12,12 +12,13 @@ import {
 } from "@nnrp/core";
 
 const TRANSPORT_ID_IPC = 3;
+const TRANSPORT_LABEL = "IPC";
 const HANDLE_KIND_INVALID = 0;
 const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
 const HANDLE_KIND_SERVER_ACCEPT = 13;
-const ABI_VERSION = "4.1.0";
+const ABI_VERSION = "4.1.1";
 const HANDLE_SIZE = 24;
 const BUFFER_VIEW_SIZE = 16;
 const STATUS_SIZE = 16;
@@ -88,6 +89,7 @@ const DENO_TRANSPORT_SYMBOLS = {
     nonblocking: true,
   },
   nnrp_transport_close: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
+  nnrp_transport_runtime_shutdown: { parameters: [], result: STATUS_STRUCT },
   nnrp_buffer_release: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
   nnrp_client_connect: {
     parameters: [CLIENT_CONNECT_REQUEST_STRUCT, "buffer"],
@@ -162,6 +164,7 @@ interface DenoTransportSymbols {
   nnrp_transport_write_batch(request: Uint8Array): Promise<Uint8Array>;
   nnrp_transport_read_batch(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_transport_close(handle: Uint8Array): Uint8Array;
+  nnrp_transport_runtime_shutdown(): Uint8Array;
   nnrp_buffer_release(handle: Uint8Array): Uint8Array;
   nnrp_client_connect(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_client_open_session(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
@@ -295,7 +298,40 @@ function hasDenoFfi(): boolean {
 
 function loadDenoIpcBinding(runtime: DenoRuntime, libraryPath: string): NnrpNativeTransportBinding {
   const library = runtime.dlopen(libraryPath, DENO_TRANSPORT_SYMBOLS);
+  registerDenoRuntimeShutdown(library);
   return new DenoIpcBinding(library);
+}
+
+const denoRuntimeLibraries = new Set<DenoTransportLibrary>();
+let denoRuntimeShutdownRegistered = false;
+
+function registerDenoRuntimeShutdown(library: DenoTransportLibrary): void {
+  denoRuntimeLibraries.add(library);
+  if (denoRuntimeShutdownRegistered) return;
+  denoRuntimeShutdownRegistered = true;
+  const runtimeGlobal = globalThis as typeof globalThis & {
+    addEventListener(type: "unload", listener: () => void): void;
+  };
+  runtimeGlobal.addEventListener("unload", () => {
+    for (const runtimeLibrary of denoRuntimeLibraries) {
+      try {
+        const status = runtimeLibrary.symbols.nnrp_transport_runtime_shutdown();
+        const view = dataView(status);
+        if (view.getUint32(0, true) !== 0) {
+          console.error(`${TRANSPORT_LABEL} native runtime shutdown failed with status ${view.getUint32(0, true)}.`);
+        }
+      } catch (error) {
+        console.error(`${TRANSPORT_LABEL} native runtime shutdown threw: ${String(error)}.`);
+      } finally {
+        try {
+          runtimeLibrary.close();
+        } catch (error) {
+          console.error(`${TRANSPORT_LABEL} native library close threw: ${String(error)}.`);
+        }
+      }
+    }
+    denoRuntimeLibraries.clear();
+  });
 }
 
 class DenoIpcBinding implements NnrpNativeTransportBinding {

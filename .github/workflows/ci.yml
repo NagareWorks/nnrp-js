@@ -376,6 +376,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: deno task artifacts:prepare
+      - name: Build Node packages
+        if: matrix.transport == 'tcp'
+        run: deno task build
+      - name: Run Node native role E2E
+        if: matrix.transport == 'tcp'
+        run: deno task node-import-smoke
       - name: Run native carrier E2E
         run: >-
           deno task native-transport-smoke
@@ -388,6 +394,38 @@ jobs:
           name: nnrp-js-${{ runner.os }}-${{ runner.arch }}-${{ matrix.transport }}
           if-no-files-found: error
           path: artifacts/native-carrier-matrix/*.json
+
+  native-node-windows-x86:
+    name: native-node-windows-x86
+    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v5
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Setup x86 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: x86
+      - name: Prepare Rust artifact packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: deno task artifacts:prepare
+      - name: Install x86 Koffi runtime
+        shell: pwsh
+        run: |
+          npm install --prefix artifacts/koffi-x86 --no-save --package-lock=false --ignore-scripts @koromix/koffi-win32-ia32@3.1.1
+          New-Item -ItemType Directory -Force node_modules/@koromix | Out-Null
+          Copy-Item -Recurse -Force artifacts/koffi-x86/node_modules/@koromix/koffi-win32-ia32 node_modules/@koromix/
+      - name: Build Node packages
+        run: deno task build
+      - name: Run x86 Node native role E2E
+        run: deno task node-import-smoke
 
   docs-only:
     name: docs-only
@@ -410,6 +448,7 @@ jobs:
       - wire-conformance-native
       - wire-conformance-browser
       - native-carrier-matrix
+      - native-node-windows-x86
     if: always()
     steps:
       - name: Verify required checks
@@ -423,6 +462,7 @@ jobs:
           wire_conformance="${{ needs.wire-conformance-native.result }}"
           browser_wire_conformance="${{ needs.wire-conformance-browser.result }}"
           native_carrier_matrix="${{ needs.native-carrier-matrix.result }}"
+          native_node_windows_x86="${{ needs.native-node-windows-x86.result }}"
           if [[ "$content_policy" != "success" ]]; then
             echo "content-policy did not pass: $content_policy"
             exit 1
@@ -441,6 +481,10 @@ jobs:
           fi
           if [[ "$native_carrier_matrix" != "success" && "$docs" != "success" ]]; then
             echo "native-carrier-matrix did not pass: $native_carrier_matrix"
+            exit 1
+          fi
+          if [[ "$native_node_windows_x86" != "success" && "$docs" != "success" ]]; then
+            echo "native-node-windows-x86 did not pass: $native_node_windows_x86"
             exit 1
           fi
           if [[ "$build" == "success" || "$docs" == "success" ]]; then
