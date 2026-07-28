@@ -56,6 +56,7 @@ interface TargetOptions {
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const CLIENT_ACCEPT_OBSERVATION_MILLISECONDS = 250;
 const BROWSER_RESULT_TIMEOUT_MILLISECONDS = 15_000;
+const BROWSER_OUTPUT_DRAIN_TIMEOUT_MILLISECONDS = 1_000;
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OFFICIAL_PROVIDER_IDS: Readonly<Record<NnrpTransportKind, string>> = {
   tcp: "nnrp.transport.tcp.native",
@@ -190,16 +191,39 @@ async function runBrowserClientCase(
   } finally {
     abortController.abort();
     await server.finished.catch(() => undefined);
-    try {
-      browser.kill("SIGTERM");
-    } catch {
-      // The page may close after publishing its result.
-    }
-    const output = await browserOutput.catch(() => undefined);
+    await terminateBrowserTree(browser);
+    const output = await withTimeout(
+      browserOutput,
+      BROWSER_OUTPUT_DRAIN_TIMEOUT_MILLISECONDS,
+      "browser host-route output drain",
+    ).catch(() => undefined);
     if (output !== undefined) {
       await Deno.writeFile(resolve(browserDirectory, "stdout.log"), output.stdout);
       await Deno.writeFile(resolve(browserDirectory, "stderr.log"), output.stderr);
     }
+  }
+}
+
+export function browserTreeTerminationCommand(pid: number): readonly [string, ...string[]] {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Browser process id must be a positive safe integer.");
+  return ["taskkill", "/PID", String(pid), "/T", "/F"];
+}
+
+async function terminateBrowserTree(browser: Deno.ChildProcess): Promise<void> {
+  if (Deno.build.os === "windows") {
+    const [command, ...args] = browserTreeTerminationCommand(browser.pid);
+    const status = await new Deno.Command(command, {
+      args,
+      stdin: "null",
+      stdout: "null",
+      stderr: "null",
+    }).spawn().status.catch(() => undefined);
+    if (status?.success) return;
+  }
+  try {
+    browser.kill("SIGKILL");
+  } catch {
+    // The page may close after publishing its result.
   }
 }
 

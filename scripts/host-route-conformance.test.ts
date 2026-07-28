@@ -6,7 +6,13 @@ import {
   type HostRouteCaseResult,
   validateHostRouteScenario,
 } from "./host-route-conformance.ts";
-import { clientLocator, providerRouteLocator, serverPolicy, validateBrowserResult } from "./run-host-route-target.ts";
+import {
+  browserTreeTerminationCommand,
+  clientLocator,
+  providerRouteLocator,
+  serverPolicy,
+  validateBrowserResult,
+} from "./run-host-route-target.ts";
 
 const clientScenario = {
   id: "wire.host-route.client.multi-route",
@@ -146,4 +152,10 @@ Deno.test("browser host-route results preserve the suite scenario identity", () 
   assertThrows(() => validateBrowserResult({ ...result, id: "other" }, result.id));
   assertThrows(() => validateBrowserResult({ ...result, outcome: "unknown" }, result.id));
   assertThrows(() => validateBrowserResult({ ...result, terminal: "unknown" }, result.id));
+});
+
+Deno.test("browser host-route terminates the complete Windows process tree", () => {
+  assertEquals(browserTreeTerminationCommand(42), ["taskkill", "/PID", "42", "/T", "/F"]);
+  assertThrows(() => browserTreeTerminationCommand(0));
+  assertThrows(() => browserTreeTerminationCommand(Number.MAX_SAFE_INTEGER + 1));
 });

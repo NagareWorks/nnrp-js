@@ -1960,7 +1960,7 @@ function validateTransportSelectionEvidence(
 
 function validateTransportCandidateReadiness(readiness: NnrpTransportCandidateReadiness): void {
   if (
-    !NNRP_TRANSPORT_KINDS.has(readiness.kind) || readiness.providerId.length === 0 ||
+    !NNRP_TRANSPORT_KINDS.has(readiness.kind) || !isNonEmptyAscii(readiness.providerId) ||
     typeof readiness.routeResolved !== "boolean" || typeof readiness.securitySatisfied !== "boolean"
   ) {
     throw invalidTransportEvidence("Candidate readiness contains an invalid provider identity or readiness value.");
@@ -1969,7 +1969,7 @@ function validateTransportCandidateReadiness(readiness: NnrpTransportCandidateRe
 
 function validateTransportProbeObservation(observation: NnrpTransportProbeObservation): void {
   if (
-    !NNRP_TRANSPORT_KINDS.has(observation.kind) || observation.providerId.length === 0 ||
+    !NNRP_TRANSPORT_KINDS.has(observation.kind) || !isNonEmptyAscii(observation.providerId) ||
     (observation.state !== "succeeded" && observation.state !== "failed")
   ) {
     throw invalidTransportEvidence("Probe observation contains an invalid provider identity or state.");
@@ -2038,8 +2038,9 @@ function validateTransportProviderMetadata(
 ): void {
   const limitations = metadata.limitations;
   if (
-    metadata.id.length === 0 || !Number.isInteger(metadata.cost.modelId) || metadata.cost.modelId < 0 ||
+    !isNonEmptyAscii(metadata.id) || !Number.isInteger(metadata.cost.modelId) || metadata.cost.modelId < 0 ||
     metadata.cost.modelId > 0xffff || metadata.cost.units < 0n ||
+    (metadata.cost.modelId === 0 && metadata.cost.units !== 0n) ||
     metadata.cost.units > 0xffff_ffff_ffff_ffffn || !Number.isInteger(metadata.preferenceRank) ||
     metadata.preferenceRank < 0 || metadata.preferenceRank > 0xffff || metadata.limits.maxFrameBytes <= 0n ||
     metadata.limits.maxFrameBytes > 0xffff_ffff_ffff_ffffn || new Set(limitations).size !== limitations.length ||
@@ -2051,6 +2052,18 @@ function validateTransportProviderMetadata(
       kind,
     );
   }
+}
+
+function isNonEmptyAscii(value: string): boolean {
+  if (value.length === 0) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) > 0x7f) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function validateTransportProbeMetrics(metrics: NnrpTransportProbeMetrics, kind: NnrpTransportKind): void {

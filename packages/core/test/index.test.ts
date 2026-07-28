@@ -1496,6 +1496,25 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
   );
   assertEquals(costModelError.diagnostic.code, "NNRP_TRANSPORT_PROVIDER_METADATA_INVALID");
 
+  for (
+    const invalidProvider of [
+      transportProvider("tcp", { id: "nnrp.transport.tcp.\u8f93\u5165" }),
+      transportProvider("tcp", { costModelId: 0, costUnits: 1n }),
+    ]
+  ) {
+    const invalidMetadataError = assertThrows(
+      () =>
+        createTransportCandidates({
+          local,
+          peer,
+          providers: [invalidProvider],
+          candidateReadiness: [],
+        }),
+      NnrpTransportError,
+    );
+    assertEquals(invalidMetadataError.diagnostic.code, "NNRP_TRANSPORT_PROVIDER_METADATA_INVALID");
+  }
+
   const provider = transportProvider("tcp");
   const metricsError = assertThrows(
     () =>
@@ -1553,8 +1572,25 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
       local,
       peer,
       providers,
+      candidateReadiness: [readiness[0]!, { ...readiness[1]!, providerId: "nnrp.transport.\u8f93\u5165" }],
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
       candidateReadiness: readiness,
       probeObservations: [{ kind: "tcp", providerId: "nnrp.transport.unknown", state: "failed" }],
+    })
+  );
+  assertInvalidEvidence(() =>
+    createTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: readiness,
+      probeObservations: [{ kind: "tcp", providerId: "nnrp.transport.\u8f93\u5165", state: "failed" }],
     })
   );
   const failedProbe = { kind: "tcp", providerId: providers[0]!.metadata.id, state: "failed" } as const;
