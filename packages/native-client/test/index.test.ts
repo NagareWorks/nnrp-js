@@ -15,6 +15,7 @@ import {
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
+  type NnrpTransportKind,
   NnrpTransportSelectionError,
   ObjectReleaseReason,
   OwnershipHint,
@@ -343,6 +344,63 @@ Deno.test("@nnrp/native-client continues past unresolved Auto routes and adopts 
   });
 
   assertEquals(connected, ["tcp"]);
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client does not infer peer support from an installed provider", async () => {
+  let probed = 0;
+  let connected = 0;
+  const binding = {
+    ...fakeTransportBinding("ipc"),
+    probe: () => {
+      probed += 1;
+      return Promise.resolve({
+        sampleCount: 3,
+        successCount: 3,
+        medianThroughputBytesPerSecond: 1_000n,
+        medianRttMicroseconds: 10n,
+      });
+    },
+    connect: (options: NnrpTransportEndpoint) => {
+      connected += 1;
+      return Promise.resolve(roleCarrier("ipc", options.endpoint));
+    },
+  } satisfies NnrpNativeTransportBinding;
+
+  const error = await assertRejects(
+    () =>
+      openNativeClient({
+        endpoint: "nnrp://127.0.0.1:4433/session/default",
+        transports: [createIpcTransportProvider({ binding })],
+        transportPolicy: "force-ipc",
+      }),
+    NnrpTransportSelectionError,
+  );
+
+  assertEquals(error.selection?.candidates[0]?.rejectionReason, "peer-unsupported");
+  assertEquals(probed, 0);
+  assertEquals(connected, 0);
+});
+
+Deno.test("@nnrp/native-client treats an explicit provider route as peer support", async () => {
+  const connected: string[] = [];
+  const ipcEndpoint = Deno.build.os === "windows" ? "npipe://./pipe/nnrp-test" : "unix:///run/nnrp.sock";
+  const binding = {
+    ...fakeTransportBinding("ipc"),
+    connect: (options: NnrpTransportEndpoint) => {
+      connected.push(String(options.endpoint));
+      return Promise.resolve(roleCarrier("ipc", options.endpoint));
+    },
+  } satisfies NnrpNativeTransportBinding;
+
+  const client = await openNativeClient({
+    endpoint: "nnrp://runtime.example/session/default",
+    providerRoutes: { ipc: { endpoint: ipcEndpoint } },
+    transports: [createIpcTransportProvider({ binding })],
+    transportPolicy: "force-ipc",
+  });
+
+  assertEquals(connected, [ipcEndpoint]);
   await client.close();
 });
 
@@ -1096,7 +1154,7 @@ function fakeQuicNativeBinding(): NnrpQuicNativeBinding {
   return fakeTransportBinding("quic");
 }
 
-function roleCarrier(kind: "tcp" | "quic", endpoint: string | URL): NnrpTransportConnection {
+function roleCarrier(kind: NnrpTransportKind, endpoint: string | URL): NnrpTransportConnection {
   return {
     kind,
     endpoint: String(endpoint),

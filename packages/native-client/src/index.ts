@@ -840,8 +840,13 @@ async function selectClientProvider(
   validateClientProviderRouteKeys(providerRoutes);
   const resolutions = providers.map((provider) => resolveClientProviderRoute(endpoint, provider, providerRoutes));
   const forced = forcedTransportKind(policy);
+  const configuredKinds = configuredClientProviderKinds(providerRoutes);
+  const peerSupportedKinds = [...new Set<NnrpTransportKind>(["tcp", "quic", ...configuredKinds])];
   const probeTargets = resolutions.filter(({ provider, rejectionReason }) =>
-    provider.localAvailable && rejectionReason === undefined && (forced === undefined || provider.kind === forced)
+    provider.localAvailable &&
+    peerSupportedKinds.includes(provider.kind) &&
+    rejectionReason === undefined &&
+    (forced === undefined || provider.kind === forced)
   );
   const samples = probeTargets.length <= 1 ? [] : await Promise.all(probeTargets.map(async (resolution) => {
     try {
@@ -857,7 +862,6 @@ async function selectClientProvider(
       return { provider: resolution.provider };
     }
   }));
-  const configuredKinds = configuredClientProviderKinds(providerRoutes);
   const installedKinds = transportKinds(providers);
   const observations: NnrpTransportProviderObservation[] = [
     ...providers,
@@ -865,9 +869,13 @@ async function selectClientProvider(
       .filter((kind) => !installedKinds.includes(kind))
       .map(uninstalledProviderObservation),
   ];
-  const manifest = createCapabilityManifest({
+  const localManifest = createCapabilityManifest({
     buildMode: "backend-native",
     transports: [...new Set([...installedKinds, ...configuredKinds])],
+  });
+  const peerManifest = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: peerSupportedKinds,
   });
   const resolutionByProviderId = new Map(
     resolutions.map((resolution) => [resolution.provider.metadata.id, resolution]),
@@ -909,8 +917,8 @@ async function selectClientProvider(
       : { kind: provider.kind, providerId: provider.metadata.id, state: "succeeded", metrics }
   );
   const candidates = createTransportCandidates({
-    local: manifest,
-    peer: manifest,
+    local: localManifest,
+    peer: peerManifest,
     providers: observations,
     candidateReadiness,
     probeObservations,
