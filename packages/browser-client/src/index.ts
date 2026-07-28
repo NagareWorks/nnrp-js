@@ -16,6 +16,7 @@ import {
   type NnrpAbortSignalLike,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
+  type NnrpClientProviderRoutes,
   type NnrpEventPollOptions,
   type NnrpInputProfile,
   NnrpMessageType,
@@ -32,12 +33,13 @@ import {
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  type NnrpTransportCandidateReadiness,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
-  type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeObservation,
   type NnrpTransportProvider,
   type NnrpTransportSelectionSummary,
   normalizeSessionMigrationRequest,
@@ -49,7 +51,7 @@ import {
   type ObjectReleaseMetadata,
   ObjectReleaseReason,
   OwnershipHint,
-  resolveProviderEndpoint,
+  parseApplicationEndpoint,
   type RouteHintMetadata,
   type RuntimeControlMetadata,
   RuntimeRole,
@@ -250,7 +252,7 @@ export interface NnrpBrowserRuntimeOptions {
 
 export interface NnrpBrowserConnectOptions {
   readonly endpoint: string;
-  readonly providerEndpoint?: string | URL;
+  readonly providerRoutes?: NnrpClientProviderRoutes;
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
   readonly sessionDefaults?: NnrpBrowserSessionOptions;
@@ -261,7 +263,8 @@ export interface NnrpBrowserTransportSelectionOptions {
   readonly providers?: readonly NnrpBrowserTransportProvider[];
   readonly policy?: NnrpTransportPolicy;
   readonly requestedMaxFrameBytes?: bigint;
-  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
@@ -382,8 +385,13 @@ export class NnrpBrowserRuntime {
     const transportProviders = options.transportProviders ?? this.#binding.transportProviders;
     const transportPolicy = options.transportPolicy ?? this.#transportPolicy;
     validateBrowserTransportProviders(transportProviders);
-    const provider = selectBrowserTransportProvider(transportProviders, transportPolicy, this.#binding.manifest);
-    const providerEndpoint = resolveProviderEndpoint(options.endpoint, provider.kind, options.providerEndpoint);
+    const { provider, endpoint: providerEndpoint } = selectBrowserTransportProvider(
+      options.endpoint,
+      options.providerRoutes,
+      transportProviders,
+      transportPolicy,
+      this.#binding.manifest,
+    );
 
     return new NnrpBrowserClient({
       endpoint: normalizeEndpoint(options.endpoint),
@@ -473,9 +481,8 @@ export class NnrpBrowserRuntime {
       ...(options.requestedMaxFrameBytes === undefined
         ? {}
         : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      ...(options.probeMetricsByProviderId === undefined
-        ? {}
-        : { probeMetricsByProviderId: options.probeMetricsByProviderId }),
+      candidateReadiness: options.candidateReadiness,
+      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
     });
   }
 }
@@ -1487,15 +1494,6 @@ function requiredWasmExports(requiredExports: readonly string[] | undefined): re
 }
 
 function validateBrowserTransportProviders(providers: readonly NnrpBrowserTransportProvider[]): void {
-  if (providers.length === 0) {
-    throw new NnrpCapabilityError({
-      code: "NNRP_BROWSER_TRANSPORT_PROVIDER_MISSING",
-      message: "At least one browser transport provider package or explicit provider is required.",
-      source: "transport",
-      retryable: false,
-      transport: "websocket",
-    });
-  }
   for (const provider of providers) {
     if (!isBrowserTransportProvider(provider) || typeof provider.connect !== "function") {
       throw new NnrpCapabilityError({
@@ -1510,39 +1508,107 @@ function validateBrowserTransportProviders(providers: readonly NnrpBrowserTransp
 }
 
 function selectBrowserTransportProvider(
+  endpoint: string | URL,
+  providerRoutes: NnrpClientProviderRoutes | undefined,
   providers: readonly NnrpBrowserTransportProvider[],
   policy: NnrpTransportPolicy,
   manifest: NnrpCapabilityManifest,
-): NnrpBrowserTransportProvider {
-  if (policy.startsWith("force-") && policy !== "force-websocket") {
-    throw new NnrpTransportError({
-      code: "NNRP_BROWSER_TRANSPORT_POLICY_UNSATISFIED",
-      message: `${policy} cannot be satisfied by the browser WebSocket carrier.`,
-      source: "transport",
-      retryable: false,
-      transport: policy.slice("force-".length) as NnrpTransportKind,
-    });
+): { readonly provider: NnrpBrowserTransportProvider; readonly endpoint: string } {
+  validateBrowserProviderRoutes(providerRoutes);
+  const route = providerRoutes?.websocket;
+  let providerEndpoint: string | undefined;
+  let routeResolved = true;
+  try {
+    providerEndpoint = resolveBrowserWebSocketEndpoint(route?.endpoint);
+  } catch {
+    routeResolved = false;
   }
-  const available = providers.filter((provider) => provider.localAvailable);
+  const securitySatisfied = routeResolved && providerEndpoint !== undefined &&
+    !(route !== undefined && "security" in route) && browserRouteSecuritySatisfied(endpoint, providerEndpoint);
+  const observedProviders = providers.length === 0 ? [uninstalledBrowserProviderObservation()] : providers;
   const selection = selectTransport(
     createTransportCandidates({
       local: { ...manifest, transports: ["websocket"] },
       peer: { ...manifest, transports: ["websocket"] },
-      providers: available,
+      providers: observedProviders,
+      candidateReadiness: observedProviders.map((provider) => ({
+        kind: provider.kind,
+        providerId: provider.metadata.id,
+        routeResolved,
+        securitySatisfied,
+        ...(!routeResolved || !securitySatisfied
+          ? {
+            diagnostic: {
+              code: !routeResolved
+                ? "NNRP_BROWSER_PROVIDER_ROUTE_UNRESOLVED"
+                : "NNRP_BROWSER_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
+              message: !routeResolved
+                ? "Browser WebSocket provider route is unresolved."
+                : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
+              source: "transport" as const,
+              retryable: false,
+              transport: "websocket" as const,
+            },
+          }
+          : {}),
+      })),
     }),
     policy,
   );
-  const selected = available.find((provider) => provider.metadata.id === selection.selected?.provider.id);
-  if (selected === undefined) {
+  const selected = providers.find((provider) => provider.metadata.id === selection.selected?.provider.id);
+  if (selected === undefined || providerEndpoint === undefined) {
     throw new NnrpTransportError({
-      code: "NNRP_BROWSER_TRANSPORT_PROVIDER_UNAVAILABLE",
-      message: "No installed browser WebSocket provider can satisfy the selected policy.",
+      code: "NNRP_BROWSER_TRANSPORT_SELECTION_INCONSISTENT",
+      message: "Selected browser transport does not have an installed provider and resolved route.",
+      source: "transport",
+      retryable: false,
+      transport: "websocket",
+      cause: createTransportSelectionSummary(selection),
+    });
+  }
+  return { provider: selected, endpoint: providerEndpoint };
+}
+
+function validateBrowserProviderRoutes(providerRoutes: NnrpClientProviderRoutes | undefined): void {
+  const invalidKey = Object.keys(providerRoutes ?? {}).find((key) => key !== "websocket");
+  if (invalidKey !== undefined) {
+    throw new NnrpTransportError({
+      code: "NNRP_BROWSER_PROVIDER_ROUTE_KEY_INVALID",
+      message: `Browser client provider routes accept only websocket; received ${invalidKey}.`,
       source: "transport",
       retryable: false,
       transport: "websocket",
     });
   }
-  return selected;
+}
+
+function browserRouteSecuritySatisfied(applicationEndpoint: string | URL, providerEndpoint: string): boolean {
+  return parseApplicationEndpoint(applicationEndpoint).protocol !== "nnrps:" ||
+    new URL(providerEndpoint).protocol === "wss:";
+}
+
+function resolveBrowserWebSocketEndpoint(endpoint: string | URL | undefined): string {
+  if (endpoint === undefined) throw new TypeError("Browser WebSocket routes require an explicit endpoint.");
+  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
+    throw new TypeError("Browser WebSocket routes require a ws:// or wss:// endpoint.");
+  }
+  return parsed.toString();
+}
+
+function uninstalledBrowserProviderObservation(): NnrpTransportProvider {
+  return {
+    kind: "websocket",
+    endpointSchemes: ["ws", "wss"],
+    localAvailable: false,
+    metadata: {
+      id: "nnrp.transport.websocket.uninstalled",
+      cost: { modelId: 0, units: 0n },
+      preferenceRank: 0xffff,
+      limits: { maxFrameBytes: 67_108_864n },
+      limitations: ["browser-host-only"],
+    },
+  };
 }
 
 async function discoverBrowserTransportProviders(): Promise<readonly NnrpBrowserTransportProvider[]> {

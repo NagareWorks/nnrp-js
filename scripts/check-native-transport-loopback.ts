@@ -239,9 +239,13 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
   });
   const server = serverRuntime.listen({
     endpoint: options.endpoint,
-    providerEndpoints: { [options.provider.kind]: options.providerEndpoint },
+    providerRoutes: {
+      [options.provider.kind]: {
+        endpoint: options.providerEndpoint,
+        ...(options.security === undefined ? {} : { security: options.security.server }),
+      },
+    },
     transportPolicy: options.policy,
-    ...(options.security === undefined ? {} : { security: options.security.server }),
   });
   const accepting = server.accept();
   let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
@@ -253,10 +257,14 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
     client = await withTimeout(
       openNativeClient({
         endpoint: options.endpoint,
-        providerEndpoint: options.providerEndpoint,
+        providerRoutes: {
+          [options.provider.kind]: {
+            endpoint: options.providerEndpoint,
+            ...(options.security === undefined ? {} : { security: options.security.client }),
+          },
+        },
         transports: [options.provider],
         transportPolicy: options.policy,
-        ...(options.security === undefined ? {} : { security: options.security.client }),
       }),
       timeoutMillis,
       `${options.provider.kind} client connect`,

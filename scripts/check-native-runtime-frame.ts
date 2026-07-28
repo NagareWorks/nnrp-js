@@ -18,7 +18,7 @@ const serverRuntime = await openBackendRuntime({
 });
 const server = serverRuntime.listen({
   endpoint,
-  providerEndpoints: { tcp: providerEndpoint },
+  providerRoutes: { tcp: { endpoint: providerEndpoint } },
   transportPolicy: "force-tcp",
 });
 const accepting = server.accept();
@@ -30,7 +30,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 50));
   client = await openNativeClient({
     endpoint,
-    providerEndpoint,
+    providerRoutes: { tcp: { endpoint: providerEndpoint } },
     transports: [provider],
     transportPolicy: "force-tcp",
   });

@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportClientSecurity, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpClientProviderRoutes, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidateReadiness, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -61,8 +61,7 @@ export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
 }
 export interface NnrpNativeClientOptions {
     readonly endpoint: string | URL;
-    readonly providerEndpoint?: string | URL;
-    readonly security?: NnrpTransportClientSecurity;
+    readonly providerRoutes?: NnrpClientProviderRoutes;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
@@ -70,8 +69,7 @@ export interface NnrpNativeClientOptions {
 }
 export interface NnrpConnectOptions {
     readonly endpoint: string | URL;
-    readonly providerEndpoint?: string | URL;
-    readonly security?: NnrpTransportClientSecurity;
+    readonly providerRoutes?: NnrpClientProviderRoutes;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly sessionDefaults?: NnrpSessionOptions;
@@ -86,7 +84,8 @@ export interface NnrpTransportSelectionOptions {
     readonly providers?: readonly NnrpNativeTransportProvider[];
     readonly policy?: NnrpTransportPolicy;
     readonly requestedMaxFrameBytes?: bigint;
-    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;

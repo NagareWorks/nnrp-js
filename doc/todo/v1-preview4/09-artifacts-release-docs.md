@@ -1,8 +1,19 @@
 # 09 - Artifacts, Release, and Docs
 
+## Coordinated Route-Contract Release Gate
+
+- [x] Do not publish another JavaScript Preview4 package until the full route-cardinality correction is complete.
+  - [x] Native client multi-route selection passes suite-owned E2E.
+  - [x] Native server multi-listener ownership and rollback pass suite-owned E2E.
+  - [x] Native and browser security-intent matrices pass.
+  - [x] Public declarations contain route sets and no production singular route overrides.
+- [x] Pin reviewed Rust artifact `1.0.0-preview.4.18`, containing the complete route/security ABI.
+- [x] Reinspect every npm tarball for role, transport-native, and browser-WASM ownership boundaries.
+- [x] Publish only after the cross-SDK design-to-code audit has no unresolved findings.
+
 ## Rust Preview4 Artifact Adoption
 
-- [x] Set the default Rust artifact version to `1.0.0-preview.4.16`.
+- [x] Set the default Rust artifact version to `1.0.0-preview.4.18`.
   - [x] Update release workflow inputs and fallback values.
   - [x] Update local artifact preparation defaults.
   - [x] Record the resolved Rust release tag and checksums in dry-run evidence.

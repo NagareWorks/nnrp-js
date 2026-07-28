@@ -16,7 +16,8 @@ const HANDLE_KIND_INVALID = 0;
 const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
-const ABI_VERSION = "4.0.0";
+const HANDLE_KIND_SERVER_ACCEPT = 13;
+const ABI_VERSION = "4.1.0";
 const HANDLE_SIZE = 24;
 const BUFFER_VIEW_SIZE = 16;
 const STATUS_SIZE = 16;
@@ -44,6 +45,7 @@ const ROLE_EVENT_POLL_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u32", "u32", "u32", "u32"],
 } as const;
 const SERVER_ACCEPT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u64", "u32", "u32"] } as const;
+const SERVER_ACCEPT_WAIT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32"] } as const;
 const SERVER_SEND_RESULT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, BUFFER_VIEW_STRUCT] } as const;
 const RUNTIME_FRAME_SEND_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u32", "u32", BUFFER_VIEW_STRUCT],
@@ -115,11 +117,20 @@ const DENO_TRANSPORT_SYMBOLS = {
     result: STATUS_STRUCT,
     nonblocking: true,
   },
-  nnrp_server_accept: {
+  nnrp_server_accept_begin: {
     parameters: [SERVER_ACCEPT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
+  nnrp_server_accept_wait: {
+    parameters: [SERVER_ACCEPT_WAIT_REQUEST_STRUCT],
     result: STATUS_STRUCT,
     nonblocking: true,
   },
+  nnrp_server_accept_claim: {
+    parameters: [SERVER_ACCEPT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
+  nnrp_server_accept_release: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
   nnrp_server_await_events: {
     parameters: [ROLE_EVENT_POLL_REQUEST_STRUCT, "buffer", "usize", "buffer"],
     result: STATUS_STRUCT,
@@ -165,7 +176,10 @@ interface DenoTransportSymbols {
   nnrp_connection_close(handle: Uint8Array): Promise<Uint8Array>;
   nnrp_client_close_connection(handle: Uint8Array): Promise<Uint8Array>;
   nnrp_server_bind(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
-  nnrp_server_accept(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_accept_begin(request: Uint8Array, output: Uint8Array): Uint8Array;
+  nnrp_server_accept_wait(request: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_accept_claim(request: Uint8Array, output: Uint8Array): Uint8Array;
+  nnrp_server_accept_release(accept: Uint8Array): Uint8Array;
   nnrp_server_await_events(
     request: Uint8Array,
     events: Uint8Array,
@@ -540,31 +554,90 @@ class DenoClientRoleSession {
 
 class DenoServerRole {
   #closed = false;
+  readonly #accepts = new Set<FfiHandle>();
 
   constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
 
   async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<DenoServerRoleSession> {
     this.#requireOpen();
-    const output = bytes(HANDLE_SIZE);
-    const request = bytes(40);
-    const view = dataView(request);
-    writeHandle(view, 0, this.handle);
-    view.setBigUint64(24, sessionHandleId, true);
-    view.setUint32(32, generation, true);
-    view.setUint32(36, timeoutMillis, true);
-    assertStatus(await this.library.symbols.nnrp_server_accept(request, output), "server session accept");
-    return new DenoServerRoleSession(this.library, decodeHandle(output));
+    const beginOutput = bytes(HANDLE_SIZE);
+    assertStatus(
+      this.library.symbols.nnrp_server_accept_begin(
+        packServerAcceptRequest(this.handle, sessionHandleId, generation, 0),
+        beginOutput,
+      ),
+      "server session accept begin",
+    );
+    const accept = decodeHandle(beginOutput, HANDLE_KIND_SERVER_ACCEPT);
+    this.#accepts.add(accept);
+    try {
+      while (true) {
+        const status = await this.library.symbols.nnrp_server_accept_wait(
+          packServerAcceptWaitRequest(accept, timeoutMillis),
+        );
+        if (timeoutMillis === 0 && statusCode(status) === 5) continue;
+        assertStatus(status, "server session accept wait");
+        break;
+      }
+      const output = bytes(32);
+      assertStatus(
+        this.library.symbols.nnrp_server_accept_claim(
+          packServerAcceptRequest(accept, sessionHandleId, generation, 0),
+          output,
+        ),
+        "server session accept claim",
+      );
+      this.#accepts.delete(accept);
+      return new DenoServerRoleSession(this.library, decodeHandle(output));
+    } finally {
+      if (this.#accepts.delete(accept)) {
+        assertStatus(
+          this.library.symbols.nnrp_server_accept_release(packHandle(accept)),
+          "server session accept release",
+        );
+      }
+    }
   }
 
   async close(): Promise<void> {
     if (this.#closed) return;
-    assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
     this.#closed = true;
+    for (const accept of this.#accepts) {
+      assertStatus(
+        this.library.symbols.nnrp_server_accept_release(packHandle(accept)),
+        "server session accept release",
+      );
+    }
+    this.#accepts.clear();
+    assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
   }
 
   #requireOpen(): void {
     if (this.#closed) throw transportError("NNRP_SERVER_CLOSED", "Native server role is closed.");
   }
+}
+
+function packServerAcceptRequest(
+  handle: FfiHandle,
+  id: bigint,
+  generation: number,
+  finalValue: number,
+): Uint8Array<ArrayBuffer> {
+  const request = bytes(40);
+  const view = dataView(request);
+  writeHandle(view, 0, handle);
+  view.setBigUint64(24, id, true);
+  view.setUint32(32, generation, true);
+  view.setUint32(36, finalValue, true);
+  return request;
+}
+
+function packServerAcceptWaitRequest(accept: FfiHandle, timeoutMillis: number): Uint8Array<ArrayBuffer> {
+  const request = bytes(32);
+  const view = dataView(request);
+  writeHandle(view, 0, accept);
+  view.setUint32(24, timeoutMillis, true);
+  return request;
 }
 
 class DenoServerRoleSession {
@@ -858,6 +931,10 @@ function assertStatus(status: Uint8Array, operation: string): void {
       code === 5 || code === 6,
     );
   }
+}
+
+function statusCode(status: Uint8Array): number {
+  return status.byteLength < STATUS_SIZE ? -1 : dataView(status).getUint32(0, true);
 }
 
 function validateManifest(value: unknown, os: string, arch: string): string {

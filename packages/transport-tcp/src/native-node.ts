@@ -20,8 +20,8 @@ const TRANSPORT_KIND = "tcp" as const;
 const TRANSPORT_LABEL = "TCP";
 const PACKAGE_NAME = "nnrp-ffi-transport-tcp";
 const TRANSPORT_SCOPE = "tcp";
-const SECURITY_MODE: "none" | "required" | "websocket" = "none";
-const ABI_VERSION = "4.0.0";
+const SECURITY_MODE: "none" | "optional" | "required" | "websocket" = "optional";
+const ABI_VERSION = "4.1.0";
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const HANDLE_KIND_INVALID = 0;
@@ -29,6 +29,7 @@ const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
 const HANDLE_KIND_SECURITY_CONFIG = 12;
+const HANDLE_KIND_SERVER_ACCEPT = 13;
 
 interface NativeHandle {
   kind: number;
@@ -72,6 +73,12 @@ interface NativeEvent {
   frame_id: number;
   payload_owner: NativeHandle;
   payload: NativeBufferView;
+}
+
+interface NativeServerAcceptResult {
+  session: NativeHandle;
+  active_transport_id: number;
+  reserved0: number;
 }
 
 interface InternalRoleEvent {
@@ -177,11 +184,27 @@ const RoleEventPollRequestType = koffi.struct({
   flags: "uint32_t",
   reserved0: "uint32_t",
 });
-const ServerAcceptRequestType = koffi.struct({
+const ServerAcceptBeginRequestType = koffi.struct({
   server: HandleType,
+  accept_handle_id: "uint64_t",
+  generation: "uint32_t",
+  reserved0: "uint32_t",
+});
+const ServerAcceptClaimRequestType = koffi.struct({
+  accept: HandleType,
   session_handle_id: "uint64_t",
   generation: "uint32_t",
+  reserved0: "uint32_t",
+});
+const ServerAcceptWaitRequestType = koffi.struct({
+  accept: HandleType,
   timeout_ms: "uint32_t",
+  flags: "uint32_t",
+});
+const ServerAcceptResultType = koffi.struct({
+  session: HandleType,
+  active_transport_id: "uint32_t",
+  reserved0: "uint32_t",
 });
 const ServerSendResultRequestType = koffi.struct({ operation: HandleType, payload: BufferViewType });
 const RuntimeFrameSendRequestType = koffi.struct({
@@ -230,7 +253,10 @@ interface NodeSymbols {
   readonly connectionClose: NativeFunction;
   readonly clientCloseConnection: NativeFunction;
   readonly serverBind: NativeFunction;
-  readonly serverAccept: NativeFunction;
+  readonly serverAcceptBegin: NativeFunction;
+  readonly serverAcceptWait: NativeFunction;
+  readonly serverAcceptClaim: NativeFunction;
+  readonly serverAcceptRelease: NativeFunction;
   readonly serverAwaitEvents: NativeFunction;
   readonly serverSendResult: NativeFunction;
   readonly serverClose: NativeFunction;
@@ -529,28 +555,63 @@ class NodeClientRoleSession {
 
 class NodeServerRole {
   #closed = false;
+  readonly #accepts = new Map<string, NativeHandle>();
 
   constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
 
   async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<NodeServerRoleSession> {
     this.#requireOpen();
-    const output: Partial<NativeHandle> = {};
+    const beginOutput: Partial<NativeHandle> = {};
     assertStatus(
-      await invoke<NativeStatus>(this.symbols.serverAccept, [{
+      this.symbols.serverAcceptBegin({
         server: this.handle,
-        session_handle_id: sessionHandleId,
+        accept_handle_id: sessionHandleId,
         generation,
-        timeout_ms: timeoutMillis,
-      }, output]),
-      "server session accept",
+        reserved0: 0,
+      }, beginOutput) as NativeStatus,
+      "server session accept begin",
     );
-    return new NodeServerRoleSession(this.symbols, requiredHandle(output));
+    const accept = requiredHandle(beginOutput, HANDLE_KIND_SERVER_ACCEPT);
+    const acceptKey = handleKey(accept);
+    this.#accepts.set(acceptKey, accept);
+    try {
+      while (true) {
+        const status = await invoke<NativeStatus>(this.symbols.serverAcceptWait, [{
+          accept,
+          timeout_ms: timeoutMillis,
+          flags: 0,
+        }]);
+        if (timeoutMillis === 0 && status.status_code === 5) continue;
+        assertStatus(status, "server session accept wait");
+        break;
+      }
+      const output: Partial<NativeServerAcceptResult> = {};
+      assertStatus(
+        this.symbols.serverAcceptClaim({
+          accept,
+          session_handle_id: sessionHandleId,
+          generation,
+          reserved0: 0,
+        }, output) as NativeStatus,
+        "server session accept claim",
+      );
+      this.#accepts.delete(acceptKey);
+      return new NodeServerRoleSession(this.symbols, requiredHandle(output.session ?? {}));
+    } finally {
+      if (this.#accepts.delete(acceptKey)) {
+        assertStatus(this.symbols.serverAcceptRelease(accept) as NativeStatus, "server session accept release");
+      }
+    }
   }
 
   async close(): Promise<void> {
     if (this.#closed) return;
-    assertStatus(await invoke<NativeStatus>(this.symbols.connectionClose, [this.handle]), "server close");
     this.#closed = true;
+    for (const accept of this.#accepts.values()) {
+      assertStatus(this.symbols.serverAcceptRelease(accept) as NativeStatus, "server session accept release");
+    }
+    this.#accepts.clear();
+    assertStatus(await invoke<NativeStatus>(this.symbols.connectionClose, [this.handle]), "server close");
   }
 
   #requireOpen(): void {
@@ -702,7 +763,13 @@ function bindSymbols(library: LibraryHandle): NodeSymbols {
     connectionClose: library.func("nnrp_connection_close", StatusType, [HandleType]),
     clientCloseConnection: library.func("nnrp_client_close_connection", StatusType, [HandleType]),
     serverBind: library.func("nnrp_server_bind", StatusType, [ServerBindRequestType, outHandle]),
-    serverAccept: library.func("nnrp_server_accept", StatusType, [ServerAcceptRequestType, outHandle]),
+    serverAcceptBegin: library.func("nnrp_server_accept_begin", StatusType, [ServerAcceptBeginRequestType, outHandle]),
+    serverAcceptWait: library.func("nnrp_server_accept_wait", StatusType, [ServerAcceptWaitRequestType]),
+    serverAcceptClaim: library.func("nnrp_server_accept_claim", StatusType, [
+      ServerAcceptClaimRequestType,
+      koffi.out(koffi.pointer(ServerAcceptResultType)),
+    ]),
+    serverAcceptRelease: library.func("nnrp_server_accept_release", StatusType, [HandleType]),
     serverAwaitEvents: library.func("nnrp_server_await_events", StatusType, [
       RoleEventPollRequestType,
       koffi.pointer(EventType),
@@ -765,6 +832,9 @@ async function withEndpointSecurity<T>(
         `${TRANSPORT_LABEL} endpoints reject transport security configuration.`,
       );
     }
+    return await operation(invalidHandle());
+  }
+  if (SECURITY_MODE === "optional" && options.security === undefined) {
     return await operation(invalidHandle());
   }
   if (SECURITY_MODE === "websocket" && new URL(options.endpoint).protocol === "ws:") {
@@ -864,6 +934,10 @@ function requiredHandle(value: Partial<NativeHandle>, expectedKind?: number): Na
   return handle;
 }
 
+function handleKey(handle: NativeHandle): string {
+  return `${handle.kind}:${BigInt(handle.id).toString()}:${handle.generation}`;
+}
+
 function invalidHandle(): NativeHandle {
   return { kind: HANDLE_KIND_INVALID, id: 0n, generation: 0, flags: 0 };
 }
@@ -920,6 +994,10 @@ function validateManifest(value: unknown, os: string, arch: string): string {
     "nnrp_transport_write_batch",
     "nnrp_transport_read_batch",
     "nnrp_transport_close",
+    "nnrp_server_accept_begin",
+    "nnrp_server_accept_wait",
+    "nnrp_server_accept_claim",
+    "nnrp_server_accept_release",
   ];
   const missing = required.filter((name) => !exports.includes(name));
   if (missing.length > 0) {

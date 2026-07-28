@@ -8,6 +8,7 @@ import {
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportProbeOptions,
+  NnrpTransportSelectionError,
 } from "@nnrp/core";
 import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
@@ -107,7 +108,7 @@ Deno.test("@nnrp/browser-client exposes the frozen runtime, client, and session 
 
   const client = runtime.connect({
     endpoint: "nnrps://example.test/render",
-    providerEndpoint: "wss://example.test/nnrp",
+    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
     sessionDefaults: { inputProfile: "token", initialCredits: 3, metadata: { app: "browser" } },
   });
   const session = client.openSession({ sessionId: "session-a", metadata: { request: "one" } });
@@ -146,7 +147,11 @@ Deno.test("@nnrp/browser-client exposes the frozen runtime, client, and session 
   await runtime.close();
   assertEquals(runtime.closed, true);
   assertThrows(
-    () => runtime.connect({ endpoint: "nnrps://example.test/render", providerEndpoint: "wss://example.test/nnrp" }),
+    () =>
+      runtime.connect({
+        endpoint: "nnrps://example.test/render",
+        providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+      }),
     NnrpCapabilityError,
     "closed browser runtime",
   );
@@ -160,21 +165,21 @@ Deno.test("@nnrp/browser-client validates provider policy and endpoint boundarie
     () =>
       runtime.connect({
         endpoint: "nnrps://example.test/render",
-        providerEndpoint: "wss://example.test/nnrp",
+        providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
       }),
     NnrpTransportError,
-    "No installed browser WebSocket provider",
+    "No viable transport provider",
   );
   assertThrows(
     () =>
       runtime.connect({
         endpoint: "nnrps://example.test/render",
-        providerEndpoint: "wss://example.test/nnrp",
+        providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
         transportProviders: [browserProvider()],
         transportPolicy: "force-quic",
       }),
     NnrpTransportError,
-    "cannot be satisfied",
+    "Forced transport is not available",
   );
   assertThrows(
     () =>
@@ -187,26 +192,90 @@ Deno.test("@nnrp/browser-client validates provider policy and endpoint boundarie
   await runtime.close();
 });
 
-Deno.test("@nnrp/browser-client selects only installed compatible browser providers", async () => {
+Deno.test("@nnrp/browser-client enforces the frozen browser route and security boundary", async () => {
+  const runtime = await browserRuntime();
+
+  const invalidKey = assertThrows(
+    () =>
+      runtime.connect({
+        endpoint: "nnrp://example.test/render",
+        providerRoutes: { tcp: { endpoint: "example.test:4433" } },
+      }),
+    NnrpTransportError,
+  );
+  assertEquals(invalidKey.diagnostic.code, "NNRP_BROWSER_PROVIDER_ROUTE_KEY_INVALID");
+
+  const unresolved = assertThrows(
+    () =>
+      runtime.connect({
+        endpoint: "nnrp://example.test/render",
+        providerRoutes: { websocket: { endpoint: "https://example.test/nnrp" } },
+      }),
+    NnrpTransportSelectionError,
+  );
+  assertEquals(unresolved.selection?.candidates[0]?.rejectionReason, "route-unresolved");
+
+  const insecure = assertThrows(
+    () =>
+      runtime.connect({
+        endpoint: "nnrps://example.test/render",
+        providerRoutes: { websocket: { endpoint: "ws://example.test/nnrp" } },
+      }),
+    NnrpTransportSelectionError,
+  );
+  assertEquals(insecure.selection?.candidates[0]?.rejectionReason, "security-unsatisfied");
+
+  const nativeCredentials = assertThrows(
+    () =>
+      runtime.connect({
+        endpoint: "nnrps://example.test/render",
+        providerRoutes: {
+          websocket: {
+            endpoint: "wss://example.test/nnrp",
+            security: {
+              mode: "client",
+              serverName: "example.test",
+              trustedCertificateDer: new Uint8Array([1]),
+            },
+          },
+        },
+      }),
+    NnrpTransportSelectionError,
+  );
+  assertEquals(nativeCredentials.selection?.candidates[0]?.rejectionReason, "security-unsatisfied");
+  await runtime.close();
+
+  const withoutProvider = await browserRuntime([]);
+  const unavailable = assertThrows(
+    () =>
+      withoutProvider.connect({
+        endpoint: "nnrp://example.test/render",
+        providerRoutes: { websocket: { endpoint: "ws://example.test/nnrp" } },
+      }),
+    NnrpTransportSelectionError,
+  );
+  assertEquals(unavailable.selection?.candidates[0]?.rejectionReason, "local-unavailable");
+  await withoutProvider.close();
+});
+
+Deno.test("@nnrp/browser-client selects its installed compatible browser provider", async () => {
   const preferred = browserProvider({ id: "browser.preferred", preferenceRank: 0 });
-  const fallback = browserProvider({ id: "browser.fallback", preferenceRank: 5 });
-  const runtime = await browserRuntime([fallback, preferred]);
+  const runtime = await browserRuntime([preferred]);
   const peer = createCapabilityManifest({
     buildMode: "backend-native",
     transports: ["websocket"],
     capabilities: [],
   });
 
-  const probe = {
-    sampleCount: 1,
-    successCount: 1,
-    medianThroughputBytesPerSecond: 1_000_000_000n,
-    medianRttMicroseconds: 1_000n,
-  };
   const selection = runtime.selectTransport({
     peerManifest: peer,
-    providers: [fallback, preferred],
-    probeMetricsByProviderId: { "browser.fallback": probe, "browser.preferred": probe },
+    providers: [preferred],
+    candidateReadiness: [{
+      kind: "websocket",
+      providerId: "browser.preferred",
+      routeResolved: true,
+      securitySatisfied: true,
+    }],
   });
   assertEquals(selection.selected, "websocket");
   assertEquals(
@@ -221,7 +290,7 @@ Deno.test("@nnrp/browser-client rejects pre-aborted event polling before opening
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const session = runtime.connect({
     endpoint: "nnrps://example.test/render",
-    providerEndpoint: "wss://example.test/nnrp",
+    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
   }).openSession();
   const controller = new AbortController();
   controller.abort("caller-stop");
@@ -241,7 +310,7 @@ Deno.test("@nnrp/browser-client releases a session when role open and close fail
   const runtime = await browserRuntime();
   const client = runtime.connect({
     endpoint: "nnrps://example.test/render",
-    providerEndpoint: "wss://example.test/nnrp",
+    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
   });
   const session = client.openSession({ sessionId: "reusable-session" });
 

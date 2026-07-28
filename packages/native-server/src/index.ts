@@ -26,16 +26,20 @@ import {
   type NnrpResult,
   type NnrpRuntimeEvent,
   type NnrpRuntimeFrameEvent,
+  type NnrpServerProviderRoutes,
   type NnrpSessionFlowControlOptions,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  type NnrpTransportCandidateReadiness,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeObservation,
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
+  type NnrpTransportRejectionReason,
   type NnrpTransportSelectionSummary,
   type NnrpTransportServer,
   type NnrpTransportServerSecurity,
@@ -45,6 +49,7 @@ import {
   type ObjectReleaseMetadata,
   ObjectReleaseReason,
   OwnershipHint,
+  parseApplicationEndpoint,
   type PartialResultMetadata,
   type PressureMetadata,
   type ProgressMetadata,
@@ -267,6 +272,10 @@ const EVENT_KIND_RUNTIME_FRAME = 13;
 const serverRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (sessionId: string) => Promise<void>>();
 const serverAcceptors = new WeakMap<NnrpServer, () => Promise<NnrpNativeAcceptedSession>>();
 const serverClosers = new WeakMap<NnrpServer, () => Promise<void>>();
+const serverBoundProviderEndpoints = new WeakMap<
+  NnrpServer,
+  Readonly<Partial<Record<NnrpTransportKind, string>>>
+>();
 const serverRoleEventReceivers = new WeakMap<
   NnrpBackendRuntime,
   (request: NnrpNativeServerReceiveRequest) => Promise<NnrpRuntimeEvent>
@@ -305,14 +314,32 @@ interface InternalServerRoleSession {
   close(): Promise<void>;
 }
 
-interface InternalServerRole {
+interface InternalTransportServerRole {
   accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<InternalServerRoleSession>;
   close(): Promise<void>;
 }
 
+interface InternalAcceptedServerRoleSession {
+  readonly session: InternalServerRoleSession;
+  readonly activeTransport: NnrpTransportKind;
+}
+
+interface InternalServerRole {
+  readonly boundProviderEndpoints: Readonly<Partial<Record<NnrpTransportKind, string>>>;
+  accept(
+    sessionHandleId: bigint,
+    generation: number,
+    timeoutMillis: number,
+  ): Promise<InternalAcceptedServerRoleSession>;
+  close(): Promise<void>;
+}
+
 interface InternalServerRoleEntry {
-  readonly role: InternalServerRole;
+  readonly kind: NnrpTransportKind;
+  readonly endpoint: string;
+  readonly role: InternalTransportServerRole;
   pending: Promise<void> | undefined;
+  settlement: InternalServerRoleSettlement | undefined;
 }
 
 interface InternalServerRoleSettlement {
@@ -321,26 +348,33 @@ interface InternalServerRoleSettlement {
 }
 
 interface InternalServerRoleWaiter {
-  readonly resolve: (session: InternalServerRoleSession) => void;
+  readonly resolve: (session: InternalAcceptedServerRoleSession) => void;
   readonly reject: (error: unknown) => void;
 }
 
 class InternalServerRoleGroup implements InternalServerRole {
   readonly #entries: InternalServerRoleEntry[];
-  readonly #ready: InternalServerRoleSettlement[] = [];
   readonly #waiters: InternalServerRoleWaiter[] = [];
   readonly #sessionHandleIds: bigint[] = [];
+  readonly boundProviderEndpoints: Readonly<Partial<Record<NnrpTransportKind, string>>>;
+  #terminalError: unknown;
   #closed = false;
 
-  public constructor(roles: readonly InternalServerRole[]) {
-    this.#entries = roles.map((role) => ({ role, pending: undefined }));
+  public constructor(entries: readonly Omit<InternalServerRoleEntry, "pending" | "settlement">[]) {
+    this.#entries = entries.map((entry) => ({ ...entry, pending: undefined, settlement: undefined }));
+    this.boundProviderEndpoints = Object.freeze(
+      Object.fromEntries(entries.map((entry) => [entry.kind, entry.endpoint])) as Partial<
+        Record<NnrpTransportKind, string>
+      >,
+    );
   }
 
   public accept(
     sessionHandleId: bigint,
     generation: number,
     timeoutMillis: number,
-  ): Promise<InternalServerRoleSession> {
+  ): Promise<InternalAcceptedServerRoleSession> {
+    if (this.#terminalError !== undefined) return Promise.reject(this.#terminalError);
     if (this.#closed) return Promise.reject(closedError("server listener"));
     this.#sessionHandleIds.push(sessionHandleId);
     return new Promise((resolve, reject) => {
@@ -354,7 +388,10 @@ class InternalServerRoleGroup implements InternalServerRole {
     this.#closed = true;
     const error = closedError("server listener");
     for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
-    const readySessions = this.#ready.splice(0).flatMap(({ session }) => session === undefined ? [] : [session]);
+    const readySessions = this.#entries.flatMap(({ settlement }) =>
+      settlement?.session === undefined ? [] : [settlement.session]
+    );
+    for (const entry of this.#entries) entry.settlement = undefined;
     await Promise.all([
       ...readySessions.map(async (session) => await session.close()),
       ...this.#entries.map(async ({ role }) => await role.close()),
@@ -363,11 +400,15 @@ class InternalServerRoleGroup implements InternalServerRole {
   }
 
   #drain(generation: number, timeoutMillis: number): void {
-    while (this.#waiters.length > 0 && this.#ready.length > 0) {
+    while (this.#waiters.length > 0) {
+      const readyEntry = this.#entries.find((entry) => entry.settlement !== undefined);
+      if (readyEntry === undefined) break;
       const waiter = this.#waiters.shift()!;
-      const settlement = this.#ready.shift()!;
-      if (settlement.session !== undefined) waiter.resolve(settlement.session);
-      else waiter.reject(settlement.error);
+      const settlement = readyEntry.settlement!;
+      readyEntry.settlement = undefined;
+      if (settlement.session !== undefined) {
+        waiter.resolve({ session: settlement.session, activeTransport: readyEntry.kind });
+      } else waiter.reject(settlement.error);
     }
     if (this.#waiters.length === 0 || this.#closed) return;
     for (const entry of this.#entries) {
@@ -379,22 +420,34 @@ class InternalServerRoleGroup implements InternalServerRole {
             await session.close();
             return;
           }
-          this.#ready.push({ session });
+          entry.settlement = { session };
         },
         (error) => {
-          if (!this.#closed) this.#ready.push({ error });
+          if (this.#closed) return;
+          if (isTerminalListenerError(error)) {
+            void this.#fail(error);
+            return;
+          }
+          entry.settlement = { error };
         },
       ).finally(() => {
         if (entry.pending === pending) entry.pending = undefined;
-        this.#drain(generation, timeoutMillis);
+        queueMicrotask(() => this.#drain(generation, timeoutMillis));
       });
       entry.pending = pending;
     }
   }
+
+  async #fail(error: unknown): Promise<void> {
+    if (this.#terminalError !== undefined || this.#closed) return;
+    this.#terminalError = error;
+    for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
+    await this.close();
+  }
 }
 
 interface InternalServerRoleCarrier {
-  [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<InternalServerRole>;
+  [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<InternalTransportServerRole>;
 }
 
 interface NativeRoleIdState {
@@ -426,13 +479,13 @@ export interface NnrpNativeRuntimeFrameSendRequest {
 
 export interface NnrpNativeAcceptRequest {
   readonly endpoint: string;
-  readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
-  readonly security?: NnrpTransportServerSecurity;
+  readonly providerRoutes?: NnrpServerProviderRoutes;
   readonly transportPolicy: NnrpTransportPolicy;
 }
 
 export interface NnrpNativeAcceptedSession {
   readonly sessionOptions?: NnrpSessionOptions;
+  readonly activeTransport: NnrpTransportKind;
 }
 
 export interface NnrpNativeServerReceiveRequest {
@@ -467,8 +520,7 @@ export interface NnrpBackendRuntimeOptions {
 
 export interface NnrpListenOptions {
   readonly endpoint: string | URL;
-  readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
-  readonly security?: NnrpTransportServerSecurity;
+  readonly providerRoutes?: NnrpServerProviderRoutes;
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
 }
@@ -484,7 +536,8 @@ export interface NnrpTransportSelectionOptions {
   readonly providers?: readonly NnrpNativeTransportProvider[];
   readonly policy?: NnrpTransportPolicy;
   readonly requestedMaxFrameBytes?: bigint;
-  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export interface NnrpNativeRuntimeBinding {
@@ -573,20 +626,22 @@ export class NnrpBackendRuntime {
     this.#ensureOpen();
     const accept = this.#binding.ffi?.accept;
     if (accept !== undefined) {
-      return await accept(request) ?? {};
+      const accepted = await accept(request);
+      if (accepted === undefined) throw bindingNotConnectedError("accept");
+      return accepted;
     }
     const server = await this.#roleServer(
       listenerKey,
       request.endpoint,
-      request.providerEndpoints,
-      request.security,
+      request.providerRoutes,
       request.transportPolicy,
       providers,
     );
-    const nativeSession = await server.accept(allocateNativeRoleId("session"), 1, 0);
+    const accepted = await server.accept(allocateNativeRoleId("session"), 1, 0);
+    const nativeSession = accepted.session;
     const sessionId = `native-server-session-${nativeSession.handle.id.toString()}`;
     this.#roleSessions.set(sessionId, nativeSession);
-    return { sessionOptions: { sessionId } };
+    return { sessionOptions: { sessionId }, activeTransport: accepted.activeTransport };
   }
 
   async #receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent> {
@@ -647,16 +702,31 @@ export class NnrpBackendRuntime {
 
     const providers = options.transports ?? this.#transportProviders;
     const listenerKey = {};
-    const providerEndpoints = copyProviderEndpoints(options.providerEndpoints);
+    const providerRoutes = copyServerProviderRoutes(options.providerRoutes);
     const state: NnrpServerState = {
       endpoint: normalizeEndpoint(options.endpoint),
-      ...(providerEndpoints === undefined ? {} : { providerEndpoints }),
-      ...(options.security === undefined ? {} : { security: options.security }),
+      ...(providerRoutes === undefined ? {} : { providerRoutes }),
       runtime: this,
       transports: providers,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
     };
     const server = new NnrpServer(state);
+    serverBoundProviderEndpoints.set(server, Object.freeze({}));
+    const roleServer = this.#binding.ffi?.accept === undefined
+      ? this.#roleServer(
+        listenerKey,
+        state.endpoint,
+        state.providerRoutes,
+        state.transportPolicy,
+        providers,
+      )
+      : undefined;
+    if (roleServer !== undefined) {
+      void roleServer.then(
+        (role) => serverBoundProviderEndpoints.set(server, role.boundProviderEndpoints),
+        () => undefined,
+      );
+    }
     serverAcceptors.set(
       server,
       () =>
@@ -664,8 +734,7 @@ export class NnrpBackendRuntime {
           listenerKey,
           {
             endpoint: state.endpoint,
-            ...(state.providerEndpoints === undefined ? {} : { providerEndpoints: state.providerEndpoints }),
-            ...(state.security === undefined ? {} : { security: state.security }),
+            ...(state.providerRoutes === undefined ? {} : { providerRoutes: state.providerRoutes }),
             transportPolicy: state.transportPolicy,
           },
           providers,
@@ -689,7 +758,11 @@ export class NnrpBackendRuntime {
   public async close(): Promise<void> {
     this.#closed = true;
     await Promise.all([...this.#roleSessions.values()].map(async (session) => await session.close()));
-    await Promise.all((await Promise.all(this.#roleServers.values())).map(async (server) => await server.close()));
+    const roleServers = await Promise.allSettled(this.#roleServers.values());
+    await Promise.all(
+      roleServers.flatMap((result) => result.status === "fulfilled" ? [result.value.close()] : []),
+    );
+    this.#roleServers.clear();
     await this.#binding.ffi?.close?.();
   }
 
@@ -725,8 +798,7 @@ export class NnrpBackendRuntime {
   #roleServer(
     listenerKey: object,
     endpoint: string,
-    providerEndpoints: Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined,
-    security: NnrpTransportServerSecurity | undefined,
+    providerRoutes: NnrpServerProviderRoutes | undefined,
     policy: NnrpTransportPolicy,
     providers: readonly NnrpNativeTransportProvider[],
   ): Promise<InternalServerRole> {
@@ -734,16 +806,12 @@ export class NnrpBackendRuntime {
     if (server !== undefined) return server;
     server = listenServerRoles(
       endpoint,
-      providerEndpoints,
-      security,
+      providerRoutes,
       providers,
       policy,
       allocateNativeRoleId("connection"),
     );
     this.#roleServers.set(listenerKey, server);
-    void server.catch(() => {
-      if (this.#roleServers.get(listenerKey) === server) this.#roleServers.delete(listenerKey);
-    });
     return server;
   }
 
@@ -770,9 +838,8 @@ export class NnrpBackendRuntime {
       ...(options.requestedMaxFrameBytes === undefined
         ? {}
         : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      ...(options.probeMetricsByProviderId === undefined
-        ? {}
-        : { probeMetricsByProviderId: options.probeMetricsByProviderId }),
+      candidateReadiness: options.candidateReadiness,
+      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
     });
   }
 }
@@ -876,19 +943,24 @@ function forcedTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | u
 
 async function listenServerRoles(
   endpoint: string,
-  providerEndpoints: Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined,
-  security: NnrpTransportServerSecurity | undefined,
+  providerRoutes: NnrpServerProviderRoutes | undefined,
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
   firstServerId: bigint,
 ): Promise<InternalServerRole> {
-  const roles: InternalServerRole[] = [];
+  const entries: Array<{
+    readonly kind: NnrpTransportKind;
+    readonly endpoint: string;
+    readonly role: InternalTransportServerRole;
+  }> = [];
   let nextServerId = firstServerId;
   try {
-    for (const provider of orderedServerProviders(providers, policy)) {
+    const resolutions = resolveServerProviderRoutes(endpoint, providerRoutes, providers, policy);
+    for (const resolution of resolutions) {
+      const provider = resolution.provider;
       const listener = await provider.listen({
-        endpoint: resolveProviderEndpoint(endpoint, provider.kind, providerEndpoints?.[provider.kind]),
-        ...(security === undefined ? {} : { security }),
+        endpoint: resolution.endpoint,
+        ...(resolution.security === undefined ? {} : { security: resolution.security }),
       });
       const adoption = (listener as NnrpTransportServer & Partial<InternalServerRoleCarrier>)[SERVER_ROLE_ADOPT];
       if (typeof adoption !== "function") {
@@ -902,16 +974,20 @@ async function listenServerRoles(
         });
       }
       try {
-        roles.push(await adoption.call(listener, nextServerId, 1));
+        entries.push({
+          kind: provider.kind,
+          endpoint: listener.endpoint,
+          role: await adoption.call(listener, nextServerId, 1),
+        });
       } catch (error) {
         await listener.close();
         throw error;
       }
       nextServerId = allocateNativeRoleId("connection");
     }
-    return new InternalServerRoleGroup(roles);
+    return new InternalServerRoleGroup(entries);
   } catch (error) {
-    await Promise.allSettled(roles.map(async (role) => await role.close()));
+    await Promise.allSettled(entries.map(async ({ role }) => await role.close()));
     throw error;
   }
 }
@@ -950,24 +1026,164 @@ function transportKindOrder(kind: NnrpTransportKind): number {
   }
 }
 
-function copyProviderEndpoints(
-  providerEndpoints: Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined,
-): Readonly<Partial<Record<NnrpTransportKind, string | URL>>> | undefined {
-  if (providerEndpoints === undefined) return undefined;
-  const kinds = ["tcp", "quic", "ipc", "websocket"] as const;
-  const unknownKind = Object.keys(providerEndpoints).find((kind) => !kinds.includes(kind as NnrpTransportKind));
+interface ResolvedServerProviderRoute {
+  readonly provider: NnrpNativeTransportProvider;
+  readonly endpoint: string;
+  readonly security?: NnrpTransportServerSecurity;
+}
+
+function resolveServerProviderRoutes(
+  endpoint: string | URL,
+  providerRoutes: NnrpServerProviderRoutes | undefined,
+  providers: readonly NnrpNativeTransportProvider[],
+  policy: NnrpTransportPolicy,
+): readonly ResolvedServerProviderRoute[] {
+  const installedKinds = new Set(providers.map((provider) => provider.kind));
+  const uninstalledKind = (Object.keys(providerRoutes ?? {}) as NnrpTransportKind[]).find((kind) =>
+    !installedKinds.has(kind)
+  );
+  if (uninstalledKind !== undefined) {
+    throw serverRouteError(uninstalledKind, "local-unavailable");
+  }
+  return orderedServerProviders(providers, policy).map((provider) => {
+    const route = providerRoutes?.[provider.kind];
+    let resolvedEndpoint: string;
+    try {
+      resolvedEndpoint = provider.kind === "websocket"
+        ? resolveNativeWebSocketEndpoint(route?.endpoint)
+        : resolveServerProviderEndpoint(endpoint, provider.kind, route?.endpoint);
+    } catch (cause) {
+      throw serverRouteError(provider.kind, "route-unresolved", cause);
+    }
+    if (!serverRouteSecuritySatisfied(endpoint, provider.kind, resolvedEndpoint, route?.security !== undefined)) {
+      throw serverRouteError(provider.kind, "security-unsatisfied");
+    }
+    return {
+      provider,
+      endpoint: resolvedEndpoint,
+      ...(route?.security === undefined ? {} : { security: route.security }),
+    };
+  });
+}
+
+function resolveServerProviderEndpoint(
+  applicationEndpoint: string | URL,
+  kind: Exclude<NnrpTransportKind, "websocket">,
+  providerEndpoint: string | URL | undefined,
+): string {
+  if ((kind !== "tcp" && kind !== "quic") || providerEndpoint === undefined) {
+    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  }
+  if (providerEndpoint instanceof URL) {
+    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  }
+
+  const value = providerEndpoint.trim();
+  if (!value.endsWith(":0")) {
+    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  }
+  if (value.length === 0 || value.includes("://")) {
+    throw new TypeError(`${kind} server provider endpoint must use host:port form.`);
+  }
+
+  const parsed = new URL(`tcp://${value}`);
+  if (
+    parsed.hostname.length === 0 || parsed.port !== "0" || parsed.username.length > 0 ||
+    parsed.password.length > 0 || (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.search.length > 0 || parsed.hash.length > 0
+  ) {
+    throw new TypeError(`${kind} server provider endpoint must contain only host and port.`);
+  }
+  return `${parsed.hostname}:0`;
+}
+
+function serverRouteSecuritySatisfied(
+  applicationEndpoint: string | URL,
+  kind: NnrpTransportKind,
+  providerEndpoint: string,
+  hasSecurity: boolean,
+): boolean {
+  const secureApplication = parseApplicationEndpoint(applicationEndpoint).protocol === "nnrps:";
+  if (kind === "tcp") return !secureApplication || hasSecurity;
+  if (kind === "quic") return hasSecurity;
+  if (kind === "ipc") return !secureApplication && !hasSecurity;
+  const secureWebSocket = new URL(providerEndpoint).protocol === "wss:";
+  return (!secureApplication || secureWebSocket) && secureWebSocket === hasSecurity;
+}
+
+function resolveNativeWebSocketEndpoint(endpoint: string | URL | undefined): string {
+  if (endpoint === undefined) throw new TypeError("Native ws/wss routes require an explicit endpoint.");
+  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
+    throw new TypeError("Native ws/wss routes require a ws:// or wss:// endpoint.");
+  }
+  return parsed.toString();
+}
+
+function serverRouteError(
+  kind: NnrpTransportKind,
+  reason: Extract<
+    NnrpTransportRejectionReason,
+    "local-unavailable" | "route-unresolved" | "security-unsatisfied"
+  >,
+  cause?: unknown,
+): NnrpTransportError {
+  return new NnrpTransportError({
+    code: reason === "local-unavailable"
+      ? "NNRP_NATIVE_PROVIDER_ROUTE_LOCAL_UNAVAILABLE"
+      : reason === "route-unresolved"
+      ? "NNRP_NATIVE_PROVIDER_ROUTE_UNRESOLVED"
+      : "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
+    message: reason === "local-unavailable"
+      ? `${kind} server provider route is configured but its provider is not installed.`
+      : reason === "route-unresolved"
+      ? `${kind} server provider route is unresolved.`
+      : `${kind} server provider route cannot satisfy the application endpoint security intent.`,
+    source: "transport",
+    retryable: false,
+    transport: kind,
+    cause: { reason, ...(cause === undefined ? {} : { cause }) },
+  });
+}
+
+function isTerminalListenerError(error: unknown): boolean {
+  if (error instanceof NnrpTimeoutError) return false;
+  return !(error instanceof NnrpTransportError && error.diagnostic.retryable);
+}
+
+const TRANSPORT_KINDS = ["tcp", "quic", "ipc", "websocket"] as const;
+
+function copyServerProviderRoutes(
+  providerRoutes: NnrpServerProviderRoutes | undefined,
+): NnrpServerProviderRoutes | undefined {
+  if (providerRoutes === undefined) return undefined;
+  const unknownKind = Object.keys(providerRoutes).find((kind) =>
+    !(TRANSPORT_KINDS as readonly string[]).includes(kind)
+  );
   if (unknownKind !== undefined) {
-    throw new NnrpProtocolError({
-      code: "NNRP_PROVIDER_ENDPOINT_KIND_INVALID",
-      message: `Unknown server provider endpoint kind ${unknownKind}.`,
+    throw new NnrpTransportError({
+      code: "NNRP_NATIVE_PROVIDER_ROUTE_KEY_INVALID",
+      message: `Unknown native server provider route key: ${unknownKind}.`,
       source: "transport",
       retryable: false,
     });
   }
-  const copy: Partial<Record<NnrpTransportKind, string | URL>> = {};
-  for (const kind of kinds) {
-    const endpoint = providerEndpoints[kind];
-    if (endpoint !== undefined) copy[kind] = endpoint instanceof URL ? new URL(endpoint.toString()) : endpoint;
+  const copy: Partial<Record<NnrpTransportKind, NonNullable<NnrpServerProviderRoutes[NnrpTransportKind]>>> = {};
+  for (const kind of TRANSPORT_KINDS) {
+    const route = providerRoutes[kind];
+    if (route === undefined) continue;
+    copy[kind] = {
+      ...(route.endpoint === undefined
+        ? {}
+        : { endpoint: route.endpoint instanceof URL ? new URL(route.endpoint.toString()) : route.endpoint }),
+      ...(route.security === undefined ? {} : {
+        security: {
+          mode: "server",
+          certificateDer: route.security.certificateDer.slice(),
+          privateKeyPkcs8Der: route.security.privateKeyPkcs8Der.slice(),
+        },
+      }),
+    };
   }
   return copy;
 }
@@ -1176,8 +1392,7 @@ const RUNTIME_OBJECT_EVENT_MAPPINGS: Readonly<
 
 export interface NnrpServerState {
   readonly endpoint: string;
-  readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
-  readonly security?: NnrpTransportServerSecurity;
+  readonly providerRoutes?: NnrpServerProviderRoutes;
   readonly runtime: NnrpBackendRuntime;
   readonly transports: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy: NnrpTransportPolicy;
@@ -1200,6 +1415,10 @@ export class NnrpServer {
     return this.#state.transportPolicy;
   }
 
+  public get boundProviderEndpoints(): Readonly<Partial<Record<NnrpTransportKind, string>>> {
+    return serverBoundProviderEndpoints.get(this) ?? Object.freeze({});
+  }
+
   public accept(): Promise<NnrpServerSession> {
     try {
       this.#ensureOpen();
@@ -1209,18 +1428,25 @@ export class NnrpServer {
 
     const accept = serverAcceptors.get(this);
     if (accept === undefined) return Promise.reject(bindingNotConnectedError("accept"));
-    return accept().then(async (accepted) => {
-      const session = new NnrpServerSession({
-        runtime: this.#state.runtime,
-        options: accepted.sessionOptions ?? {},
-      });
-      if (this.closed) {
-        await session.close();
-        throw closedError("server");
-      }
-      this.#sessions.add(session);
-      return session;
-    });
+    return accept().then(
+      async (accepted) => {
+        const session = new NnrpServerSession({
+          runtime: this.#state.runtime,
+          options: accepted.sessionOptions ?? {},
+          activeTransport: accepted.activeTransport,
+        });
+        if (this.closed) {
+          await session.close();
+          throw closedError("server");
+        }
+        this.#sessions.add(session);
+        return session;
+      },
+      async (error) => {
+        if (isTerminalListenerError(error)) await this.close();
+        throw error;
+      },
+    );
   }
 
   public async close(): Promise<void> {
@@ -1245,6 +1471,7 @@ export class NnrpServer {
 export interface NnrpServerSessionState {
   readonly runtime: NnrpBackendRuntime;
   readonly options: NnrpSessionOptions;
+  readonly activeTransport: NnrpTransportKind;
 }
 
 export class NnrpServerSession {
@@ -1266,6 +1493,12 @@ export class NnrpServerSession {
 
   public get sessionId(): string {
     return this.options.sessionId ?? "";
+  }
+
+  public get activeTransport(): NnrpTransportKind {
+    const activeTransport = this.#state?.activeTransport;
+    if (activeTransport === undefined) throw bindingNotConnectedError("activeTransport");
+    return activeTransport;
   }
 
   public receive(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {

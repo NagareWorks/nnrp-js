@@ -187,9 +187,13 @@ async function startServer(
   const runtime = await openBackendRuntime({ transports: [provider], transportPolicy });
   const server = runtime.listen({
     endpoint,
-    providerEndpoints: { [provider.kind]: providerEndpoint },
+    providerRoutes: {
+      [provider.kind]: {
+        endpoint: providerEndpoint,
+        ...(security === undefined ? {} : { security }),
+      },
+    },
     transportPolicy,
-    ...(security === undefined ? {} : { security }),
   });
   return { runtime, server };
 }
@@ -302,10 +306,14 @@ async function connectWithRetry(options: Parameters<typeof handleProgressClient>
     try {
       return await openNativeClient({
         endpoint: options.endpoint,
-        providerEndpoint: options.providerEndpoint,
+        providerRoutes: {
+          [options.provider.kind]: {
+            endpoint: options.providerEndpoint,
+            ...(options.security === undefined ? {} : { security: options.security }),
+          },
+        },
         transports: [options.provider],
         transportPolicy: options.transportPolicy,
-        ...(options.security === undefined ? {} : { security: options.security }),
       });
     } catch (error) {
       lastError = error;

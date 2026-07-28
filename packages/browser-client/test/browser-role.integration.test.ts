@@ -31,7 +31,7 @@ Deno.test({
     });
     const server = serverRuntime.listen({
       endpoint: "nnrp://127.0.0.1/browser-role",
-      providerEndpoints: { websocket: providerEndpoint },
+      providerRoutes: { websocket: { endpoint: providerEndpoint } },
       transportPolicy: "force-websocket",
     });
     const accepting = server.accept();
@@ -70,7 +70,7 @@ Deno.test({
     });
     const client = browserRuntime.connect({
       endpoint: "nnrp://127.0.0.1/browser-role",
-      providerEndpoint,
+      providerRoutes: { websocket: { endpoint: providerEndpoint } },
     });
     const session = client.openSession({ sessionId: "browser-role-e2e", inputProfile: "token" });
 

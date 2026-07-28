@@ -1,4 +1,4 @@
-import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type NnrpTransportServerSecurity, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpServerProviderRoutes, type NnrpSessionFlowControlOptions, type NnrpTransportCandidateReadiness, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -21,12 +21,12 @@ export interface NnrpNativeRuntimeFrameSendRequest {
 }
 export interface NnrpNativeAcceptRequest {
     readonly endpoint: string;
-    readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
-    readonly security?: NnrpTransportServerSecurity;
+    readonly providerRoutes?: NnrpServerProviderRoutes;
     readonly transportPolicy: NnrpTransportPolicy;
 }
 export interface NnrpNativeAcceptedSession {
     readonly sessionOptions?: NnrpSessionOptions;
+    readonly activeTransport: NnrpTransportKind;
 }
 export interface NnrpNativeServerReceiveRequest {
     readonly sessionOptions: NnrpSessionOptions;
@@ -54,8 +54,7 @@ export interface NnrpBackendRuntimeOptions {
 }
 export interface NnrpListenOptions {
     readonly endpoint: string | URL;
-    readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
-    readonly security?: NnrpTransportServerSecurity;
+    readonly providerRoutes?: NnrpServerProviderRoutes;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
 }
@@ -69,7 +68,8 @@ export interface NnrpTransportSelectionOptions {
     readonly providers?: readonly NnrpNativeTransportProvider[];
     readonly policy?: NnrpTransportPolicy;
     readonly requestedMaxFrameBytes?: bigint;
-    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
@@ -93,8 +93,7 @@ export declare class NnrpBackendRuntime {
 }
 export interface NnrpServerState {
     readonly endpoint: string;
-    readonly providerEndpoints?: Readonly<Partial<Record<NnrpTransportKind, string | URL>>>;
-    readonly security?: NnrpTransportServerSecurity;
+    readonly providerRoutes?: NnrpServerProviderRoutes;
     readonly runtime: NnrpBackendRuntime;
     readonly transports: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy: NnrpTransportPolicy;
@@ -104,6 +103,7 @@ export declare class NnrpServer {
     constructor(state: NnrpServerState);
     get endpoint(): string;
     get transportPolicy(): NnrpTransportPolicy;
+    get boundProviderEndpoints(): Readonly<Partial<Record<NnrpTransportKind, string>>>;
     accept(): Promise<NnrpServerSession>;
     close(): Promise<void>;
     get closed(): boolean;
@@ -111,12 +111,14 @@ export declare class NnrpServer {
 export interface NnrpServerSessionState {
     readonly runtime: NnrpBackendRuntime;
     readonly options: NnrpSessionOptions;
+    readonly activeTransport: NnrpTransportKind;
 }
 export declare class NnrpServerSession {
     #private;
     constructor(state?: NnrpServerSessionState);
     get options(): NnrpSessionOptions;
     get sessionId(): string;
+    get activeTransport(): NnrpTransportKind;
     receive(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     sendResult(result: NnrpResult): Promise<void>;
     sendProgress(metadata: ProgressMetadata, body?: Uint8Array): Promise<void>;

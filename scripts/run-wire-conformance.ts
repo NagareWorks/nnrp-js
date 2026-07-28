@@ -5,10 +5,15 @@ import {
   validatePlanCoverage,
   type WireConformanceOptions,
 } from "./wire-conformance-plan.ts";
+import {
+  BROWSER_HOST_ROUTE_PROFILE,
+  createHostRouteTargetManifest,
+  type HostRouteProfile,
+  NATIVE_HOST_ROUTE_PROFILES,
+} from "./host-route-conformance.ts";
 
 const MANIFEST_WAIT_MILLIS = 15_000;
 const TARGET_EXIT_WAIT_MILLIS = 10_000;
-
 if (import.meta.main) {
   await runWireConformance(
     parseWireConformanceOptions(Deno.args, { NNRP_CONFORMANCE_ROOT: Deno.env.get("NNRP_CONFORMANCE_ROOT") }),
@@ -88,6 +93,7 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
     ]);
     const status = await withTimeout(targetStatus, TARGET_EXIT_WAIT_MILLIS, "wire target shutdown");
     if (!status.success) throw new Error(`wire target exited with code ${status.code}`);
+    await runHostRouteConformance(options, suitePath);
   } catch (error) {
     try {
       target.kill("SIGTERM");
@@ -96,6 +102,103 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
     }
     await targetStatus.catch(() => undefined);
     throw error;
+  }
+}
+
+export async function runHostRouteConformance(options: WireConformanceOptions, suitePath: string): Promise<void> {
+  await runHostRouteProfiles(options, suitePath, NATIVE_HOST_ROUTE_PROFILES, 10);
+}
+
+export async function runBrowserHostRouteConformance(
+  options: WireConformanceOptions,
+  suitePath: string,
+): Promise<void> {
+  await runHostRouteProfiles(options, suitePath, [BROWSER_HOST_ROUTE_PROFILE], 1);
+}
+
+async function runHostRouteProfiles(
+  options: WireConformanceOptions,
+  suitePath: string,
+  profiles: readonly HostRouteProfile[],
+  expectedTotal: number,
+): Promise<void> {
+  const suite = JSON.parse(await Deno.readTextFile(suitePath)) as { readonly suite_version?: unknown };
+  if (typeof suite.suite_version !== "string" || suite.suite_version.length === 0) {
+    throw new Error("wire suite manifest does not declare suite_version");
+  }
+  const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+  const targetExecutable = resolve(
+    scriptDirectory,
+    Deno.build.os === "windows" ? "run-host-route-target.cmd" : "run-host-route-target.sh",
+  );
+  await requireFile(targetExecutable, "host-route target executable");
+
+  let totalPassed = 0;
+  for (const profile of profiles) {
+    const profileDirectory = resolve(options.artifactDirectory, `host-route-${profile.name}`);
+    await Deno.mkdir(profileDirectory, { recursive: true });
+    const targetPath = resolve(profileDirectory, "target.json");
+    const planPath = resolve(profileDirectory, "plan.json");
+    const resultsPath = resolve(profileDirectory, "results.json");
+    const evidenceDirectory = resolve(profileDirectory, "evidence");
+    const targetName = `nnrp-js-host-route-${profile.name}`;
+    await Deno.writeTextFile(
+      targetPath,
+      `${
+        JSON.stringify(
+          createHostRouteTargetManifest(targetName, suite.suite_version, profile.providers, profile.modes),
+          null,
+          2,
+        )
+      }\n`,
+    );
+    await runCargo(options.conformanceRoot, [
+      "wire-plan",
+      "--suite",
+      suitePath,
+      "--target",
+      targetPath,
+      "--output",
+      planPath,
+      "--results-path",
+      resultsPath,
+      "--evidence-dir",
+      evidenceDirectory,
+    ]);
+    await runCargo(options.conformanceRoot, [
+      "wire-run",
+      "--plan",
+      planPath,
+      "--target",
+      targetPath,
+      "--host-route-target",
+      targetExecutable,
+      "--output",
+      resultsPath,
+    ]);
+    await runCargo(options.conformanceRoot, [
+      "validate-wire-results",
+      "--plan",
+      planPath,
+      "--results",
+      resultsPath,
+    ]);
+    const report = JSON.parse(await Deno.readTextFile(resultsPath)) as {
+      readonly results?: readonly { readonly outcome?: unknown }[];
+    };
+    const results = report.results;
+    const failures = results?.filter((result) => result.outcome !== "passed") ?? [];
+    if (results === undefined || results.length !== profile.expected || failures.length !== 0) {
+      throw new Error(
+        `${profile.name} expected ${profile.expected} passing host-route scenarios; got ${
+          results?.length ?? 0
+        } total and ${failures.length} non-passing.`,
+      );
+    }
+    totalPassed += results.length;
+  }
+  if (totalPassed !== expectedTotal) {
+    throw new Error(`Expected ${expectedTotal} Preview4 host-route scenarios, got ${totalPassed}.`);
   }
 }
 

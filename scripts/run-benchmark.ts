@@ -18,7 +18,7 @@ import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson
 
 const RESULT_SCHEMA_URL =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/benchmark-results.schema.json";
-const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.16";
+const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.18";
 const DEFAULT_DURATION_SECONDS = 3;
 const DEFAULT_WARMUP_ITERATIONS = 100;
 const DEFAULT_PAYLOAD_BYTES = 1024;
@@ -294,7 +294,7 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
   });
   const server = serverRuntime.listen({
     endpoint: "nnrp://localhost/benchmark-browser",
-    providerEndpoints: { websocket: providerEndpoint },
+    providerRoutes: { websocket: { endpoint: providerEndpoint } },
     transportPolicy: "force-websocket",
   });
   const accepting = server.accept();
@@ -305,7 +305,10 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     transportProviders: [createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket })],
     transportPolicy: "force-websocket",
   });
-  const client = browserRuntime.connect({ endpoint: "nnrp://localhost/benchmark-browser", providerEndpoint });
+  const client = browserRuntime.connect({
+    endpoint: "nnrp://localhost/benchmark-browser",
+    providerRoutes: { websocket: { endpoint: providerEndpoint } },
+  });
   const session = client.openSession({ sessionId: "benchmark-browser", inputProfile: "token" });
   const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
   const serverSessionPromise = accepting;
@@ -345,14 +348,14 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: policy });
   const server = serverRuntime.listen({
     endpoint,
-    providerEndpoints: { [transport]: providerEndpoint },
+    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
     transportPolicy: policy,
   });
   const accepting = server.accept();
   await delay(25);
   const client = await openNativeClient({
     endpoint,
-    providerEndpoint,
+    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
     transports: [provider],
     transportPolicy: policy,
   });

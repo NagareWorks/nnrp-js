@@ -389,7 +389,7 @@ export interface NnrpCapabilityManifest {
     readonly transports: readonly NnrpTransportKind[];
     readonly capabilities: readonly NnrpCapability[];
 }
-export type NnrpTransportRejectionReason = "policy-disallowed" | "local-unavailable" | "peer-unsupported" | "limit-exceeded" | "probe-missing" | "probe-failed";
+export type NnrpTransportRejectionReason = "policy-disallowed" | "local-unavailable" | "peer-unsupported" | "limit-exceeded" | "route-unresolved" | "security-unsatisfied" | "probe-missing" | "probe-failed";
 export type NnrpTransportProviderLimitation = "requires-udp" | "requires-tcp" | "local-host-only" | "native-host-only" | "browser-host-only" | "unix-domain-socket" | "windows-named-pipe";
 export type NnrpTransportProbeState = "not-run" | "succeeded" | "failed" | "missing";
 export interface NnrpTransportProviderCost {
@@ -418,6 +418,20 @@ export interface NnrpTransportProbeMetrics {
     readonly medianThroughputBytesPerSecond: bigint;
     readonly medianRttMicroseconds: bigint;
 }
+export interface NnrpTransportCandidateReadiness {
+    readonly kind: NnrpTransportKind;
+    readonly providerId: string;
+    readonly routeResolved: boolean;
+    readonly securitySatisfied: boolean;
+    readonly diagnostic?: NnrpDiagnostic;
+}
+export interface NnrpTransportProbeObservation {
+    readonly kind: NnrpTransportKind;
+    readonly providerId: string;
+    readonly state: "succeeded" | "failed";
+    readonly metrics?: NnrpTransportProbeMetrics;
+    readonly diagnostic?: NnrpDiagnostic;
+}
 export interface NnrpTransportClientSecurity {
     readonly mode: "client";
     readonly serverName: string;
@@ -429,6 +443,16 @@ export interface NnrpTransportServerSecurity {
     readonly privateKeyPkcs8Der: Uint8Array;
 }
 export type NnrpTransportSecurity = NnrpTransportClientSecurity | NnrpTransportServerSecurity;
+export interface NnrpClientProviderRoute {
+    readonly endpoint?: string | URL;
+    readonly security?: NnrpTransportClientSecurity;
+}
+export interface NnrpServerProviderRoute {
+    readonly endpoint?: string | URL;
+    readonly security?: NnrpTransportServerSecurity;
+}
+export type NnrpClientProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpClientProviderRoute>>>;
+export type NnrpServerProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpServerProviderRoute>>>;
 export interface NnrpTransportCandidate {
     readonly kind: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
@@ -496,8 +520,10 @@ export interface NnrpTransportCandidateOptions {
     readonly peer: NnrpCapabilityManifest;
     readonly providers: readonly NnrpTransportProviderObservation[];
     readonly requestedMaxFrameBytes?: bigint;
-    readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
+export type NnrpTransportSelectionErrorCode = "INVALID_EVIDENCE" | "FORCED_TRANSPORT_UNAVAILABLE" | "NO_VIABLE_TRANSPORT";
 export interface NnrpTransportSelectionSummary {
     readonly policy: NnrpTransportPolicy;
     readonly selected: NnrpTransportKind | null;
@@ -718,6 +744,11 @@ export declare class NnrpCapabilityError extends NnrpError {
 }
 export declare class NnrpTransportError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
+}
+export declare class NnrpTransportSelectionError extends NnrpTransportError {
+    readonly code: NnrpTransportSelectionErrorCode;
+    readonly selection?: NnrpTransportSelection;
+    constructor(code: NnrpTransportSelectionErrorCode, diagnostic: NnrpDiagnostic, selection?: NnrpTransportSelection);
 }
 export declare class NnrpTimeoutError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);

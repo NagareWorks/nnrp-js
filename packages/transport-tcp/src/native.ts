@@ -16,7 +16,9 @@ const HANDLE_KIND_INVALID = 0;
 const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
-const ABI_VERSION = "4.0.0";
+const HANDLE_KIND_SECURITY_CONFIG = 12;
+const HANDLE_KIND_SERVER_ACCEPT = 13;
+const ABI_VERSION = "4.1.0";
 const HANDLE_SIZE = 24;
 const BUFFER_VIEW_SIZE = 16;
 const STATUS_SIZE = 16;
@@ -34,6 +36,9 @@ const ACCEPT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32"] } as const
 const WRITE_BATCH_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "pointer", "u32", "u32"] } as const;
 const READ_BATCH_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32", "u64"] } as const;
 const PROBE_REQUEST_STRUCT = { struct: [OPEN_REQUEST_STRUCT, "u32", "u32"] } as const;
+const SECURITY_CONFIG_REQUEST_STRUCT = {
+  struct: ["u32", "u32", BUFFER_VIEW_STRUCT, BUFFER_VIEW_STRUCT],
+} as const;
 const CLIENT_CONNECT_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT] } as const;
 const SERVER_BIND_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT] } as const;
 const SESSION_OPEN_REQUEST_STRUCT = {
@@ -44,12 +49,21 @@ const ROLE_EVENT_POLL_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u32", "u32", "u32", "u32"],
 } as const;
 const SERVER_ACCEPT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u64", "u32", "u32"] } as const;
+const SERVER_ACCEPT_WAIT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32"] } as const;
 const SERVER_SEND_RESULT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, BUFFER_VIEW_STRUCT] } as const;
 const RUNTIME_FRAME_SEND_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u32", "u32", BUFFER_VIEW_STRUCT],
 } as const;
 
 const DENO_TRANSPORT_SYMBOLS = {
+  nnrp_transport_client_security_config_create: {
+    parameters: [SECURITY_CONFIG_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
+  nnrp_transport_server_security_config_create: {
+    parameters: [SECURITY_CONFIG_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
   nnrp_transport_probe: {
     parameters: [PROBE_REQUEST_STRUCT, "buffer"],
     result: STATUS_STRUCT,
@@ -115,11 +129,20 @@ const DENO_TRANSPORT_SYMBOLS = {
     result: STATUS_STRUCT,
     nonblocking: true,
   },
-  nnrp_server_accept: {
+  nnrp_server_accept_begin: {
     parameters: [SERVER_ACCEPT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
+  nnrp_server_accept_wait: {
+    parameters: [SERVER_ACCEPT_WAIT_REQUEST_STRUCT],
     result: STATUS_STRUCT,
     nonblocking: true,
   },
+  nnrp_server_accept_claim: {
+    parameters: [SERVER_ACCEPT_REQUEST_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
+  nnrp_server_accept_release: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
   nnrp_server_await_events: {
     parameters: [ROLE_EVENT_POLL_REQUEST_STRUCT, "buffer", "usize", "buffer"],
     result: STATUS_STRUCT,
@@ -139,6 +162,8 @@ const DENO_TRANSPORT_SYMBOLS = {
 } as const;
 
 interface DenoTransportSymbols {
+  nnrp_transport_client_security_config_create(request: Uint8Array, output: Uint8Array): Uint8Array;
+  nnrp_transport_server_security_config_create(request: Uint8Array, output: Uint8Array): Uint8Array;
   nnrp_transport_probe(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_transport_connect(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_transport_listen(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
@@ -165,7 +190,10 @@ interface DenoTransportSymbols {
   nnrp_connection_close(handle: Uint8Array): Promise<Uint8Array>;
   nnrp_client_close_connection(handle: Uint8Array): Promise<Uint8Array>;
   nnrp_server_bind(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
-  nnrp_server_accept(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_accept_begin(request: Uint8Array, output: Uint8Array): Uint8Array;
+  nnrp_server_accept_wait(request: Uint8Array): Promise<Uint8Array>;
+  nnrp_server_accept_claim(request: Uint8Array, output: Uint8Array): Uint8Array;
+  nnrp_server_accept_release(accept: Uint8Array): Uint8Array;
   nnrp_server_await_events(
     request: Uint8Array,
     events: Uint8Array,
@@ -290,47 +318,54 @@ class DenoTcpBinding implements NnrpNativeTransportBinding {
   constructor(readonly library: DenoTransportLibrary) {}
 
   async probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics> {
-    assertNoSecurity(options);
     const endpoint = endpointBytes(options.endpoint, "probe");
-    const request = packProbeRequest(options, endpoint);
-    const output = bytes(24);
-    assertStatus(await this.library.symbols.nnrp_transport_probe(request, output), "transport probe");
-    const view = dataView(output);
-    return {
-      sampleCount: view.getUint32(0, true),
-      successCount: view.getUint32(4, true),
-      medianThroughputBytesPerSecond: view.getBigUint64(8, true),
-      medianRttMicroseconds: view.getBigUint64(16, true),
-    };
+    return await withOptionalSecurityConfig(this.library, options, "client", async (config) => {
+      const request = packProbeRequest(options, endpoint, config);
+      const output = bytes(24);
+      assertStatus(await this.library.symbols.nnrp_transport_probe(request, output), "transport probe");
+      const view = dataView(output);
+      return {
+        sampleCount: view.getUint32(0, true),
+        successCount: view.getUint32(4, true),
+        medianThroughputBytesPerSecond: view.getBigUint64(8, true),
+        medianRttMicroseconds: view.getBigUint64(16, true),
+      };
+    });
   }
 
   async connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection> {
-    assertNoSecurity(options);
     const endpoint = endpointBytes(options.endpoint, "connect");
-    const output = bytes(HANDLE_SIZE);
-    assertStatus(
-      await this.library.symbols.nnrp_transport_connect(packOpenRequest(options, endpoint), output),
-      "transport connect",
-    );
-    return new DenoTcpConnection(this.library, decodeHandle(output, HANDLE_KIND_CONNECTION), String(options.endpoint));
+    return await withOptionalSecurityConfig(this.library, options, "client", async (config) => {
+      const output = bytes(HANDLE_SIZE);
+      assertStatus(
+        await this.library.symbols.nnrp_transport_connect(packOpenRequest(options, endpoint, config), output),
+        "transport connect",
+      );
+      return new DenoTcpConnection(
+        this.library,
+        decodeHandle(output, HANDLE_KIND_CONNECTION),
+        String(options.endpoint),
+      );
+    });
   }
 
   async listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer> {
-    assertNoSecurity(options);
     const endpoint = endpointBytes(options.endpoint, "listen");
-    const output = bytes(HANDLE_SIZE);
-    assertStatus(
-      await this.library.symbols.nnrp_transport_listen(packOpenRequest(options, endpoint), output),
-      "transport listen",
-    );
-    const handle = decodeHandle(output, HANDLE_KIND_LISTENER);
-    try {
-      const boundEndpoint = await readListenerEndpoint(this.library, handle);
-      return new DenoTcpServer(this.library, handle, boundEndpoint);
-    } catch (error) {
-      closeHandle(this.library, handle, "transport listener cleanup");
-      throw error;
-    }
+    return await withOptionalSecurityConfig(this.library, options, "server", async (config) => {
+      const output = bytes(HANDLE_SIZE);
+      assertStatus(
+        await this.library.symbols.nnrp_transport_listen(packOpenRequest(options, endpoint, config), output),
+        "transport listen",
+      );
+      const handle = decodeHandle(output, HANDLE_KIND_LISTENER);
+      try {
+        const boundEndpoint = await readListenerEndpoint(this.library, handle);
+        return new DenoTcpServer(this.library, handle, boundEndpoint);
+      } catch (error) {
+        closeHandle(this.library, handle, "transport listener cleanup");
+        throw error;
+      }
+    });
   }
 }
 
@@ -540,31 +575,90 @@ class DenoClientRoleSession {
 
 class DenoServerRole {
   #closed = false;
+  readonly #accepts = new Set<FfiHandle>();
 
   constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
 
   async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<DenoServerRoleSession> {
     this.#requireOpen();
-    const output = bytes(HANDLE_SIZE);
-    const request = bytes(40);
-    const view = dataView(request);
-    writeHandle(view, 0, this.handle);
-    view.setBigUint64(24, sessionHandleId, true);
-    view.setUint32(32, generation, true);
-    view.setUint32(36, timeoutMillis, true);
-    assertStatus(await this.library.symbols.nnrp_server_accept(request, output), "server session accept");
-    return new DenoServerRoleSession(this.library, decodeHandle(output));
+    const beginOutput = bytes(HANDLE_SIZE);
+    assertStatus(
+      this.library.symbols.nnrp_server_accept_begin(
+        packServerAcceptRequest(this.handle, sessionHandleId, generation, 0),
+        beginOutput,
+      ),
+      "server session accept begin",
+    );
+    const accept = decodeHandle(beginOutput, HANDLE_KIND_SERVER_ACCEPT);
+    this.#accepts.add(accept);
+    try {
+      while (true) {
+        const status = await this.library.symbols.nnrp_server_accept_wait(
+          packServerAcceptWaitRequest(accept, timeoutMillis),
+        );
+        if (timeoutMillis === 0 && statusCode(status) === 5) continue;
+        assertStatus(status, "server session accept wait");
+        break;
+      }
+      const output = bytes(32);
+      assertStatus(
+        this.library.symbols.nnrp_server_accept_claim(
+          packServerAcceptRequest(accept, sessionHandleId, generation, 0),
+          output,
+        ),
+        "server session accept claim",
+      );
+      this.#accepts.delete(accept);
+      return new DenoServerRoleSession(this.library, decodeHandle(output));
+    } finally {
+      if (this.#accepts.delete(accept)) {
+        assertStatus(
+          this.library.symbols.nnrp_server_accept_release(packHandle(accept)),
+          "server session accept release",
+        );
+      }
+    }
   }
 
   async close(): Promise<void> {
     if (this.#closed) return;
-    assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
     this.#closed = true;
+    for (const accept of this.#accepts) {
+      assertStatus(
+        this.library.symbols.nnrp_server_accept_release(packHandle(accept)),
+        "server session accept release",
+      );
+    }
+    this.#accepts.clear();
+    assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
   }
 
   #requireOpen(): void {
     if (this.#closed) throw transportError("NNRP_SERVER_CLOSED", "Native server role is closed.");
   }
+}
+
+function packServerAcceptRequest(
+  handle: FfiHandle,
+  id: bigint,
+  generation: number,
+  finalValue: number,
+): Uint8Array<ArrayBuffer> {
+  const request = bytes(40);
+  const view = dataView(request);
+  writeHandle(view, 0, handle);
+  view.setBigUint64(24, id, true);
+  view.setUint32(32, generation, true);
+  view.setUint32(36, finalValue, true);
+  return request;
+}
+
+function packServerAcceptWaitRequest(accept: FfiHandle, timeoutMillis: number): Uint8Array<ArrayBuffer> {
+  const request = bytes(32);
+  const view = dataView(request);
+  writeHandle(view, 0, accept);
+  view.setUint32(24, timeoutMillis, true);
+  return request;
 }
 
 class DenoServerRoleSession {
@@ -708,12 +802,16 @@ async function readListenerEndpoint(library: DenoTransportLibrary, listener: Ffi
   }
 }
 
-function packOpenRequest(options: NnrpTransportEndpoint, endpoint: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+function packOpenRequest(
+  options: NnrpTransportEndpoint,
+  endpoint: Uint8Array<ArrayBuffer>,
+  config: FfiHandle,
+): Uint8Array<ArrayBuffer> {
   const request = bytes(64);
   const view = dataView(request);
   view.setUint32(0, TRANSPORT_ID_TCP, true);
   writeBufferView(view, 8, endpoint);
-  writeHandle(view, 24, invalidHandle());
+  writeHandle(view, 24, config);
   view.setBigUint64(48, boundedU64("maxPacketBytes", options.maxPacketBytes ?? 0n), true);
   view.setUint32(56, boundedU32("timeoutMillis", options.timeoutMillis ?? 0), true);
   return request;
@@ -722,9 +820,10 @@ function packOpenRequest(options: NnrpTransportEndpoint, endpoint: Uint8Array<Ar
 function packProbeRequest(
   options: NnrpTransportProbeOptions,
   endpoint: Uint8Array<ArrayBuffer>,
+  config: FfiHandle,
 ): Uint8Array<ArrayBuffer> {
   const request = bytes(72);
-  request.set(packOpenRequest(options, endpoint), 0);
+  request.set(packOpenRequest(options, endpoint, config), 0);
   const view = dataView(request);
   view.setUint32(64, boundedU32("sampleCount", options.sampleCount ?? 0), true);
   view.setUint32(68, boundedU32("payloadBytes", options.payloadBytes ?? 0), true);
@@ -742,10 +841,50 @@ function nativeEndpoint(endpoint: string | URL): string {
   return value.length > 0 && !value.includes("://") ? `tcp://${value}` : value;
 }
 
-function assertNoSecurity(options: NnrpTransportEndpoint): void {
-  if (options.security !== undefined) {
-    throw transportError("NNRP_TCP_SECURITY_INVALID", "TCP endpoints do not accept transport security configuration.");
+async function withOptionalSecurityConfig<T>(
+  library: DenoTransportLibrary,
+  options: NnrpTransportEndpoint,
+  mode: "client" | "server",
+  operation: (config: FfiHandle) => Promise<T>,
+): Promise<T> {
+  if (options.security === undefined) return await operation(invalidHandle());
+  const config = createSecurityConfig(library, options, mode);
+  try {
+    return await operation(config);
+  } finally {
+    closeHandle(library, config, "transport security config close");
   }
+}
+
+function createSecurityConfig(
+  library: DenoTransportLibrary,
+  options: NnrpTransportEndpoint,
+  mode: "client" | "server",
+): FfiHandle {
+  const security = options.security;
+  if (security === undefined || security.mode !== mode) {
+    throw transportError("NNRP_TCP_SECURITY_INVALID", `TCP ${mode} requires ${mode} security configuration.`);
+  }
+  const first = security.mode === "client"
+    ? new TextEncoder().encode(security.serverName)
+    : security.certificateDer.slice();
+  const second = security.mode === "client"
+    ? security.trustedCertificateDer.slice()
+    : security.privateKeyPkcs8Der.slice();
+  if (first.byteLength === 0 || second.byteLength === 0) {
+    throw transportError("NNRP_TCP_SECURITY_INVALID", `TCP ${mode} security fields must be non-empty.`);
+  }
+  const request = bytes(40);
+  const view = dataView(request);
+  view.setUint32(0, TRANSPORT_ID_TCP, true);
+  writeBufferView(view, 8, first as Uint8Array<ArrayBuffer>);
+  writeBufferView(view, 24, second as Uint8Array<ArrayBuffer>);
+  const output = bytes(HANDLE_SIZE);
+  const status = mode === "client"
+    ? library.symbols.nnrp_transport_client_security_config_create(request, output)
+    : library.symbols.nnrp_transport_server_security_config_create(request, output);
+  assertStatus(status, `transport ${mode} security config create`);
+  return decodeHandle(output, HANDLE_KIND_SECURITY_CONFIG);
 }
 
 function normalizePackets(packets: Uint8Array | readonly Uint8Array[]): readonly Uint8Array<ArrayBuffer>[] {
@@ -859,6 +998,10 @@ function assertStatus(status: Uint8Array, operation: string): void {
       code === 5 || code === 6,
     );
   }
+}
+
+function statusCode(status: Uint8Array): number {
+  return status.byteLength < STATUS_SIZE ? -1 : dataView(status).getUint32(0, true);
 }
 
 function validateManifest(value: unknown, os: string, arch: string): string {

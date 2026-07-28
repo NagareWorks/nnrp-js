@@ -19,6 +19,7 @@ import {
   type NnrpCapability,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
+  type NnrpClientProviderRoutes,
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
   type NnrpInputProfile,
@@ -37,6 +38,7 @@ import {
   type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
+  type NnrpTransportCandidateReadiness,
   type NnrpTransportClientSecurity,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
@@ -44,8 +46,11 @@ import {
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeObservation,
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
+  type NnrpTransportProviderObservation,
+  type NnrpTransportRejectionReason,
   type NnrpTransportSelectionSummary,
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
@@ -56,6 +61,7 @@ import {
   type ObjectReleaseMetadata,
   ObjectReleaseReason,
   OwnershipHint,
+  parseApplicationEndpoint,
   type PressureMetadata,
   resolveProviderEndpoint,
   type RouteHintMetadata,
@@ -74,6 +80,7 @@ const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 3;
 const EXPECTED_ABI_MINOR = 0;
 const EXPECTED_ABI_PATCH = 0;
+const TRANSPORT_KINDS = ["tcp", "quic", "ipc", "websocket"] as const satisfies readonly NnrpTransportKind[];
 
 type RuntimeObjectSendMetadata =
   | ObjectDescriptorMetadata
@@ -398,8 +405,7 @@ export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
 
 export interface NnrpNativeClientOptions {
   readonly endpoint: string | URL;
-  readonly providerEndpoint?: string | URL;
-  readonly security?: NnrpTransportClientSecurity;
+  readonly providerRoutes?: NnrpClientProviderRoutes;
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpSessionOptions;
@@ -414,8 +420,7 @@ interface NnrpBackendRuntimeOptions {
 
 export interface NnrpConnectOptions {
   readonly endpoint: string | URL;
-  readonly providerEndpoint?: string | URL;
-  readonly security?: NnrpTransportClientSecurity;
+  readonly providerRoutes?: NnrpClientProviderRoutes;
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly sessionDefaults?: NnrpSessionOptions;
@@ -432,7 +437,8 @@ export interface NnrpTransportSelectionOptions {
   readonly providers?: readonly NnrpNativeTransportProvider[];
   readonly policy?: NnrpTransportPolicy;
   readonly requestedMaxFrameBytes?: bigint;
-  readonly probeMetricsByProviderId?: Readonly<Record<string, NnrpTransportProbeMetrics>>;
+  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export interface NnrpNativeRuntimeBinding {
@@ -454,8 +460,7 @@ export async function openNativeClient(options: NnrpNativeClientOptions): Promis
   try {
     return await runtime.connect({
       endpoint: options.endpoint,
-      ...(options.providerEndpoint === undefined ? {} : { providerEndpoint: options.providerEndpoint }),
-      ...(options.security === undefined ? {} : { security: options.security }),
+      ...(options.providerRoutes === undefined ? {} : { providerRoutes: options.providerRoutes }),
       ...(options.transportPolicy === undefined ? {} : { transportPolicy: options.transportPolicy }),
       ...(options.sessionDefaults === undefined ? {} : { sessionDefaults: options.sessionDefaults }),
     });
@@ -607,12 +612,12 @@ class NnrpBackendRuntime {
       options.transports ?? this.#transportProviders,
       options.transportPolicy ?? this.#transportPolicy,
     );
+    validateClientProviderRouteKeys(options.providerRoutes);
 
     if (this.#binding.ffi === undefined) {
       this.#roleConnection = await connectClientRole(
         options.endpoint,
-        options.providerEndpoint,
-        options.security,
+        options.providerRoutes,
         options.transports ?? this.#transportProviders,
         options.transportPolicy ?? this.#transportPolicy,
       );
@@ -716,9 +721,8 @@ class NnrpBackendRuntime {
       ...(options.requestedMaxFrameBytes === undefined
         ? {}
         : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      ...(options.probeMetricsByProviderId === undefined
-        ? {}
-        : { probeMetricsByProviderId: options.probeMetricsByProviderId }),
+      candidateReadiness: options.candidateReadiness,
+      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
     });
   }
 }
@@ -789,15 +793,15 @@ function forcedTransportKind(policy: NnrpTransportPolicy): NnrpTransportKind | u
 
 async function connectClientRole(
   endpoint: string | URL,
-  providerEndpoint: string | URL | undefined,
-  security: NnrpTransportClientSecurity | undefined,
+  providerRoutes: NnrpClientProviderRoutes | undefined,
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
 ): Promise<InternalClientRoleConnection> {
-  const provider = await selectClientProvider(endpoint, providerEndpoint, security, providers, policy);
+  const selected = await selectClientProvider(endpoint, providerRoutes, providers, policy);
+  const provider = selected.provider;
   const carrier = await provider.connect({
-    endpoint: resolveProviderEndpoint(endpoint, provider.kind, providerEndpoint),
-    ...(security === undefined ? {} : { security }),
+    endpoint: resolvedRouteEndpoint(selected),
+    ...(selected.security === undefined ? {} : { security: selected.security }),
   });
   const adoption = (carrier as NnrpTransportConnection & Partial<InternalRoleCarrier>)[CLIENT_ROLE_ADOPT];
   if (typeof adoption !== "function") {
@@ -829,49 +833,212 @@ function allocateNativeRoleId(kind: keyof NativeRoleIdState, maximum = 0xffff_ff
 
 async function selectClientProvider(
   endpoint: string | URL,
-  providerEndpoint: string | URL | undefined,
-  security: NnrpTransportClientSecurity | undefined,
+  providerRoutes: NnrpClientProviderRoutes | undefined,
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
-): Promise<NnrpNativeTransportProvider> {
-  const available = providers.filter((provider) => provider.localAvailable);
+): Promise<ResolvedClientProviderRoute> {
+  validateClientProviderRouteKeys(providerRoutes);
+  const resolutions = providers.map((provider) => resolveClientProviderRoute(endpoint, provider, providerRoutes));
   const forced = forcedTransportKind(policy);
-  if (forced !== undefined) {
-    const selected = available.find((provider) => provider.kind === forced);
-    if (selected !== undefined) return selected;
-  }
-  if (available.length === 1) return available[0]!;
-  const samples = await Promise.all(available.map(async (provider) => {
+  const configuredKinds = configuredClientProviderKinds(providerRoutes);
+  const peerSupportedKinds = [...new Set<NnrpTransportKind>(["tcp", "quic", ...configuredKinds])];
+  const probeTargets = resolutions.filter(({ provider, rejectionReason }) =>
+    provider.localAvailable &&
+    peerSupportedKinds.includes(provider.kind) &&
+    rejectionReason === undefined &&
+    (forced === undefined || provider.kind === forced)
+  );
+  const samples = probeTargets.length <= 1 ? [] : await Promise.all(probeTargets.map(async (resolution) => {
     try {
-      const metrics = await provider.probe({
-        endpoint: resolveProviderEndpoint(endpoint, provider.kind, providerEndpoint),
-        ...(security === undefined ? {} : { security }),
+      const metrics = await resolution.provider.probe({
+        endpoint: resolvedRouteEndpoint(resolution),
+        ...(resolution.security === undefined ? {} : { security: resolution.security }),
         sampleCount: 3,
         payloadBytes: 64,
         timeoutMillis: 1_000,
       });
-      return { provider, metrics };
+      return { provider: resolution.provider, metrics };
     } catch {
-      return { provider };
+      return { provider: resolution.provider };
     }
   }));
-  const transports = available.map((provider) => provider.kind);
-  const manifest = createCapabilityManifest({ buildMode: "backend-native", transports });
-  const probeMetricsByProviderId = Object.fromEntries(
-    samples.flatMap(({ provider, metrics }) => metrics === undefined ? [] : [[provider.metadata.id, metrics]]),
+  const installedKinds = transportKinds(providers);
+  const observations: NnrpTransportProviderObservation[] = [
+    ...providers,
+    ...configuredKinds
+      .filter((kind) => !installedKinds.includes(kind))
+      .map(uninstalledProviderObservation),
+  ];
+  const localManifest = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: [...new Set([...installedKinds, ...configuredKinds])],
+  });
+  const peerManifest = createCapabilityManifest({
+    buildMode: "backend-native",
+    transports: peerSupportedKinds,
+  });
+  const resolutionByProviderId = new Map(
+    resolutions.map((resolution) => [resolution.provider.metadata.id, resolution]),
   );
-  const selection = selectTransport(
-    createTransportCandidates({
-      local: manifest,
-      peer: manifest,
-      providers: available,
-      probeMetricsByProviderId,
-    }),
-    policy,
+  const candidateReadiness = observations.map((provider): NnrpTransportCandidateReadiness => {
+    const resolution = resolutionByProviderId.get(provider.metadata.id);
+    return {
+      kind: provider.kind,
+      providerId: provider.metadata.id,
+      routeResolved: resolution?.rejectionReason !== "route-unresolved",
+      securitySatisfied: resolution?.rejectionReason !== "security-unsatisfied",
+      ...(resolution?.rejectionReason === undefined ? {} : {
+        diagnostic: {
+          code: resolution.rejectionReason === "route-unresolved"
+            ? "NNRP_NATIVE_PROVIDER_ROUTE_UNRESOLVED"
+            : "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
+          message: `${provider.kind} client provider route is ${resolution.rejectionReason}.`,
+          source: "transport",
+          retryable: false,
+          transport: provider.kind,
+        },
+      }),
+    };
+  });
+  const probeObservations = samples.map(({ provider, metrics }): NnrpTransportProbeObservation =>
+    metrics === undefined
+      ? {
+        kind: provider.kind,
+        providerId: provider.metadata.id,
+        state: "failed",
+        diagnostic: {
+          code: "NNRP_NATIVE_TRANSPORT_PROBE_FAILED",
+          message: `${provider.kind} transport probe failed.`,
+          source: "transport",
+          retryable: true,
+          transport: provider.kind,
+        },
+      }
+      : { kind: provider.kind, providerId: provider.metadata.id, state: "succeeded", metrics }
   );
-  const selected = available.find((provider) => provider.metadata.id === selection.selected?.provider.id);
-  if (selected === undefined) throw bindingNotConnectedError("transportSelection");
-  return selected;
+  const candidates = createTransportCandidates({
+    local: localManifest,
+    peer: peerManifest,
+    providers: observations,
+    candidateReadiness,
+    probeObservations,
+  });
+  const selection = selectTransport(candidates, policy);
+  const selected = resolutions.find((resolution) =>
+    resolution.provider.metadata.id === selection.selected?.provider.id
+  );
+  if (selected === undefined || selected.endpoint === undefined) {
+    throw new NnrpTransportError({
+      code: "NNRP_NATIVE_TRANSPORT_SELECTION_INCONSISTENT",
+      message: "Selected native client transport does not have a resolved provider route.",
+      source: "transport",
+      retryable: false,
+      cause: createTransportSelectionSummary(selection),
+    });
+  }
+  return { ...selected, endpoint: selected.endpoint };
+}
+
+interface ResolvedClientProviderRoute {
+  readonly provider: NnrpNativeTransportProvider;
+  readonly endpoint?: string;
+  readonly security?: NnrpTransportClientSecurity;
+  readonly rejectionReason?: Extract<NnrpTransportRejectionReason, "route-unresolved" | "security-unsatisfied">;
+}
+
+function resolveClientProviderRoute(
+  endpoint: string | URL,
+  provider: NnrpNativeTransportProvider,
+  providerRoutes: NnrpClientProviderRoutes | undefined,
+): ResolvedClientProviderRoute {
+  const route = providerRoutes?.[provider.kind];
+  let resolvedEndpoint: string;
+  try {
+    resolvedEndpoint = provider.kind === "websocket"
+      ? resolveNativeWebSocketEndpoint(route?.endpoint)
+      : resolveProviderEndpoint(endpoint, provider.kind, route?.endpoint);
+  } catch {
+    return { provider, rejectionReason: "route-unresolved" };
+  }
+  const security = route?.security;
+  if (!clientRouteSecuritySatisfied(endpoint, provider.kind, resolvedEndpoint, security !== undefined)) {
+    return {
+      provider,
+      endpoint: resolvedEndpoint,
+      ...(security === undefined ? {} : { security }),
+      rejectionReason: "security-unsatisfied",
+    };
+  }
+  return {
+    provider,
+    endpoint: resolvedEndpoint,
+    ...(security === undefined ? {} : { security }),
+  };
+}
+
+function clientRouteSecuritySatisfied(
+  applicationEndpoint: string | URL,
+  kind: NnrpTransportKind,
+  providerEndpoint: string,
+  hasSecurity: boolean,
+): boolean {
+  const secureApplication = parseApplicationEndpoint(applicationEndpoint).protocol === "nnrps:";
+  if (kind === "tcp") return !secureApplication || hasSecurity;
+  if (kind === "quic") return hasSecurity;
+  if (kind === "ipc") return !secureApplication && !hasSecurity;
+  const secureWebSocket = new URL(providerEndpoint).protocol === "wss:";
+  return (!secureApplication || secureWebSocket) && secureWebSocket === hasSecurity;
+}
+
+function resolveNativeWebSocketEndpoint(endpoint: string | URL | undefined): string {
+  if (endpoint === undefined) throw new TypeError("Native ws/wss routes require an explicit endpoint.");
+  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
+    throw new TypeError("Native ws/wss routes require a ws:// or wss:// endpoint.");
+  }
+  return parsed.toString();
+}
+
+function validateClientProviderRouteKeys(providerRoutes: NnrpClientProviderRoutes | undefined): void {
+  for (const key of Object.keys(providerRoutes ?? {})) {
+    if (!(TRANSPORT_KINDS as readonly string[]).includes(key)) {
+      throw new NnrpTransportError({
+        code: "NNRP_NATIVE_PROVIDER_ROUTE_KEY_INVALID",
+        message: `Unknown native client provider route key: ${key}.`,
+        source: "transport",
+        retryable: false,
+      });
+    }
+  }
+}
+
+function configuredClientProviderKinds(providerRoutes: NnrpClientProviderRoutes | undefined): NnrpTransportKind[] {
+  return Object.keys(providerRoutes ?? {}) as NnrpTransportKind[];
+}
+
+function uninstalledProviderObservation(kind: NnrpTransportKind): NnrpTransportProviderObservation {
+  return {
+    kind,
+    metadata: {
+      id: `nnrp.transport.${kind}.uninstalled`,
+      cost: { modelId: 0, units: 0n },
+      preferenceRank: 0xffff,
+      limits: { maxFrameBytes: 67_108_864n },
+      limitations: [],
+    },
+    localAvailable: false,
+  };
+}
+
+function resolvedRouteEndpoint(resolution: ResolvedClientProviderRoute): string {
+  if (resolution.endpoint !== undefined) return resolution.endpoint;
+  throw new NnrpTransportError({
+    code: "NNRP_NATIVE_PROVIDER_ROUTE_UNRESOLVED",
+    message: `${resolution.provider.kind} client provider route is unresolved.`,
+    source: "transport",
+    retryable: false,
+    transport: resolution.provider.kind,
+  });
 }
 
 function standardProfileId(profile: NnrpInputProfile | undefined): number {
