@@ -81,7 +81,7 @@
   - [x] Accept only the WebSocket entry from `NnrpClientProviderRoutes`.
   - [x] Require WSS for `nnrps://` and use browser-owned TLS verification.
   - [x] Reject native DER security fields in browser routes.
-- [ ] Add two-provider E2E tests against suite-owned endpoints.
-  - [ ] Verify selection diagnostics and active transport identity.
-  - [ ] Verify no connection is adopted from a rejected candidate.
-  - [ ] Verify close ownership for selected and unselected candidates.
+- [x] Add two-provider E2E tests against suite-owned endpoints.
+  - [x] Verify selection diagnostics and active transport identity.
+  - [x] Verify no connection is adopted from a rejected candidate.
+  - [x] Verify close ownership for selected and unselected candidates.

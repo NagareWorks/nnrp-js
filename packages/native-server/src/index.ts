@@ -1051,7 +1051,7 @@ function resolveServerProviderRoutes(
     try {
       resolvedEndpoint = provider.kind === "websocket"
         ? resolveNativeWebSocketEndpoint(route?.endpoint)
-        : resolveProviderEndpoint(endpoint, provider.kind, route?.endpoint);
+        : resolveServerProviderEndpoint(endpoint, provider.kind, route?.endpoint);
     } catch (cause) {
       throw serverRouteError(provider.kind, "route-unresolved", cause);
     }
@@ -1064,6 +1064,37 @@ function resolveServerProviderRoutes(
       ...(route?.security === undefined ? {} : { security: route.security }),
     };
   });
+}
+
+function resolveServerProviderEndpoint(
+  applicationEndpoint: string | URL,
+  kind: Exclude<NnrpTransportKind, "websocket">,
+  providerEndpoint: string | URL | undefined,
+): string {
+  if ((kind !== "tcp" && kind !== "quic") || providerEndpoint === undefined) {
+    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  }
+  if (providerEndpoint instanceof URL) {
+    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  }
+
+  const value = providerEndpoint.trim();
+  if (!value.endsWith(":0")) {
+    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  }
+  if (value.length === 0 || value.includes("://")) {
+    throw new TypeError(`${kind} server provider endpoint must use host:port form.`);
+  }
+
+  const parsed = new URL(`tcp://${value}`);
+  if (
+    parsed.hostname.length === 0 || parsed.port !== "0" || parsed.username.length > 0 ||
+    parsed.password.length > 0 || (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.search.length > 0 || parsed.hash.length > 0
+  ) {
+    throw new TypeError(`${kind} server provider endpoint must contain only host and port.`);
+  }
+  return `${parsed.hostname}:0`;
 }
 
 function serverRouteSecuritySatisfied(

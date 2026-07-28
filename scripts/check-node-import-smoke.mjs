@@ -136,11 +136,19 @@ async function verifyNativeTransportLoopbacks() {
   const moduleUrl = (name) =>
     pathToFileURL(join(smokeRoot, "node_modules", ...name.split("/"), "dist", "index.js")).href;
   const script = `
-    const [{ createTcpTransportProvider }, { createIpcTransportProvider }, { createWebSocketTransportProvider }] =
+    const [
+      { createTcpTransportProvider },
+      { createIpcTransportProvider },
+      { createWebSocketTransportProvider },
+      { openNativeClient },
+      { openBackendRuntime },
+    ] =
       await Promise.all([
         import(${JSON.stringify(moduleUrl("@nnrp/transport-tcp"))}),
         import(${JSON.stringify(moduleUrl("@nnrp/transport-ipc"))}),
         import(${JSON.stringify(moduleUrl("@nnrp/transport-websocket"))}),
+        import(${JSON.stringify(moduleUrl("@nnrp/native-client"))}),
+        import(${JSON.stringify(moduleUrl("@nnrp/native-server"))}),
       ]);
     const nonce = process.pid + "-" + Date.now();
     const providers = [
@@ -169,6 +177,56 @@ async function verifyNativeTransportLoopbacks() {
         server.close();
       }
     }
+
+    const tcp = createTcpTransportProvider();
+    const ipc = createIpcTransportProvider();
+    const ipcEndpoint = process.platform === "win32"
+      ? "npipe://nnrp-js-node-role-" + nonce
+      : "unix://" + ${JSON.stringify(smokeRoot)} + "/nnrp-js-node-role-" + nonce + ".sock";
+    const runtime = await openBackendRuntime({ transports: [tcp, ipc], transportPolicy: "auto" });
+    const server = runtime.listen({
+      endpoint: "nnrp://node-role-smoke",
+      providerRoutes: {
+        tcp: { endpoint: "127.0.0.1:0" },
+        ipc: { endpoint: ipcEndpoint },
+      },
+      transports: [tcp, ipc],
+      transportPolicy: "auto",
+    });
+    const accepting = server.accept();
+    const deadline = Date.now() + 5_000;
+    while (server.boundProviderEndpoints.tcp === undefined && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const tcpEndpoint = server.boundProviderEndpoints.tcp;
+    if (tcpEndpoint === undefined) throw new Error("Node role smoke did not publish its TCP endpoint");
+    const client = await openNativeClient({
+      endpoint: "nnrp://node-role-smoke",
+      providerRoutes: { tcp: { endpoint: tcpEndpoint.replace("tcp://", "") } },
+      transports: [createTcpTransportProvider()],
+      transportPolicy: "force-tcp",
+    });
+    const clientSession = client.openSession({ sessionId: "node-role-smoke", inputProfile: "token" });
+    await clientSession.submitNoWait({
+      operationId: 1n,
+      frameId: 1,
+      payload: new Uint8Array(),
+      inputProfile: "token",
+    });
+    const serverSession = await accepting;
+    const submitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (submitEvent.type !== "submit") throw new Error("Node role smoke did not observe the client submit");
+    await serverSession.sendResult({ frameId: submitEvent.submit.frameId, payload: new Uint8Array([1]) });
+    const resultEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
+    if (resultEvent.type !== "result") throw new Error("Node role smoke did not observe the server result");
+    const clientClosing = clientSession.close();
+    const closeEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (closeEvent.type !== "close") throw new Error("Node role smoke did not observe the client close");
+    await serverSession.close();
+    await clientClosing;
+    await client.close();
+    await server.close();
+    await runtime.close();
   `;
   await runNodeChild(script);
 }

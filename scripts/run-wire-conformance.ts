@@ -5,9 +5,61 @@ import {
   validatePlanCoverage,
   type WireConformanceOptions,
 } from "./wire-conformance-plan.ts";
+import { createHostRouteTargetManifest, type HostRouteProviderDeclaration } from "./host-route-conformance.ts";
 
 const MANIFEST_WAIT_MILLIS = 15_000;
 const TARGET_EXIT_WAIT_MILLIS = 10_000;
+const HOST_ROUTE_PROFILES: readonly {
+  readonly name: string;
+  readonly expected: number;
+  readonly providers: readonly HostRouteProviderDeclaration[];
+}[] = [
+  {
+    name: "installed-native",
+    expected: 9,
+    providers: [
+      {
+        transport: "tcp",
+        provider_id: "nnrp.transport.tcp.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["plain", "tls_server_auth"],
+      },
+      {
+        transport: "quic",
+        provider_id: "nnrp.transport.quic.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["tls_server_auth"],
+      },
+      {
+        transport: "ipc",
+        provider_id: "nnrp.transport.ipc.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["plain"],
+      },
+      {
+        transport: "websocket",
+        provider_id: "nnrp.transport.websocket.native",
+        installed: true,
+        platforms: ["native"],
+        security_modes: ["plain", "wss"],
+      },
+    ],
+  },
+  {
+    name: "known-uninstalled",
+    expected: 1,
+    providers: [{
+      transport: "quic",
+      provider_id: "example.transport.quic.uninstalled",
+      installed: false,
+      platforms: ["native"],
+      security_modes: ["tls_server_auth"],
+    }],
+  },
+];
 
 if (import.meta.main) {
   await runWireConformance(
@@ -88,6 +140,7 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
     ]);
     const status = await withTimeout(targetStatus, TARGET_EXIT_WAIT_MILLIS, "wire target shutdown");
     if (!status.success) throw new Error(`wire target exited with code ${status.code}`);
+    await runHostRouteConformance(options, suitePath);
   } catch (error) {
     try {
       target.kill("SIGTERM");
@@ -97,6 +150,79 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
     await targetStatus.catch(() => undefined);
     throw error;
   }
+}
+
+export async function runHostRouteConformance(options: WireConformanceOptions, suitePath: string): Promise<void> {
+  const suite = JSON.parse(await Deno.readTextFile(suitePath)) as { readonly suite_version?: unknown };
+  if (typeof suite.suite_version !== "string" || suite.suite_version.length === 0) {
+    throw new Error("wire suite manifest does not declare suite_version");
+  }
+  const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+  const targetExecutable = resolve(
+    scriptDirectory,
+    Deno.build.os === "windows" ? "run-host-route-target.cmd" : "run-host-route-target.sh",
+  );
+  await requireFile(targetExecutable, "host-route target executable");
+
+  let totalPassed = 0;
+  for (const profile of HOST_ROUTE_PROFILES) {
+    const profileDirectory = resolve(options.artifactDirectory, `host-route-${profile.name}`);
+    await Deno.mkdir(profileDirectory, { recursive: true });
+    const targetPath = resolve(profileDirectory, "target.json");
+    const planPath = resolve(profileDirectory, "plan.json");
+    const resultsPath = resolve(profileDirectory, "results.json");
+    const evidenceDirectory = resolve(profileDirectory, "evidence");
+    const targetName = `nnrp-js-host-route-${profile.name}`;
+    await Deno.writeTextFile(
+      targetPath,
+      `${JSON.stringify(createHostRouteTargetManifest(targetName, suite.suite_version, profile.providers), null, 2)}\n`,
+    );
+    await runCargo(options.conformanceRoot, [
+      "wire-plan",
+      "--suite",
+      suitePath,
+      "--target",
+      targetPath,
+      "--output",
+      planPath,
+      "--results-path",
+      resultsPath,
+      "--evidence-dir",
+      evidenceDirectory,
+    ]);
+    await runCargo(options.conformanceRoot, [
+      "wire-run",
+      "--plan",
+      planPath,
+      "--target",
+      targetPath,
+      "--host-route-target",
+      targetExecutable,
+      "--output",
+      resultsPath,
+    ]);
+    await runCargo(options.conformanceRoot, [
+      "validate-wire-results",
+      "--plan",
+      planPath,
+      "--results",
+      resultsPath,
+    ]);
+    const report = JSON.parse(await Deno.readTextFile(resultsPath)) as {
+      readonly results?: readonly { readonly outcome?: unknown }[];
+    };
+    const results = report.results;
+    const failures = results?.filter((result) => result.outcome !== "passed") ?? [];
+    if (results === undefined || results.length !== profile.expected || failures.length !== 0) {
+      throw new Error(
+        `${profile.name} expected ${profile.expected} passing host-route scenarios; got ${
+          results?.length ?? 0
+        } total and ${failures.length} non-passing.`,
+      );
+    }
+    totalPassed += results.length;
+  }
+  if (totalPassed !== 10) throw new Error(`Expected ten Preview4 host-route scenarios, got ${totalPassed}.`);
 }
 
 export async function runCargo(conformanceRoot: string, runnerArgs: readonly string[]): Promise<void> {

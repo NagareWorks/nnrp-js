@@ -11,6 +11,7 @@ const excludedSources = new Set([
   "packages/transport-quic/src/native.ts",
   "packages/transport-tcp/src/native.ts",
   "packages/transport-websocket/src/native.ts",
+  "scripts/run-host-route-target.ts",
 ]);
 
 await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
@@ -53,7 +54,7 @@ const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath), excludedSo
 const linePercent = percentage(coverage.lines.hit, coverage.lines.found);
 
 console.log(
-  `Coverage gate excludes role facades, generated WASM glue, and platform FFI adapters covered by real loopback smoke: ${
+  `Coverage gate excludes role facades, generated WASM glue, platform FFI adapters, and the process target covered by real loopback or suite-owned E2E: ${
     [...excludedSources].join(", ")
   }.`,
 );

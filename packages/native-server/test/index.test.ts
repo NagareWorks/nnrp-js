@@ -250,6 +250,24 @@ Deno.test("@nnrp/native-server isolates TCP TLS and QUIC credentials across one 
   await runtime.close();
 });
 
+Deno.test("@nnrp/native-server allows an ephemeral TCP bind route", async () => {
+  let listened: NnrpTransportEndpoint | undefined;
+  const runtime = await openBackendRuntime({
+    transports: [fakeRoleProvider("tcp", { onListen: (options) => listened = options })],
+    transportPolicy: "force-tcp",
+  });
+  const server = runtime.listen({
+    endpoint: "nnrp://runtime.example/session/default",
+    providerRoutes: { tcp: { endpoint: "127.0.0.1:0" } },
+  });
+  const session = await server.accept();
+
+  assertEquals(listened, { endpoint: "127.0.0.1:0" });
+  await session.close();
+  await server.close();
+  await runtime.close();
+});
+
 Deno.test("@nnrp/native-server opens IPC and plain WebSocket together under nnrp", async () => {
   const listened: NnrpTransportKind[] = [];
   const runtime = await openBackendRuntime({
