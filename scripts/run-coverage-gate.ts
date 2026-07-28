@@ -1,3 +1,5 @@
+import { parseLcovCoverage } from "./lcov-coverage.ts";
+
 const coverageDir = "artifacts/coverage";
 const lcovPath = `${coverageDir}/lcov.info`;
 const lineThreshold = parseLineThreshold(Deno.args);
@@ -69,13 +71,6 @@ if (linePercent < lineThreshold) {
   Deno.exit(1);
 }
 
-interface CoverageCounters {
-  readonly lines: {
-    readonly found: number;
-    readonly hit: number;
-  };
-}
-
 function parseLineThreshold(args: readonly string[]): number {
   const lineIndex = args.indexOf("--line");
   const raw = lineIndex === -1 ? "90" : args[lineIndex + 1];
@@ -85,48 +80,6 @@ function parseLineThreshold(args: readonly string[]): number {
   }
 
   return threshold;
-}
-
-function parseLcovCoverage(lcov: string, excluded: ReadonlySet<string>): CoverageCounters {
-  let found = 0;
-  let hit = 0;
-  let currentExcluded = false;
-
-  for (const line of lcov.split(/\r?\n/)) {
-    if (line.startsWith("SF:")) {
-      currentExcluded = excluded.has(normalizeSourcePath(line.slice(3)));
-      continue;
-    }
-    if (line === "end_of_record") {
-      currentExcluded = false;
-      continue;
-    }
-    if (currentExcluded) {
-      continue;
-    }
-    if (!line.startsWith("DA:")) {
-      continue;
-    }
-
-    const [, count] = line.slice(3).split(",");
-    found += 1;
-    if (Number(count) > 0) {
-      hit += 1;
-    }
-  }
-
-  if (found === 0) {
-    throw new Error("Coverage report did not contain line counters.");
-  }
-
-  return { lines: { found, hit } };
-}
-
-function normalizeSourcePath(path: string): string {
-  const normalized = path.replaceAll("\\", "/");
-  const marker = "/nnrp-js/";
-  const markerIndex = normalized.lastIndexOf(marker);
-  return markerIndex === -1 ? normalized : normalized.slice(markerIndex + marker.length);
 }
 
 function percentage(hit: number, found: number): number {
