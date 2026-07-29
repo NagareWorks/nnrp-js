@@ -21,7 +21,7 @@ const TRANSPORT_LABEL = "TCP";
 const PACKAGE_NAME = "nnrp-ffi-transport-tcp";
 const TRANSPORT_SCOPE = "tcp";
 const SECURITY_MODE: "none" | "optional" | "required" | "websocket" = "optional";
-const ABI_VERSION = "4.1.0";
+const ABI_VERSION = "4.1.1";
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const HANDLE_KIND_INVALID = 0;
@@ -217,9 +217,8 @@ const DiagnosticType = koffi.struct({
   status: StatusType,
   related_connection_id: "uint64_t",
   related_session_id: "uint32_t",
-  related_frame_id: "uint32_t",
   related_operation_id: "uint64_t",
-  message: BufferViewType,
+  related_frame_id: "uint32_t",
 });
 const EventType = koffi.struct({
   kind: "uint32_t",
@@ -232,6 +231,139 @@ const EventType = koffi.struct({
   payload: BufferViewType,
   diagnostic: DiagnosticType,
 });
+const pointerSize = koffi.sizeof("void *");
+if (pointerSize !== 4 && pointerSize !== 8) {
+  throw new Error(`${TRANSPORT_LABEL} native ABI uses unsupported pointer width ${pointerSize}.`);
+}
+const usesFourByteU64Alignment = pointerSize === 4 && process.arch === "ia32" && process.platform !== "win32";
+const requestLayout = pointerSize === 8
+  ? {
+    handleSize: 24,
+    handleId: 8,
+    bufferSize: 16,
+    bufferLength: 8,
+    openSize: 64,
+    openConfig: 24,
+    openMaxPacket: 48,
+    openReserved: 60,
+    adoptionSize: 40,
+    sessionOpenSize: 48,
+    submitSize: 56,
+    submitPayload: 40,
+    rolePollSize: 40,
+    acceptTicketSize: 40,
+    acceptWaitSize: 32,
+    runtimeFrameSize: 48,
+  }
+  : usesFourByteU64Alignment
+  ? {
+    handleSize: 20,
+    handleId: 4,
+    bufferSize: 8,
+    bufferLength: 4,
+    openSize: 52,
+    openConfig: 16,
+    openMaxPacket: 36,
+    openReserved: 48,
+    adoptionSize: 36,
+    sessionOpenSize: 40,
+    submitSize: 40,
+    submitPayload: 32,
+    rolePollSize: 36,
+    acceptTicketSize: 36,
+    acceptWaitSize: 28,
+    runtimeFrameSize: 36,
+  }
+  : {
+    handleSize: 24,
+    handleId: 8,
+    bufferSize: 8,
+    bufferLength: 4,
+    openSize: 56,
+    openConfig: 16,
+    openMaxPacket: 40,
+    openReserved: 52,
+    adoptionSize: 40,
+    sessionOpenSize: 48,
+    submitSize: 48,
+    submitPayload: 36,
+    rolePollSize: 40,
+    acceptTicketSize: 40,
+    acceptWaitSize: 32,
+    runtimeFrameSize: 40,
+  };
+const diagnosticLayout = usesFourByteU64Alignment
+  ? { size: 40, operation: 28, frame: 36 }
+  : { size: 48, operation: 32, frame: 40 };
+const eventLayout = pointerSize === 8
+  ? { size: 176, session: 32, operation: 56, frame: 80, owner: 88, payload: 112, diagnostic: 128 }
+  : usesFourByteU64Alignment
+  ? { size: 140, session: 28, operation: 48, frame: 68, owner: 72, payload: 92, diagnostic: 100 }
+  : { size: 168, session: 32, operation: 56, frame: 80, owner: 88, payload: 112, diagnostic: 120 };
+const layoutChecks = [
+  ["handle.size", koffi.sizeof(HandleType), requestLayout.handleSize],
+  ["handle.kind", koffi.offsetof(HandleType, "kind"), 0],
+  ["handle.id", koffi.offsetof(HandleType, "id"), requestLayout.handleId],
+  ["handle.generation", koffi.offsetof(HandleType, "generation"), requestLayout.handleId + 8],
+  ["handle.flags", koffi.offsetof(HandleType, "flags"), requestLayout.handleId + 12],
+  ["buffer.size", koffi.sizeof(BufferViewType), requestLayout.bufferSize],
+  ["buffer.ptr", koffi.offsetof(BufferViewType, "ptr"), 0],
+  ["buffer.len", koffi.offsetof(BufferViewType, "len"), requestLayout.bufferLength],
+  ["transport_open.size", koffi.sizeof(OpenRequestType), requestLayout.openSize],
+  ["transport_open.endpoint", koffi.offsetof(OpenRequestType, "endpoint"), 8],
+  ["transport_open.config", koffi.offsetof(OpenRequestType, "config"), requestLayout.openConfig],
+  [
+    "transport_open.max_packet_bytes",
+    koffi.offsetof(OpenRequestType, "max_packet_bytes"),
+    requestLayout.openMaxPacket,
+  ],
+  ["transport_open.reserved0", koffi.offsetof(OpenRequestType, "reserved0"), requestLayout.openReserved],
+  ["client_connect.size", koffi.sizeof(ClientConnectRequestType), requestLayout.adoptionSize],
+  ["client_connect.reserved0", koffi.offsetof(ClientConnectRequestType, "reserved0"), 12],
+  ["client_connect.transport", koffi.offsetof(ClientConnectRequestType, "transport_connection"), 16],
+  ["server_bind.size", koffi.sizeof(ServerBindRequestType), requestLayout.adoptionSize],
+  ["server_bind.reserved0", koffi.offsetof(ServerBindRequestType, "reserved0"), 12],
+  ["server_bind.transport", koffi.offsetof(ServerBindRequestType, "transport_listener"), 16],
+  ["session_open.size", koffi.sizeof(SessionOpenRequestType), requestLayout.sessionOpenSize],
+  ["session_open.profile_id", koffi.offsetof(SessionOpenRequestType, "profile_id"), requestLayout.handleSize + 8],
+  ["session_open.schema_id", koffi.offsetof(SessionOpenRequestType, "schema_id"), requestLayout.handleSize + 12],
+  ["submit.size", koffi.sizeof(SubmitRequestType), requestLayout.submitSize],
+  ["submit.operation_id", koffi.offsetof(SubmitRequestType, "operation_id"), requestLayout.handleSize],
+  ["submit.payload", koffi.offsetof(SubmitRequestType, "payload"), requestLayout.submitPayload],
+  ["role_poll.size", koffi.sizeof(RoleEventPollRequestType), requestLayout.rolePollSize],
+  ["role_poll.max_events", koffi.offsetof(RoleEventPollRequestType, "max_events"), requestLayout.handleSize],
+  ["accept_begin.size", koffi.sizeof(ServerAcceptBeginRequestType), requestLayout.acceptTicketSize],
+  ["accept_claim.size", koffi.sizeof(ServerAcceptClaimRequestType), requestLayout.acceptTicketSize],
+  ["accept_wait.size", koffi.sizeof(ServerAcceptWaitRequestType), requestLayout.acceptWaitSize],
+  ["accept_result.size", koffi.sizeof(ServerAcceptResultType), requestLayout.acceptWaitSize],
+  ["runtime_frame.size", koffi.sizeof(RuntimeFrameSendRequestType), requestLayout.runtimeFrameSize],
+  ["runtime_frame.message_type", koffi.offsetof(RuntimeFrameSendRequestType, "message_type"), requestLayout.handleSize],
+  ["diagnostic.size", koffi.sizeof(DiagnosticType), diagnosticLayout.size],
+  ["diagnostic.status", koffi.offsetof(DiagnosticType, "status"), 0],
+  ["diagnostic.related_connection_id", koffi.offsetof(DiagnosticType, "related_connection_id"), 16],
+  ["diagnostic.related_session_id", koffi.offsetof(DiagnosticType, "related_session_id"), 24],
+  [
+    "diagnostic.related_operation_id",
+    koffi.offsetof(DiagnosticType, "related_operation_id"),
+    diagnosticLayout.operation,
+  ],
+  ["diagnostic.related_frame_id", koffi.offsetof(DiagnosticType, "related_frame_id"), diagnosticLayout.frame],
+  ["event.size", koffi.sizeof(EventType), eventLayout.size],
+  ["event.kind", koffi.offsetof(EventType, "kind"), 0],
+  ["event.message_type", koffi.offsetof(EventType, "message_type"), 4],
+  ["event.connection", koffi.offsetof(EventType, "connection"), 8],
+  ["event.session", koffi.offsetof(EventType, "session"), eventLayout.session],
+  ["event.operation", koffi.offsetof(EventType, "operation"), eventLayout.operation],
+  ["event.frame_id", koffi.offsetof(EventType, "frame_id"), eventLayout.frame],
+  ["event.payload_owner", koffi.offsetof(EventType, "payload_owner"), eventLayout.owner],
+  ["event.payload", koffi.offsetof(EventType, "payload"), eventLayout.payload],
+  ["event.diagnostic", koffi.offsetof(EventType, "diagnostic"), eventLayout.diagnostic],
+] as const;
+const mismatch = layoutChecks.find(([, actual, expected]) => actual !== expected);
+if (mismatch) {
+  const [field, actual, expected] = mismatch;
+  throw new Error(`${TRANSPORT_LABEL} native ABI layout mismatch for ${field}: expected ${expected}, got ${actual}.`);
+}
 
 interface NodeSymbols {
   readonly probe: NativeFunction;
@@ -242,6 +374,7 @@ interface NodeSymbols {
   readonly writeBatch: NativeFunction;
   readonly readBatch: NativeFunction;
   readonly close: NativeFunction;
+  readonly shutdownRuntime: NativeFunction;
   readonly releaseBuffer: NativeFunction;
   readonly createClientSecurity: NativeFunction;
   readonly createServerSecurity: NativeFunction;
@@ -269,7 +402,9 @@ export function loadNodeTcpBinding(): NnrpNativeTransportBinding {
   const manifest = JSON.parse(readFileSync(manifestUrl, "utf8")) as unknown;
   const libraryName = validateManifest(manifest, platform.os, platform.arch);
   const library = koffi.load(fileURLToPath(new URL(`../native/${platform.tag}/${libraryName}`, import.meta.url)));
-  return new NodeTransportBinding(library, bindSymbols(library));
+  const symbols = bindSymbols(library);
+  registerNodeRuntimeShutdown(symbols.shutdownRuntime);
+  return new NodeTransportBinding(library, symbols);
 }
 
 class NodeTransportBinding implements NnrpNativeTransportBinding {
@@ -741,6 +876,7 @@ function bindSymbols(library: LibraryHandle): NodeSymbols {
       koffi.out(koffi.pointer(FrameBatchType)),
     ]),
     close: library.func("nnrp_transport_close", StatusType, [HandleType]),
+    shutdownRuntime: library.func("nnrp_transport_runtime_shutdown", StatusType, []),
     releaseBuffer: library.func("nnrp_buffer_release", StatusType, [HandleType]),
     createClientSecurity: library.func("nnrp_transport_client_security_config_create", StatusType, [
       SecurityConfigRequestType,
@@ -966,6 +1102,29 @@ function invoke<T>(fn: NativeFunction, args: readonly unknown[]): Promise<T> {
   });
 }
 
+const nodeRuntimeShutdowns = new Set<NativeFunction>();
+let nodeRuntimeShutdownRegistered = false;
+
+function registerNodeRuntimeShutdown(shutdown: NativeFunction): void {
+  nodeRuntimeShutdowns.add(shutdown);
+  if (nodeRuntimeShutdownRegistered) return;
+  nodeRuntimeShutdownRegistered = true;
+  process.once("exit", () => {
+    for (const shutdownRuntime of nodeRuntimeShutdowns) {
+      try {
+        const status = shutdownRuntime() as NativeStatus;
+        if (status.status_code !== 0) {
+          process.stderr.write(
+            `${TRANSPORT_LABEL} native runtime shutdown failed with status ${status.status_code}.\n`,
+          );
+        }
+      } catch (error) {
+        process.stderr.write(`${TRANSPORT_LABEL} native runtime shutdown threw: ${String(error)}.\n`);
+      }
+    }
+  });
+}
+
 function validateManifest(value: unknown, os: string, arch: string): string {
   if (typeof value !== "object" || value === null) {
     throw new Error(`${TRANSPORT_LABEL} native artifact manifest is not an object.`);
@@ -994,6 +1153,7 @@ function validateManifest(value: unknown, os: string, arch: string): string {
     "nnrp_transport_write_batch",
     "nnrp_transport_read_batch",
     "nnrp_transport_close",
+    "nnrp_transport_runtime_shutdown",
     "nnrp_server_accept_begin",
     "nnrp_server_accept_wait",
     "nnrp_server_accept_claim",

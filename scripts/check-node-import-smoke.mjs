@@ -75,11 +75,14 @@ const entrypoints = [
 
 const failures = [];
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const smokeRoot = join(tmpdir(), `nnrp-js-node-smoke-${process.pid}-${Date.now()}`);
+const installedMode = process.argv.includes("--installed");
+const smokeRoot = installedMode ? process.cwd() : join(tmpdir(), `nnrp-js-node-smoke-${process.pid}-${Date.now()}`);
 
 try {
-  for (const entrypoint of entrypoints) {
-    await copyWorkspacePackage(entrypoint);
+  if (!installedMode) {
+    for (const entrypoint of entrypoints) {
+      await copyWorkspacePackage(entrypoint);
+    }
   }
 
   for (const entrypoint of entrypoints) {
@@ -101,7 +104,9 @@ try {
 
   await verifyNativeTransportLoopbacks();
 } finally {
-  await rm(smokeRoot, { recursive: true, force: true });
+  if (!installedMode) {
+    await rm(smokeRoot, { recursive: true, force: true });
+  }
 }
 
 if (failures.length > 0) {
@@ -126,16 +131,33 @@ async function copyWorkspacePackage(entrypoint) {
 }
 
 async function verifyNativeTransportLoopbacks() {
-  const koffiRoot = dirname(fileURLToPath(import.meta.resolve("koffi")));
-  await cp(koffiRoot, join(smokeRoot, "node_modules", "koffi"), { recursive: true, dereference: true });
-  await cp(join(dirname(koffiRoot), "@koromix"), join(smokeRoot, "node_modules", "@koromix"), {
-    recursive: true,
-    dereference: true,
-  });
+  if (!installedMode) {
+    const koffiRoot = dirname(fileURLToPath(import.meta.resolve("koffi")));
+    const koffiPlatformPackage = `koffi-${process.platform}-${process.arch}`;
+    let koffiPlatformRoot;
+    try {
+      koffiPlatformRoot = dirname(
+        fileURLToPath(import.meta.resolve(`@koromix/${koffiPlatformPackage}`)),
+      );
+    } catch {
+      koffiPlatformRoot = join(dirname(koffiRoot), "@koromix", koffiPlatformPackage);
+    }
+    await cp(koffiRoot, join(smokeRoot, "node_modules", "koffi"), { recursive: true, dereference: true });
+    await mkdir(join(smokeRoot, "node_modules", "@koromix"), { recursive: true });
+    await cp(koffiPlatformRoot, join(smokeRoot, "node_modules", "@koromix", koffiPlatformPackage), {
+      recursive: true,
+      dereference: true,
+    });
+  }
 
   const moduleUrl = (name) =>
     pathToFileURL(join(smokeRoot, "node_modules", ...name.split("/"), "dist", "index.js")).href;
+  const nativeNodeModuleUrls = ["transport-tcp", "transport-quic", "transport-ipc", "transport-websocket"]
+    .map((transport) =>
+      pathToFileURL(join(smokeRoot, "node_modules", "@nnrp", transport, "dist", "native-node.js")).href
+    );
   const script = `
+    await Promise.all(${JSON.stringify(nativeNodeModuleUrls)}.map((url) => import(url)));
     const [
       { createTcpTransportProvider },
       { createIpcTransportProvider },
@@ -155,7 +177,7 @@ async function verifyNativeTransportLoopbacks() {
       [createTcpTransportProvider(), "tcp://127.0.0.1:0"],
       [createIpcTransportProvider(), process.platform === "win32"
         ? "npipe://nnrp-js-node-" + nonce
-        : "unix://" + ${JSON.stringify(smokeRoot)} + "/nnrp-js-node-" + nonce + ".sock"],
+        : "unix:///tmp/nnrp-js-node-" + nonce + ".sock"],
       [createWebSocketTransportProvider(), "ws://127.0.0.1:0/nnrp"],
     ];
     const packet = new Uint8Array(40);
@@ -182,7 +204,7 @@ async function verifyNativeTransportLoopbacks() {
     const ipc = createIpcTransportProvider();
     const ipcEndpoint = process.platform === "win32"
       ? "npipe://nnrp-js-node-role-" + nonce
-      : "unix://" + ${JSON.stringify(smokeRoot)} + "/nnrp-js-node-role-" + nonce + ".sock";
+      : "unix:///tmp/nnrp-js-node-role-" + nonce + ".sock";
     const runtime = await openBackendRuntime({ transports: [tcp, ipc], transportPolicy: "auto" });
     const server = runtime.listen({
       endpoint: "nnrp://node-role-smoke",
@@ -207,18 +229,46 @@ async function verifyNativeTransportLoopbacks() {
       transportPolicy: "force-tcp",
     });
     const clientSession = client.openSession({ sessionId: "node-role-smoke", inputProfile: "token" });
-    await clientSession.submitNoWait({
-      operationId: 1n,
-      frameId: 1,
-      payload: new Uint8Array(),
-      inputProfile: "token",
-    });
     const serverSession = await accepting;
-    const submitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-    if (submitEvent.type !== "submit") throw new Error("Node role smoke did not observe the client submit");
-    await serverSession.sendResult({ frameId: submitEvent.submit.frameId, payload: new Uint8Array([1]) });
-    const resultEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
-    if (resultEvent.type !== "result") throw new Error("Node role smoke did not observe the server result");
+    for (let exchange = 1; exchange <= 2; exchange += 1) {
+      await clientSession.submitNoWait({
+        operationId: BigInt(exchange),
+        frameId: exchange,
+        payload: new Uint8Array([exchange]),
+        inputProfile: "token",
+      });
+      const submitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+      if (submitEvent.type !== "submit" || submitEvent.submit.frameId !== exchange) {
+        throw new Error("Node role smoke did not observe submit " + exchange);
+      }
+      await serverSession.sendPartialResult({
+        operationId: submitEvent.submit.operationId,
+        resultSequence: 1n,
+        objectId: 0n,
+        deltaSequence: 1n,
+        bodyBytes: 1,
+        flags: 0,
+      }, new Uint8Array([exchange + 10]));
+      await serverSession.sendResult({
+        frameId: submitEvent.submit.frameId,
+        payload: new Uint8Array([exchange + 20]),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const partialEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
+      if (
+        partialEvent.type !== "partial-result" || partialEvent.body.length !== 1 ||
+        partialEvent.body[0] !== exchange + 10
+      ) {
+        throw new Error("Node role smoke did not observe partial result " + exchange);
+      }
+      const resultEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
+      if (
+        resultEvent.type !== "result" || resultEvent.result.payload.length !== 1 ||
+        resultEvent.result.payload[0] !== exchange + 20
+      ) {
+        throw new Error("Node role smoke did not observe result " + exchange);
+      }
+    }
     const clientClosing = clientSession.close();
     const closeEvent = await serverSession.receive({ timeoutMillis: 5_000 });
     if (closeEvent.type !== "close") throw new Error("Node role smoke did not observe the client close");
@@ -229,6 +279,14 @@ async function verifyNativeTransportLoopbacks() {
     await runtime.close();
   `;
   await runNodeChild(script);
+
+  const forcedExitScript = `
+    const { createTcpTransportProvider } = await import(${JSON.stringify(moduleUrl("@nnrp/transport-tcp"))});
+    const provider = createTcpTransportProvider();
+    await provider.listen({ endpoint: "tcp://127.0.0.1:0", timeoutMillis: 5_000 });
+    process.exit(0);
+  `;
+  await runNodeChild(forcedExitScript);
 }
 
 function runNodeChild(script) {
@@ -237,13 +295,23 @@ function runNodeChild(script) {
       cwd: smokeRoot,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("Node transport smoke did not terminate within 15 seconds"));
+    }, 15_000);
     let stderr = "";
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => stderr += chunk);
-    child.on("error", reject);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on(
       "close",
-      (code) => code === 0 ? resolve() : reject(new Error(stderr || `Node transport smoke exited ${code}`)),
+      (code) => {
+        clearTimeout(timeout);
+        code === 0 ? resolve() : reject(new Error(stderr || `Node transport smoke exited ${code}`));
+      },
     );
   });
 }
