@@ -6,6 +6,7 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
+const CONFORMANCE_REVISION = "4cd50456a317bb0ae7a7726b8f3d9026c8efb7ec";
 
 Deno.test("release workflow and local preparation pin Rust preview4.19", () => {
   assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.19/g)?.length ?? 0) >= 3, true);
@@ -42,6 +43,18 @@ Deno.test("release benchmark separates production providers from the explicit Ru
   assertStringIncludes(releaseWorkflow, "--features benchmark-ffi,transport-tcp");
   assertStringIncludes(releaseWorkflow, "NNRP_JS_BENCHMARK_NATIVE_LIBRARY");
   assertStringIncludes(releaseWorkflow, "deno task benchmark:privacy");
+});
+
+Deno.test("release validates the complete Preview4 adapter suite before publishing", () => {
+  assertStringIncludes(releaseWorkflow, CONFORMANCE_REVISION);
+  assertStringIncludes(releaseWorkflow, "uses: ./.conformance/.github/actions/run-conformance");
+  assertStringIncludes(releaseWorkflow, "protocol-version: nnrp-1-preview4");
+  assertStringIncludes(releaseWorkflow, "capabilities-path: conformance/nnrp-1-preview4.capabilities.json");
+  assertStringIncludes(releaseWorkflow, "deno task conformance:suite");
+  const conformanceIndex = releaseWorkflow.indexOf("- name: Run suite-owned Preview4 adapter conformance");
+  const publishIndex = releaseWorkflow.indexOf("- name: Publish packages");
+  assertEquals(conformanceIndex >= 0, true);
+  assertEquals(publishIndex > conformanceIndex, true);
 });
 
 Deno.test("release publishes packages before creating the immutable git tag", () => {

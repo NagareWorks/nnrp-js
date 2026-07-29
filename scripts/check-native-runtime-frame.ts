@@ -4,90 +4,94 @@ import { openBackendRuntime } from "@nnrp/native-server";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createServer as createTcpServer } from "node:net";
 
-const provider = createTcpTransportProvider();
-if (!provider.localAvailable) {
-  throw new Error(`packaged TCP provider is unavailable: ${provider.diagnostic?.message ?? "unknown"}`);
+if (import.meta.main) {
+  await verifyNativeRuntimeFrame();
 }
 
-const providerEndpoint = await reserveTcpEndpoint();
+export async function verifyNativeRuntimeFrame(): Promise<void> {
+  const provider = createTcpTransportProvider();
+  if (!provider.localAvailable) {
+    throw new Error(`packaged TCP provider is unavailable: ${provider.diagnostic?.message ?? "unknown"}`);
+  }
 
-const endpoint = `nnrp://${providerEndpoint}/session/default`;
-const serverRuntime = await openBackendRuntime({
-  transports: [provider],
-  transportPolicy: "force-tcp",
-});
-const server = serverRuntime.listen({
-  endpoint,
-  providerRoutes: { tcp: { endpoint: providerEndpoint } },
-  transportPolicy: "force-tcp",
-});
-const accepting = server.accept();
-let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
-let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;
-let serverSession: Awaited<ReturnType<typeof server.accept>> | undefined;
-
-try {
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  client = await openNativeClient({
-    endpoint,
-    providerRoutes: { tcp: { endpoint: providerEndpoint } },
+  const providerEndpoint = await reserveTcpEndpoint();
+  const endpoint = `nnrp://${providerEndpoint}/session/default`;
+  const serverRuntime = await openBackendRuntime({
     transports: [provider],
     transportPolicy: "force-tcp",
   });
-  clientSession = client.openSession({ sessionId: "native-runtime-frame-smoke", inputProfile: "token" });
-  const bootstrapResult = clientSession.submit({
-    operationId: 1n,
-    frameId: 1,
-    payload: new Uint8Array([0x62, 0x6f, 0x6f, 0x74]),
-    inputProfile: "token",
+  const server = serverRuntime.listen({
+    endpoint,
+    providerRoutes: { tcp: { endpoint: providerEndpoint } },
+    transportPolicy: "force-tcp",
   });
-  serverSession = await accepting;
-  const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-  if (bootstrapEvent.type !== "submit") {
-    throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.type}`);
-  }
-  await serverSession.sendResult({ frameId: bootstrapEvent.submit.frameId, payload: new Uint8Array() });
-  await bootstrapResult;
+  const accepting = server.accept();
+  let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
+  let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;
+  let serverSession: Awaited<ReturnType<typeof server.accept>> | undefined;
 
-  await clientSession.submitNoWait({
-    operationId: 2n,
-    frameId: 2,
-    payload: new Uint8Array([0x77, 0x6f, 0x72, 0x6b]),
-    inputProfile: "token",
-  });
-  const pendingSubmit = await serverSession.receive({ timeoutMillis: 5_000 });
-  if (pendingSubmit.type !== "submit") {
-    throw new Error(`expected pending submit event, got ${pendingSubmit.type}`);
-  }
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    client = await openNativeClient({
+      endpoint,
+      providerRoutes: { tcp: { endpoint: providerEndpoint } },
+      transports: [provider],
+      transportPolicy: "force-tcp",
+    });
+    clientSession = client.openSession({ sessionId: "native-runtime-frame-smoke", inputProfile: "token" });
+    const bootstrapResult = clientSession.submit({
+      operationId: 1n,
+      frameId: 1,
+      payload: new Uint8Array([0x62, 0x6f, 0x6f, 0x74]),
+      inputProfile: "token",
+    });
+    serverSession = await accepting;
+    const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (bootstrapEvent.type !== "submit") {
+      throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.type}`);
+    }
+    await serverSession.sendResult({ frameId: bootstrapEvent.submit.frameId, payload: new Uint8Array() });
+    await bootstrapResult;
 
-  const diagnostic = new Uint8Array([0x6f, 0x6b]);
-  const cancelPending = clientSession.cancel({
-    operationId: 2n,
-    controlSequence: 1n,
-    reasonCode: 0,
-    sourceRole: RuntimeRole.Client,
-    flags: 0,
-    diagnosticBytes: diagnostic.byteLength,
-  }, diagnostic);
-  await cancelPending;
-  diagnostic.fill(0);
+    await clientSession.submitNoWait({
+      operationId: 2n,
+      frameId: 2,
+      payload: new Uint8Array([0x77, 0x6f, 0x72, 0x6b]),
+      inputProfile: "token",
+    });
+    const pendingSubmit = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (pendingSubmit.type !== "submit") {
+      throw new Error(`expected pending submit event, got ${pendingSubmit.type}`);
+    }
 
-  const event = await serverSession.receive({ timeoutMillis: 5_000 });
-  if (
-    event.type !== "cancel" || event.sessionId === undefined || event.sessionId.length === 0 ||
-    event.metadata.operationId !== 2n ||
-    event.diagnostic?.[0] !== 0x6f || event.diagnostic?.[1] !== 0x6b
-  ) {
-    throw new Error(`unexpected native runtime frame event: ${JSON.stringify(event, bigintJsonReplacer)}`);
+    const diagnostic = new Uint8Array([0x6f, 0x6b]);
+    const cancelPending = clientSession.cancel({
+      operationId: 2n,
+      controlSequence: 1n,
+      reasonCode: 0,
+      sourceRole: RuntimeRole.Client,
+      flags: 0,
+      diagnosticBytes: diagnostic.byteLength,
+    }, diagnostic);
+    await cancelPending;
+    diagnostic.fill(0);
+
+    const event = await serverSession.receive({ timeoutMillis: 5_000 });
+    if (
+      event.type !== "cancel" || event.sessionId === undefined || event.sessionId.length === 0 ||
+      event.metadata.operationId !== 2n ||
+      event.diagnostic?.[0] !== 0x6f || event.diagnostic?.[1] !== 0x6b
+    ) {
+      throw new Error(`unexpected native runtime frame event: ${JSON.stringify(event, bigintJsonReplacer)}`);
+    }
+  } finally {
+    await serverSession?.close().catch(() => undefined);
+    await clientSession?.close().catch(() => undefined);
+    await client?.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    await client?.runtime.close().catch(() => undefined);
+    await serverRuntime.close().catch(() => undefined);
   }
-  console.log(`verified native runtime frame over TCP at ${providerEndpoint}`);
-} finally {
-  await serverSession?.close().catch(() => undefined);
-  await clientSession?.close().catch(() => undefined);
-  await client?.close().catch(() => undefined);
-  await server.close().catch(() => undefined);
-  await client?.runtime.close().catch(() => undefined);
-  await serverRuntime.close().catch(() => undefined);
 }
 
 async function reserveTcpEndpoint(): Promise<string> {

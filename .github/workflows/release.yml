@@ -71,6 +71,12 @@ jobs:
           repository: NagareWorks/nnrp-rs
           ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.19' }}
           path: .rust-benchmark
+      - name: Checkout conformance suite
+        uses: actions/checkout@v5
+        with:
+          repository: NagareWorks/nnrp-conformance
+          ref: 4cd50456a317bb0ae7a7726b8f3d9026c8efb7ec
+          path: .conformance
       - name: Resolve version
         id: version
         shell: bash
@@ -123,6 +129,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.19' }}
         run: deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run
+      - name: Run suite-owned Preview4 adapter conformance
+        uses: ./.conformance/.github/actions/run-conformance
+        with:
+          protocol-version: nnrp-1-preview4
+          capabilities-path: conformance/nnrp-1-preview4.capabilities.json
+          working-directory: .
+          artifact-name: nnrp-js-preview4-release-conformance
+          adapter-command: >-
+            deno task conformance:suite
+            --plan $env:NNRP_CONFORMANCE_ADAPTER_PLAN
+            --output $env:NNRP_CONFORMANCE_ADAPTER_RESULTS
       - name: Verify real native benchmark gate
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         shell: bash

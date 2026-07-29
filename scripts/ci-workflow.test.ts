@@ -3,6 +3,11 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 const ciWorkflow = await Deno.readTextFile(".github/workflows/ci.yml");
 const installedPackageSmoke = await Deno.readTextFile("scripts/check-installed-package-smoke.ts");
 const nodeImportSmoke = await Deno.readTextFile("scripts/check-node-import-smoke.mjs");
+const preview4Adapter = await Deno.readTextFile("scripts/preview4-adapter.ts");
+const preview4Contract = await Deno.readTextFile("scripts/preview4-conformance-contract.ts");
+const preview4Capabilities = await Deno.readTextFile("conformance/nnrp-1-preview4.capabilities.json");
+
+const CONFORMANCE_REVISION = "4cd50456a317bb0ae7a7726b8f3d9026c8efb7ec";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
@@ -30,4 +35,18 @@ Deno.test("installed tarballs run the real Node role E2E", () => {
   assertStringIncludes(nodeImportSmoke, "await serverSession.sendPartialResult");
   assertStringIncludes(nodeImportSmoke, "await serverSession.sendResult");
   assertStringIncludes(nodeImportSmoke, "for (let exchange = 1; exchange <= 2; exchange += 1)");
+});
+
+Deno.test("CI gates Preview4 with suite-owned adapter and wire conformance", () => {
+  assertEquals(ciWorkflow.match(new RegExp(CONFORMANCE_REVISION, "g"))?.length ?? 0, 3);
+  assertStringIncludes(ciWorkflow, "suite-conformance:");
+  assertStringIncludes(ciWorkflow, "uses: ./.conformance/.github/actions/run-conformance");
+  assertStringIncludes(ciWorkflow, "protocol-version: nnrp-1-preview4");
+  assertStringIncludes(ciWorkflow, "capabilities-path: conformance/nnrp-1-preview4.capabilities.json");
+  assertStringIncludes(ciWorkflow, "deno task conformance:suite");
+  assertStringIncludes(ciWorkflow, "- suite-conformance");
+  assertStringIncludes(ciWorkflow, "suite-conformance did not pass");
+  assertStringIncludes(preview4Adapter, "const CASE_EXECUTORS");
+  assertStringIncludes(preview4Contract, '"l1.control.recoverable-error"');
+  assertEquals(JSON.parse(preview4Capabilities).supports.length, 18);
 });
