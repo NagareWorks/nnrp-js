@@ -1,7 +1,7 @@
 # NNRP/1 Preview4 JavaScript/TypeScript Implementation Todo
 
 This directory is the closed implementation plan for JavaScript/TypeScript Preview4. The public API contract is frozen
-in `nnrp-doc`; the coordinated Rust `1.0.0-preview.4.19` release owns the native and WASM ABI; and `nnrp-conformance`
+in `nnrp-doc`; the coordinated Rust `1.0.0-preview.4.20` release owns the native and WASM ABI; and `nnrp-conformance`
 owns wire-level schemas and scenarios.
 
 ## Closure Rules

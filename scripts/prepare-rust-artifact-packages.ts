@@ -8,7 +8,7 @@ import {
   parseReleaseChecksums,
 } from "./rust-artifact-policy.ts";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.19";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.20";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
@@ -19,8 +19,19 @@ const transportPackages: readonly TransportPackagePolicy[] = [
 
 const version = Deno.env.get("NNRP_JS_RUST_ARTIFACT_VERSION") ?? DEFAULT_RUST_ARTIFACT_VERSION;
 const cacheDir = Deno.env.get("NNRP_JS_RUST_ARTIFACT_CACHE") ?? "artifacts/rust-artifacts";
+const workflowRunId = Deno.env.get("NNRP_JS_RUST_ARTIFACT_RUN_ID");
+const workflowCommit = Deno.env.get("NNRP_JS_RUST_ARTIFACT_COMMIT");
+
+if ((workflowRunId === undefined) !== (workflowCommit === undefined)) {
+  throw new Error(
+    "NNRP_JS_RUST_ARTIFACT_RUN_ID and NNRP_JS_RUST_ARTIFACT_COMMIT must be set together",
+  );
+}
 
 await Deno.mkdir(cacheDir, { recursive: true });
+if (workflowRunId !== undefined && workflowCommit !== undefined) {
+  await prepareWorkflowArtifactSource(workflowRunId, workflowCommit, version);
+}
 const releaseChecksums = await loadReleaseChecksums(version);
 
 for (const transportPackage of transportPackages) {
@@ -174,6 +185,20 @@ async function downloadReleaseAsset(
   replacePartial = false,
 ): Promise<void> {
   const outputPath = `${cacheDir}/${assetName}`;
+  if (workflowRunId !== undefined) {
+    try {
+      const stat = await Deno.stat(outputPath);
+      if (stat.isFile) {
+        return;
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+    throw new Error(`Rust workflow artifact ${workflowRunId} does not contain ${assetName}`);
+  }
+
   if (!replacePartial) {
     try {
       const stat = await Deno.stat(outputPath);
@@ -222,6 +247,124 @@ async function downloadReleaseAsset(
   }
 
   throw new Error(`failed to download nnrp-rs release asset ${assetName} after 3 attempts`);
+}
+
+async function prepareWorkflowArtifactSource(
+  runId: string,
+  expectedCommit: string,
+  artifactVersion: string,
+): Promise<void> {
+  if (!/^\d+$/.test(runId)) {
+    throw new Error(`invalid NNRP_JS_RUST_ARTIFACT_RUN_ID: ${runId}`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(expectedCommit)) {
+    throw new Error(`invalid NNRP_JS_RUST_ARTIFACT_COMMIT: ${expectedCommit}`);
+  }
+
+  const run = await commandJson<WorkflowRun>([
+    "run",
+    "view",
+    runId,
+    "--repo",
+    "NagareWorks/nnrp-rs",
+    "--json",
+    "headSha,status,conclusion",
+  ]);
+  if (run.headSha !== expectedCommit) {
+    throw new Error(`Rust workflow run ${runId} points to ${run.headSha}, expected ${expectedCommit}`);
+  }
+  if (run.status !== "completed" || run.conclusion !== "success") {
+    throw new Error(
+      `Rust workflow run ${runId} is not a successful completed run: ${run.status}/${run.conclusion}`,
+    );
+  }
+
+  const markerPath = `${cacheDir}/workflow-source.json`;
+  const marker = { runId, commit: expectedCommit, version: artifactVersion };
+  try {
+    const cached = JSON.parse(await Deno.readTextFile(markerPath)) as unknown;
+    if (
+      isRecord(cached) && cached.runId === runId && cached.commit === expectedCommit &&
+      cached.version === artifactVersion
+    ) {
+      const stat = await Deno.stat(`${cacheDir}/SHA256SUMS`);
+      if (stat.isFile) {
+        return;
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound) && !(error instanceof SyntaxError)) {
+      throw error;
+    }
+  }
+
+  await resetDir(cacheDir);
+  const downloadDir = `${cacheDir}/workflow-download`;
+  await Deno.mkdir(downloadDir, { recursive: true });
+  const artifactName = `nnrp-rs-release-${artifactVersion}`;
+  const output = await new Deno.Command("gh", {
+    args: [
+      "run",
+      "download",
+      runId,
+      "--repo",
+      "NagareWorks/nnrp-rs",
+      "--name",
+      artifactName,
+      "--dir",
+      downloadDir,
+    ],
+    stdout: "inherit",
+    stderr: "inherit",
+  }).output();
+  if (!output.success) {
+    throw new Error(`failed to download Rust workflow artifact ${artifactName} from run ${runId}`);
+  }
+
+  const checksumsPath = await findFile(downloadDir, "SHA256SUMS");
+  if (checksumsPath === undefined) {
+    throw new Error(`Rust workflow artifact ${artifactName} does not contain SHA256SUMS`);
+  }
+  const releaseAssetsDir = checksumsPath.slice(0, checksumsPath.lastIndexOf("/"));
+  for await (const entry of Deno.readDir(releaseAssetsDir)) {
+    if (entry.isFile) {
+      await copyFile(`${releaseAssetsDir}/${entry.name}`, `${cacheDir}/${entry.name}`);
+    }
+  }
+  await Deno.remove(downloadDir, { recursive: true });
+  await Deno.writeTextFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+}
+
+async function commandJson<T>(args: readonly string[]): Promise<T> {
+  const output = await new Deno.Command("gh", {
+    args: [...args],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!output.success) {
+    throw new Error(new TextDecoder().decode(output.stderr).trim() || `gh ${args.join(" ")} failed`);
+  }
+  return JSON.parse(new TextDecoder().decode(output.stdout)) as T;
+}
+
+async function findFile(root: string, name: string): Promise<string | undefined> {
+  for await (const entry of Deno.readDir(root)) {
+    const path = `${root}/${entry.name}`;
+    if (entry.isFile && entry.name === name) {
+      return path;
+    }
+    if (entry.isDirectory) {
+      const nested = await findFile(path, name);
+      if (nested !== undefined) {
+        return nested;
+      }
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function verifySha256(path: string, expected: string): Promise<void> {
@@ -301,4 +444,10 @@ function escapePowerShell(path: string): string {
 interface TransportPackagePolicy {
   readonly transport: NativeTransportScope;
   readonly packageDir: string;
+}
+
+interface WorkflowRun {
+  readonly headSha: string;
+  readonly status: string;
+  readonly conclusion: string;
 }

@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+env:
+  NNRP_JS_RUST_ARTIFACT_VERSION: 1.0.0-preview.4.20
+  NNRP_JS_RUST_ARTIFACT_RUN_ID: "30557000535"
+  NNRP_JS_RUST_ARTIFACT_COMMIT: 9a6ac67081aa490ec48e272b706fcdd6d168ff8c
+
 jobs:
   content-policy:
     name: content-policy
@@ -114,8 +119,9 @@ jobs:
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-          changed="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          changed="$(git diff --name-only "$base" "$head")"
           if [[ -n "$changed" ]] && ! grep -Ev '^(README\.md|CONTRIBUTING\.md|LICENSE|doc/|docs/|assets/.*\.(svg|png|jpg|jpeg|webp))$' <<< "$changed" >/dev/null; then
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           else
@@ -140,11 +146,11 @@ jobs:
           head_ref="${{ github.head_ref }}"
           range="origin/$base_ref...HEAD"
           count="$(git rev-list --count "$range")"
-          integration_pr=false
           if [[ "$base_ref" == "main" && "$head_ref" == "develop" ]]; then
-            integration_pr=true
+            echo "Develop-to-main integration PR detected; preserving reviewed integration history is allowed."
+            exit 0
           fi
-          if [[ "$integration_pr" != "true" && "$count" -ne 1 ]]; then
+          if [[ "$count" -ne 1 ]]; then
             echo "PR must contain exactly one commit before review; found $count."
             exit 1
           fi
@@ -269,7 +275,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-conformance
-          ref: 1634bd48c622bf32aa6daf7a0ccb183e0872641a
+          ref: ef031b8a77c59f33068cd20e584a7f802347a4ff
           path: .conformance
       - name: Setup Deno
         uses: denoland/setup-deno@v2
@@ -313,7 +319,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-conformance
-          ref: 1634bd48c622bf32aa6daf7a0ccb183e0872641a
+          ref: ef031b8a77c59f33068cd20e584a7f802347a4ff
           path: .conformance
       - name: Setup Deno
         uses: denoland/setup-deno@v2
@@ -349,6 +355,40 @@ jobs:
             artifacts/wire-conformance/browser/browser-stdout.log
             artifacts/wire-conformance/browser/browser-stderr.log
             artifacts/wire-conformance/browser/evidence
+
+  suite-conformance:
+    name: suite-conformance
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v5
+      - name: Checkout conformance suite
+        uses: actions/checkout@v5
+        with:
+          repository: NagareWorks/nnrp-conformance
+          ref: ef031b8a77c59f33068cd20e584a7f802347a4ff
+          path: .conformance
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Prepare Rust artifact packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: deno task artifacts:prepare
+      - name: Run suite-owned Preview4 adapter conformance
+        uses: ./.conformance/.github/actions/run-conformance
+        with:
+          protocol-version: nnrp-1-preview4
+          capabilities-path: conformance/nnrp-1-preview4.capabilities.json
+          working-directory: .
+          artifact-name: nnrp-js-preview4-conformance
+          adapter-command: >-
+            deno task conformance:suite
+            --plan $env:NNRP_CONFORMANCE_ADAPTER_PLAN
+            --output $env:NNRP_CONFORMANCE_ADAPTER_RESULTS
 
   native-carrier-matrix:
     name: native-carrier-${{ matrix.os }}-${{ matrix.transport }}
@@ -447,6 +487,7 @@ jobs:
       - runtime-policy
       - wire-conformance-native
       - wire-conformance-browser
+      - suite-conformance
       - native-carrier-matrix
       - native-node-windows-x86
     if: always()
@@ -461,6 +502,7 @@ jobs:
           runtime_policy="${{ needs.runtime-policy.result }}"
           wire_conformance="${{ needs.wire-conformance-native.result }}"
           browser_wire_conformance="${{ needs.wire-conformance-browser.result }}"
+          suite_conformance="${{ needs.suite-conformance.result }}"
           native_carrier_matrix="${{ needs.native-carrier-matrix.result }}"
           native_node_windows_x86="${{ needs.native-node-windows-x86.result }}"
           if [[ "$content_policy" != "success" ]]; then
@@ -477,6 +519,10 @@ jobs:
           fi
           if [[ "$browser_wire_conformance" != "success" && "$docs" != "success" ]]; then
             echo "wire-conformance-browser did not pass: $browser_wire_conformance"
+            exit 1
+          fi
+          if [[ "$suite_conformance" != "success" && "$docs" != "success" ]]; then
+            echo "suite-conformance did not pass: $suite_conformance"
             exit 1
           fi
           if [[ "$native_carrier_matrix" != "success" && "$docs" != "success" ]]; then

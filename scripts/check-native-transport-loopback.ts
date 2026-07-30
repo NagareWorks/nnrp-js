@@ -10,7 +10,10 @@ import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { dirname } from "node:path";
 import {
   CacheReuseScope,
+  createTokenSubmitRequest,
   MemoryLocationHint,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpRuntimeEvent,
   NnrpTransportClientSecurity,
   NnrpTransportConnection,
@@ -270,12 +273,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       `${options.provider.kind} client connect`,
     );
     clientSession = client.openSession({ inputProfile: "token" });
-    await clientSession.submitNoWait({
-      operationId: 1n,
-      frameId: 1,
-      payload: new TextEncoder().encode("ping"),
-      inputProfile: "token",
-    });
+    await clientSession.submitNoWait(tokenSubmit(1n, 1, new TextEncoder().encode("ping")));
     serverSession = await withTimeout(accepting, timeoutMillis, `${options.provider.kind} server accept`);
     const submit = await withTimeout(
       serverSession.receive({ timeoutMillis }),
@@ -405,6 +403,14 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
     await client?.runtime.close().catch(() => undefined);
     await serverRuntime.close().catch(() => undefined);
   }
+}
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
 }
 
 function assertEventType(

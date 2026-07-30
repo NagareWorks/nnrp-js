@@ -21,7 +21,7 @@ const TRANSPORT_LABEL = "TCP";
 const PACKAGE_NAME = "nnrp-ffi-transport-tcp";
 const TRANSPORT_SCOPE = "tcp";
 const SECURITY_MODE: "none" | "optional" | "required" | "websocket" = "optional";
-const ABI_VERSION = "4.1.1";
+const ABI_VERSION = "4.3.0";
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const HANDLE_KIND_INVALID = 0;
@@ -64,13 +64,25 @@ interface NativeFrameBatch {
   reserved0: number;
 }
 
+interface NativeRuntimeFrameHeader {
+  present: number;
+  version_major: number;
+  wire_format: number;
+  message_type: number;
+  flags: number;
+  session_id: number;
+  frame_id: number;
+  view_id: number;
+  route_id: number;
+  trace_id: number | bigint;
+}
+
 interface NativeEvent {
   kind: number;
-  message_type: number;
+  header: NativeRuntimeFrameHeader;
   connection: NativeHandle;
   session: NativeHandle;
   operation: NativeHandle;
-  frame_id: number;
   payload_owner: NativeHandle;
   payload: NativeBufferView;
 }
@@ -84,10 +96,17 @@ interface NativeServerAcceptResult {
 interface InternalRoleEvent {
   readonly kind: number;
   readonly messageType: number;
+  readonly versionMajor: number;
+  readonly wireFormat: number;
+  readonly headerFlags: number;
+  readonly wireSessionId: number;
   readonly connection: NativeHandle;
   readonly session: NativeHandle;
   readonly operation: NativeHandle;
   readonly frameId: number;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
   readonly payload: Uint8Array;
 }
 
@@ -175,6 +194,10 @@ const SubmitRequestType = koffi.struct({
   session: HandleType,
   operation_id: "uint64_t",
   frame_id: "uint32_t",
+  header_flags: "uint32_t",
+  view_id: "uint16_t",
+  route_id: "uint16_t",
+  trace_id: "uint64_t",
   payload: BufferViewType,
 });
 const RoleEventPollRequestType = koffi.struct({
@@ -220,13 +243,24 @@ const DiagnosticType = koffi.struct({
   related_operation_id: "uint64_t",
   related_frame_id: "uint32_t",
 });
+const RuntimeFrameHeaderType = koffi.struct({
+  present: "uint8_t",
+  version_major: "uint8_t",
+  wire_format: "uint8_t",
+  message_type: "uint8_t",
+  flags: "uint32_t",
+  session_id: "uint32_t",
+  frame_id: "uint32_t",
+  view_id: "uint16_t",
+  route_id: "uint16_t",
+  trace_id: "uint64_t",
+});
 const EventType = koffi.struct({
   kind: "uint32_t",
-  message_type: "uint32_t",
+  header: RuntimeFrameHeaderType,
   connection: HandleType,
   session: HandleType,
   operation: HandleType,
-  frame_id: "uint32_t",
   payload_owner: HandleType,
   payload: BufferViewType,
   diagnostic: DiagnosticType,
@@ -248,8 +282,9 @@ const requestLayout = pointerSize === 8
     openReserved: 60,
     adoptionSize: 40,
     sessionOpenSize: 48,
-    submitSize: 56,
-    submitPayload: 40,
+    submitSize: 72,
+    submitTrace: 48,
+    submitPayload: 56,
     rolePollSize: 40,
     acceptTicketSize: 40,
     acceptWaitSize: 32,
@@ -267,8 +302,9 @@ const requestLayout = pointerSize === 8
     openReserved: 48,
     adoptionSize: 36,
     sessionOpenSize: 40,
-    submitSize: 40,
-    submitPayload: 32,
+    submitSize: 56,
+    submitTrace: 40,
+    submitPayload: 48,
     rolePollSize: 36,
     acceptTicketSize: 36,
     acceptWaitSize: 28,
@@ -285,8 +321,9 @@ const requestLayout = pointerSize === 8
     openReserved: 52,
     adoptionSize: 40,
     sessionOpenSize: 48,
-    submitSize: 48,
-    submitPayload: 36,
+    submitSize: 64,
+    submitTrace: 48,
+    submitPayload: 56,
     rolePollSize: 40,
     acceptTicketSize: 40,
     acceptWaitSize: 32,
@@ -295,11 +332,12 @@ const requestLayout = pointerSize === 8
 const diagnosticLayout = usesFourByteU64Alignment
   ? { size: 40, operation: 28, frame: 36 }
   : { size: 48, operation: 32, frame: 40 };
+const headerLayout = usesFourByteU64Alignment ? { size: 28, trace: 20 } : { size: 32, trace: 24 };
 const eventLayout = pointerSize === 8
-  ? { size: 176, session: 32, operation: 56, frame: 80, owner: 88, payload: 112, diagnostic: 128 }
+  ? { size: 200, header: 8, connection: 40, session: 64, operation: 88, owner: 112, payload: 136, diagnostic: 152 }
   : usesFourByteU64Alignment
-  ? { size: 140, session: 28, operation: 48, frame: 68, owner: 72, payload: 92, diagnostic: 100 }
-  : { size: 168, session: 32, operation: 56, frame: 80, owner: 88, payload: 112, diagnostic: 120 };
+  ? { size: 160, header: 4, connection: 32, session: 52, operation: 72, owner: 92, payload: 112, diagnostic: 120 }
+  : { size: 192, header: 8, connection: 40, session: 64, operation: 88, owner: 112, payload: 136, diagnostic: 144 };
 const layoutChecks = [
   ["handle.size", koffi.sizeof(HandleType), requestLayout.handleSize],
   ["handle.kind", koffi.offsetof(HandleType, "kind"), 0],
@@ -329,6 +367,11 @@ const layoutChecks = [
   ["session_open.schema_id", koffi.offsetof(SessionOpenRequestType, "schema_id"), requestLayout.handleSize + 12],
   ["submit.size", koffi.sizeof(SubmitRequestType), requestLayout.submitSize],
   ["submit.operation_id", koffi.offsetof(SubmitRequestType, "operation_id"), requestLayout.handleSize],
+  ["submit.frame_id", koffi.offsetof(SubmitRequestType, "frame_id"), requestLayout.handleSize + 8],
+  ["submit.header_flags", koffi.offsetof(SubmitRequestType, "header_flags"), requestLayout.handleSize + 12],
+  ["submit.view_id", koffi.offsetof(SubmitRequestType, "view_id"), requestLayout.handleSize + 16],
+  ["submit.route_id", koffi.offsetof(SubmitRequestType, "route_id"), requestLayout.handleSize + 18],
+  ["submit.trace_id", koffi.offsetof(SubmitRequestType, "trace_id"), requestLayout.submitTrace],
   ["submit.payload", koffi.offsetof(SubmitRequestType, "payload"), requestLayout.submitPayload],
   ["role_poll.size", koffi.sizeof(RoleEventPollRequestType), requestLayout.rolePollSize],
   ["role_poll.max_events", koffi.offsetof(RoleEventPollRequestType, "max_events"), requestLayout.handleSize],
@@ -348,13 +391,19 @@ const layoutChecks = [
     diagnosticLayout.operation,
   ],
   ["diagnostic.related_frame_id", koffi.offsetof(DiagnosticType, "related_frame_id"), diagnosticLayout.frame],
+  ["header.size", koffi.sizeof(RuntimeFrameHeaderType), headerLayout.size],
+  ["header.flags", koffi.offsetof(RuntimeFrameHeaderType, "flags"), 4],
+  ["header.session_id", koffi.offsetof(RuntimeFrameHeaderType, "session_id"), 8],
+  ["header.frame_id", koffi.offsetof(RuntimeFrameHeaderType, "frame_id"), 12],
+  ["header.view_id", koffi.offsetof(RuntimeFrameHeaderType, "view_id"), 16],
+  ["header.route_id", koffi.offsetof(RuntimeFrameHeaderType, "route_id"), 18],
+  ["header.trace_id", koffi.offsetof(RuntimeFrameHeaderType, "trace_id"), headerLayout.trace],
   ["event.size", koffi.sizeof(EventType), eventLayout.size],
   ["event.kind", koffi.offsetof(EventType, "kind"), 0],
-  ["event.message_type", koffi.offsetof(EventType, "message_type"), 4],
-  ["event.connection", koffi.offsetof(EventType, "connection"), 8],
+  ["event.header", koffi.offsetof(EventType, "header"), eventLayout.header],
+  ["event.connection", koffi.offsetof(EventType, "connection"), eventLayout.connection],
   ["event.session", koffi.offsetof(EventType, "session"), eventLayout.session],
   ["event.operation", koffi.offsetof(EventType, "operation"), eventLayout.operation],
-  ["event.frame_id", koffi.offsetof(EventType, "frame_id"), eventLayout.frame],
   ["event.payload_owner", koffi.offsetof(EventType, "payload_owner"), eventLayout.owner],
   ["event.payload", koffi.offsetof(EventType, "payload"), eventLayout.payload],
   ["event.diagnostic", koffi.offsetof(EventType, "diagnostic"), eventLayout.diagnostic],
@@ -642,7 +691,15 @@ class NodeClientRoleSession {
 
   constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
 
-  async submit(operationId: bigint, frameId: number, payload: Uint8Array): Promise<NativeHandle> {
+  async submit(
+    operationId: bigint,
+    frameId: number,
+    headerFlags: number,
+    viewId: number,
+    routeId: number,
+    traceId: bigint,
+    payload: Uint8Array,
+  ): Promise<NativeHandle> {
     this.#requireOpen();
     const body = Buffer.from(payload);
     const output: Partial<NativeHandle> = {};
@@ -651,6 +708,10 @@ class NodeClientRoleSession {
         session: this.handle,
         operation_id: operationId,
         frame_id: frameId,
+        header_flags: headerFlags,
+        view_id: viewId,
+        route_id: routeId,
+        trace_id: traceId,
         payload: { ptr: body, len: body.byteLength },
       }, output]),
       "client submit",
@@ -843,11 +904,18 @@ function copyRoleEvent(symbols: NodeSymbols, event: NativeEvent): InternalRoleEv
   try {
     return {
       kind: event.kind,
-      messageType: event.message_type,
+      messageType: event.header.message_type,
+      versionMajor: event.header.version_major,
+      wireFormat: event.header.wire_format,
+      headerFlags: event.header.flags,
+      wireSessionId: event.header.session_id,
       connection: requiredHandle(event.connection),
       session: requiredHandle(event.session),
       operation: requiredHandle(event.operation),
-      frameId: event.frame_id,
+      frameId: event.header.frame_id,
+      viewId: event.header.view_id,
+      routeId: event.header.route_id,
+      traceId: BigInt(event.header.trace_id),
       payload: copyNativeBytes(event.payload),
     };
   } finally {

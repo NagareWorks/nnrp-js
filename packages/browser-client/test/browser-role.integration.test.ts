@@ -2,8 +2,11 @@ import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
   CacheMissReason,
   CacheReuseScope,
+  createTokenSubmitRequest,
   ErrorScope,
   MemoryLocationHint,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpMessageType,
   NnrpTimeoutError,
   NnrpTransportError,
@@ -15,6 +18,14 @@ import {
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { type NnrpBrowserClientSession, openBrowserRuntime } from "../src/index.ts";
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
+}
 
 Deno.test({
   name: "@nnrp/browser-client runs the package-owned WASM role over the browser WebSocket carrier",
@@ -75,19 +86,14 @@ Deno.test({
     const session = client.openSession({ sessionId: "browser-role-e2e", inputProfile: "token" });
 
     try {
-      const submit = session.submit({
-        operationId: 11n,
-        frameId: 7,
-        inputProfile: "token",
-        payload: new Uint8Array([1, 2, 3]),
-      });
+      const submit = session.submit(tokenSubmit(11n, 7, new Uint8Array([1, 2, 3])));
       void submit.catch(() => undefined);
       const serverSession = await accepting;
       const event = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(event.type, "submit");
       if (event.type !== "submit") throw new Error("expected submit event");
       assertEquals(event.submit.frameId, 7);
-      assertEquals(event.submit.payload, new Uint8Array([1, 2, 3]));
+      assertEquals(event.submit.body.slice(-3), new Uint8Array([1, 2, 3]));
       await serverSession.sendProgress({
         operationId: 11n,
         progressSequence: 1n,
@@ -113,12 +119,7 @@ Deno.test({
       assertEquals((await session.nextEvent()).type, "progress");
       assertEquals((await session.nextEvent()).type, "partial-result");
 
-      await session.submitNoWait({
-        operationId: 99n,
-        frameId: 8,
-        inputProfile: "token",
-        payload: new Uint8Array([4, 5]),
-      });
+      await session.submitNoWait(tokenSubmit(99n, 8, new Uint8Array([4, 5])));
       const cancellable = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(cancellable.type, "submit");
       await session.declareObject({
@@ -189,12 +190,7 @@ Deno.test({
         "was already released",
       );
 
-      await session.submitNoWait({
-        operationId: 100n,
-        frameId: 9,
-        inputProfile: "token",
-        payload: new Uint8Array([6]),
-      });
+      await session.submitNoWait(tokenSubmit(100n, 9, new Uint8Array([6])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       await session.updatePriority({
         operationId: 100n,
@@ -277,12 +273,7 @@ Deno.test({
       }, new Uint8Array([8]));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "retry-after");
 
-      await session.submitNoWait({
-        operationId: 101n,
-        frameId: 10,
-        inputProfile: "token",
-        payload: new Uint8Array([7]),
-      });
+      await session.submitNoWait(tokenSubmit(101n, 10, new Uint8Array([7])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       await session.supersede({
         oldOperationId: 101n,
@@ -303,12 +294,7 @@ Deno.test({
         diagnosticBytes: 1,
       }, new Uint8Array([1]));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "abort");
-      await session.submitNoWait({
-        operationId: 103n,
-        frameId: 11,
-        inputProfile: "token",
-        payload: new Uint8Array([8]),
-      });
+      await session.submitNoWait(tokenSubmit(103n, 11, new Uint8Array([8])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       await session.declareObject({
         objectId: 101n,
@@ -427,12 +413,7 @@ Deno.test({
       await serverSession.sendResult({ frameId: 11, payload: new Uint8Array([20]) });
       assertEquals((await session.nextEvent({ timeoutMillis: 5_000 })).type, "result");
 
-      await session.submitNoWait({
-        operationId: 109n,
-        frameId: 12,
-        inputProfile: "token",
-        payload: new Uint8Array([26]),
-      });
+      await session.submitNoWait(tokenSubmit(109n, 12, new Uint8Array([26])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       const pendingWhileCancelling = session.nextEvent({ timeoutMillis: 5_000 }).catch((error) => error);
       const sentBeforeCancel = sentPackets.length;
@@ -467,12 +448,9 @@ Deno.test({
       assertEquals((await pendingWhileCancelling).type, "trace-context");
 
       const abortController = new AbortController();
-      const abortedSubmit = session.submit({
-        operationId: 104n,
-        frameId: 13,
-        inputProfile: "token",
-        payload: new Uint8Array([20]),
-      }, { signal: abortController.signal });
+      const abortedSubmit = session.submit(tokenSubmit(104n, 13, new Uint8Array([20])), {
+        signal: abortController.signal,
+      });
       const abortObserved = abortedSubmit.catch((error) => error);
       const abortSubmitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(abortSubmitEvent.type, "submit");
@@ -486,24 +464,16 @@ Deno.test({
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cancel");
 
       const terminalSignal = new TrackingAbortSignal();
-      const completedSubmit = session.submit({
-        operationId: 105n,
-        frameId: 14,
-        inputProfile: "token",
-        payload: new Uint8Array([21]),
-      }, { signal: terminalSignal });
+      const completedSubmit = session.submit(tokenSubmit(105n, 14, new Uint8Array([21])), {
+        signal: terminalSignal,
+      });
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       await serverSession.sendResult({ frameId: 14, payload: new Uint8Array([22]) });
       assertEquals((await completedSubmit).payload, new Uint8Array([22]));
       assertEquals(terminalSignal.addCount, 1);
       assertEquals(terminalSignal.removeCount, 1);
 
-      const timedSubmit = session.submit({
-        operationId: 106n,
-        frameId: 15,
-        inputProfile: "token",
-        payload: new Uint8Array([23]),
-      }, { timeoutMillis: 200 });
+      const timedSubmit = session.submit(tokenSubmit(106n, 15, new Uint8Array([23])), { timeoutMillis: 200 });
       const timedObserved = timedSubmit.catch((error) => error);
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "deadline");
@@ -576,32 +546,16 @@ Deno.test({
       );
 
       await session.patch({ initialCredits: 1, submitCapacityPolicy: "await" });
-      await session.submitNoWait({
-        operationId: 107n,
-        frameId: 16,
-        inputProfile: "token",
-        payload: new Uint8Array([24]),
-      });
+      await session.submitNoWait(tokenSubmit(107n, 16, new Uint8Array([24])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       const creditError = await assertRejects(
-        () =>
-          session.submitNoWait({
-            operationId: 108n,
-            frameId: 17,
-            inputProfile: "token",
-            payload: new Uint8Array([25]),
-          }),
+        () => session.submitNoWait(tokenSubmit(108n, 17, new Uint8Array([25]))),
         NnrpTransportError,
       );
       assertEquals(creditError.diagnostic.code, "NNRP_BACKPRESSURE_CREDIT_EXHAUSTED");
       await serverSession.sendCreditUpdate({ ...pressure, scopeId: 107n, creditWindow: 1n });
       assertEquals((await session.nextEvent({ timeoutMillis: 5_000 })).type, "credit-update");
-      await session.submitNoWait({
-        operationId: 108n,
-        frameId: 17,
-        inputProfile: "token",
-        payload: new Uint8Array([25]),
-      });
+      await session.submitNoWait(tokenSubmit(108n, 17, new Uint8Array([25])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
 
       const pendingEventRejected = assertRejects(() => session.nextEvent({ timeoutMillis: 5_000 }));

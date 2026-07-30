@@ -14,6 +14,12 @@ npm install @nnrp/native-client @nnrp/transport-tcp
 ```
 
 ```ts
+import {
+  createTypedPayloadSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpPayloadKind,
+} from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
@@ -24,13 +30,15 @@ const client = await openNativeClient({
 });
 
 const session = client.openSession({ inputProfile: "tool_delta" });
-await session.submitNoWait({
-  operationId: 1n,
-  frameId: 1,
-  payload: new TextEncoder().encode("summarize repository status"),
-  inputProfile: "tool_delta",
-  submitMode: "inline",
-});
+await session.submitNoWait(createTypedPayloadSubmitRequest({
+  identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
+  policy: NNRP_DEFAULT_SUBMIT_POLICY,
+  frames: [{
+    profileId: 3,
+    payloadKind: NnrpPayloadKind.ToolDelta,
+    payload: new TextEncoder().encode("summarize repository status"),
+  }],
+}));
 
 await session.close();
 await client.close();

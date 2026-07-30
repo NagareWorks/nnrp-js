@@ -15,6 +15,7 @@ import {
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeSubmitPayload,
   type NnrpAbortSignalLike,
   type NnrpCapability,
   NnrpCapabilityError,
@@ -77,8 +78,8 @@ import {
 } from "@nnrp/core";
 const EXPECTED_PROTOCOL_MAJOR = 1;
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
-const EXPECTED_ABI_MAJOR = 3;
-const EXPECTED_ABI_MINOR = 0;
+const EXPECTED_ABI_MAJOR = 4;
+const EXPECTED_ABI_MINOR = 3;
 const EXPECTED_ABI_PATCH = 0;
 const TRANSPORT_KINDS = ["tcp", "quic", "ipc", "websocket"] as const satisfies readonly NnrpTransportKind[];
 
@@ -273,7 +274,6 @@ const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
   RUNTIME_FEATURE_PREVIEW4_RUNTIME_FRAME_SEND;
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const NATIVE_ROLE_IDS = Symbol.for("nnrp.internal.native.role-handle-ids.v1");
-const FRAME_SUBMIT_METADATA_SIZE = 72;
 const RESULT_PUSH_METADATA_SIZE = 64;
 const EVENT_KIND_RESULT_PUSHED = 6;
 const EVENT_KIND_RESULT_DROPPED = 7;
@@ -293,16 +293,31 @@ interface InternalNativeHandle {
 interface InternalRoleEvent {
   readonly kind: number;
   readonly messageType: number;
+  readonly versionMajor: number;
+  readonly wireFormat: number;
+  readonly headerFlags: number;
+  readonly wireSessionId: number;
   readonly connection: InternalNativeHandle;
   readonly session: InternalNativeHandle;
   readonly operation: InternalNativeHandle;
   readonly frameId: number;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
   readonly payload: Uint8Array;
 }
 
 interface InternalClientRoleSession {
   readonly handle: InternalNativeHandle;
-  submit(operationId: bigint, frameId: number, payload: Uint8Array): Promise<InternalNativeHandle>;
+  submit(
+    operationId: bigint,
+    frameId: number,
+    headerFlags: number,
+    viewId: number,
+    routeId: number,
+    traceId: bigint,
+    payload: Uint8Array,
+  ): Promise<InternalNativeHandle>;
   poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]>;
   sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
   close(): Promise<void>;
@@ -532,7 +547,11 @@ class NnrpBackendRuntime {
     await session.submit(
       validated.submit.operationId,
       validated.submit.frameId,
-      encodeFrameSubmitPayload(validated.submit),
+      validated.submit.header.flags,
+      validated.submit.header.viewId,
+      validated.submit.header.routeId,
+      validated.submit.header.traceId,
+      encodeSubmitPayload(validated.submit),
     );
     while (true) {
       const events = await session.poll(Math.max(validated.maxEvents ?? 1, 1), 1);
@@ -556,7 +575,11 @@ class NnrpBackendRuntime {
     await session.submit(
       validated.submit.operationId,
       validated.submit.frameId,
-      encodeFrameSubmitPayload(validated.submit),
+      validated.submit.header.flags,
+      validated.submit.header.viewId,
+      validated.submit.header.routeId,
+      validated.submit.header.traceId,
+      encodeSubmitPayload(validated.submit),
     );
     return validated.submit.operationId;
   }
@@ -1051,35 +1074,6 @@ function standardProfileSchema(
   profile: NnrpInputProfile | undefined,
 ): { readonly id: number; readonly version: number } {
   return profile === "token" ? { id: 0x0000_1001, version: 3 } : { id: 0, version: 0 };
-}
-
-function encodeFrameSubmitPayload(submit: NnrpNormalizedSubmitRequest): Uint8Array {
-  const bodyParts = submit.tensors?.map((tensor) => tensor.payload) ??
-    (submit.payload === undefined ? [] : [submit.payload]);
-  const bodyBytes = bodyParts.reduce((total, part) => total + part.byteLength, 0);
-  const output = new Uint8Array(FRAME_SUBMIT_METADATA_SIZE + bodyBytes);
-  const view = new DataView(output.buffer);
-  view.setUint16(10, submit.tensors?.length ?? 0, true);
-  view.setBigUint64(40, submit.operationId, true);
-  view.setUint8(52, submit.submitMode === "object-reference" ? 1 : 0);
-  view.setUint8(54, 0xff);
-  view.setUint32(64, payloadKind(submit), true);
-  view.setUint16(68, Math.max(bodyParts.length, 1), true);
-  let offset = FRAME_SUBMIT_METADATA_SIZE;
-  for (const part of bodyParts) {
-    output.set(part, offset);
-    offset += part.byteLength;
-  }
-  return output;
-}
-
-function payloadKind(submit: NnrpNormalizedSubmitRequest): number {
-  const profile = submit.inputProfile ?? submit.descriptor?.profile;
-  if (profile === "tensor" || submit.tensors !== undefined) return 0x01;
-  if (profile === "token") return 0x02;
-  if (profile === "structured_event") return 0x10;
-  if (profile === "tool_delta") return 0x20;
-  return 0x40;
 }
 
 function decodeClientRoleEvent(event: InternalRoleEvent, sessionId?: string): NnrpRuntimeEvent {

@@ -1,6 +1,9 @@
 import { resolve } from "node:path";
 import {
+  createTokenSubmitRequest,
   MemoryLocationHint,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpTransportConnection,
   type NnrpTransportKind,
   OwnershipHint,
@@ -18,7 +21,7 @@ import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson
 
 const RESULT_SCHEMA_URL =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/benchmark-results.schema.json";
-const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.19";
+const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.20";
 const DEFAULT_DURATION_SECONDS = 3;
 const DEFAULT_WARMUP_ITERATIONS = 100;
 const DEFAULT_PAYLOAD_BYTES = 1024;
@@ -312,7 +315,7 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
   const session = client.openSession({ sessionId: "benchmark-browser", inputProfile: "token" });
   const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
   const serverSessionPromise = accepting;
-  const bootstrap = session.submit({ operationId: 1n, frameId: 1, inputProfile: "token", payload });
+  const bootstrap = session.submit(tokenSubmit(1n, 1, payload));
   const serverSession = await serverSessionPromise;
   const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
   if (bootstrapEvent.type !== "submit") throw new Error(`expected bootstrap submit, got ${bootstrapEvent.type}`);
@@ -321,7 +324,7 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
   let frameId = 1;
   const operation = async () => {
     frameId += 1;
-    const pending = session.submit({ operationId: BigInt(frameId), frameId, inputProfile: "token", payload });
+    const pending = session.submit(tokenSubmit(BigInt(frameId), frameId, payload));
     const event = await serverSession.receive({ timeoutMillis: 5_000 });
     if (event.type !== "submit") throw new Error(`expected submit, got ${event.type}`);
     await serverSession.sendResult({ frameId, payload });
@@ -361,7 +364,7 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   });
   const clientSession = client.openSession({ sessionId: `benchmark-${transport}`, inputProfile: "token" });
   const payload = new Uint8Array(1);
-  const bootstrap = clientSession.submit({ operationId: 1n, frameId: 1, inputProfile: "token", payload });
+  const bootstrap = clientSession.submit(tokenSubmit(1n, 1, payload));
   const serverSession = await accepting;
   const event = await serverSession.receive({ timeoutMillis: 5_000 });
   if (event.type !== "submit") throw new Error(`expected bootstrap submit, got ${event.type}`);
@@ -400,14 +403,17 @@ async function declareBenchmarkObject(pair: NativeRolePair, size: number): Promi
 }
 
 async function startBenchmarkOperation(pair: NativeRolePair, operationId: bigint, frameId: number): Promise<void> {
-  await pair.clientSession.submitNoWait({
-    operationId,
-    frameId,
-    inputProfile: "token",
-    payload: new Uint8Array(1),
-  });
+  await pair.clientSession.submitNoWait(tokenSubmit(operationId, frameId, new Uint8Array(1)));
   const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
   if (event.type !== "submit") throw new Error(`expected active submit, got ${event.type}`);
+}
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
 }
 
 async function measureAsyncScenario(

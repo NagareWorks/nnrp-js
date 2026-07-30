@@ -32,7 +32,7 @@ on:
       rust_artifact_version:
         description: nnrp-rs release version that provides the Linux native benchmark artifact.
         required: true
-        default: 1.0.0-preview.4.19
+        default: 1.0.0-preview.4.20
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -69,8 +69,14 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-rs
-          ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.19' }}
+          ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.20' }}
           path: .rust-benchmark
+      - name: Checkout conformance suite
+        uses: actions/checkout@v5
+        with:
+          repository: NagareWorks/nnrp-conformance
+          ref: ef031b8a77c59f33068cd20e584a7f802347a4ff
+          path: .conformance
       - name: Resolve version
         id: version
         shell: bash
@@ -121,8 +127,19 @@ jobs:
       - name: Verify release gates
         env:
           GH_TOKEN: ${{ github.token }}
-          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.19' }}
+          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.20' }}
         run: deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run
+      - name: Run suite-owned Preview4 adapter conformance
+        uses: ./.conformance/.github/actions/run-conformance
+        with:
+          protocol-version: nnrp-1-preview4
+          capabilities-path: conformance/nnrp-1-preview4.capabilities.json
+          working-directory: .
+          artifact-name: nnrp-js-preview4-release-conformance
+          adapter-command: >-
+            deno task conformance:suite
+            --plan $env:NNRP_CONFORMANCE_ADAPTER_PLAN
+            --output $env:NNRP_CONFORMANCE_ADAPTER_RESULTS
       - name: Verify real native benchmark gate
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         shell: bash

@@ -3,10 +3,12 @@ import {
   CacheMissReason,
   CacheReuseScope,
   createBackendNativeManifest,
+  createTokenSubmitRequest,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
   MemoryLocationHint,
-  NnrpCacheObjectKind,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpCapabilityError,
   NnrpMessageType,
   type NnrpNativeTransportBinding,
@@ -34,6 +36,14 @@ import { createIpcTransportProvider } from "@nnrp/transport-ipc";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
+
+function tokenSubmit(operationId: bigint, frameId: number, payload = new Uint8Array()) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
+}
 
 Deno.test("@nnrp/native-client requires the exact Preview4 native ABI", () => {
   const capabilities = preview4RuntimeCapabilities();
@@ -153,7 +163,7 @@ Deno.test("@nnrp/native-client preserves not-connected diagnostics", async () =>
   const session = client.openSession();
 
   const error = await assertRejects(
-    () => session.submit({ operationId: 1n, frameId: 1, payload: new Uint8Array([1]) }),
+    () => session.submit(tokenSubmit(1n, 1, new Uint8Array([1]))),
     NnrpNativeBindingUnavailableError,
   );
 
@@ -562,7 +572,7 @@ Deno.test("@nnrp/native-client starts the Rust session handshake when the sessio
   const session = client.openSession({ sessionId: "eager-handshake" });
   assertEquals(openSessionCalls, 1);
   let submitSettled = false;
-  const submit = session.submitNoWait({ operationId: 1n, frameId: 1 }).then((operationId) => {
+  const submit = session.submitNoWait(tokenSubmit(1n, 1)).then((operationId) => {
     submitSettled = true;
     return operationId;
   });
@@ -623,18 +633,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
   });
   const session = client.openSession({ sessionId: "explicit-cache" });
 
-  await session.submit({
-    operationId: 1n,
-    frameId: 1,
-    descriptor: {
-      profile: "tensor",
-      cache: {
-        key: { kind: NnrpCacheObjectKind.TensorSectionTable, key: "frame-1" },
-        version: 3n,
-        leaseMillis: 1_000,
-      },
-    },
-  });
+  await session.submit(tokenSubmit(1n, 1));
 
   assertEquals(submitCalls, 1);
   assertEquals(runtimeFrames, []);
@@ -740,7 +739,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
     diagnosticBytes: 0,
   });
   const controller = new AbortController();
-  const pending = session.submit({ operationId: 41n, frameId: 41 }, {
+  const pending = session.submit(tokenSubmit(41n, 41), {
     signal: controller.signal,
     timeoutMillis: 10_000,
   });
@@ -791,20 +790,20 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   preAborted.abort("before-dispatch");
 
   const error = await assertRejects(
-    () => session.submit({ operationId: 51n, frameId: 51 }, { signal: preAborted.signal }),
+    () => session.submit(tokenSubmit(51n, 51), { signal: preAborted.signal }),
     NnrpTimeoutError,
   );
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
   assertEquals(submitCalls, 0);
 
   const signal = new TrackingAbortSignal();
-  assertEquals(await session.submitNoWait({ operationId: 52n, frameId: 52 }, { signal }), 52n);
+  assertEquals(await session.submitNoWait(tokenSubmit(52n, 52), { signal }), 52n);
   assertEquals(signal.addCount, 1);
   assertEquals(signal.removeCount, 0);
   session.completeEvent({ type: "result", result: { frameId: 52 } });
   assertEquals(signal.removeCount, 1);
 
-  assertEquals(await session.submitNoWait({ operationId: 53n, frameId: 53 }, { timeoutMillis: 5 }), 53n);
+  assertEquals(await session.submitNoWait(tokenSubmit(53n, 53), { timeoutMillis: 5 }), 53n);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
   assertEquals(controls[1]?.metadata.operationId, 53n);
@@ -1306,8 +1305,8 @@ class TrackingAbortSignal {
 
 function preview4RuntimeCapabilities(): NnrpNativeRuntimeCapabilities {
   return {
-    abiMajor: 3,
-    abiMinor: 0,
+    abiMajor: 4,
+    abiMinor: 3,
     abiPatch: 0,
     protocolMajor: 1,
     protocolWireFormat: 0,

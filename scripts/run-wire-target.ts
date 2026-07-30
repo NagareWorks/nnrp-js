@@ -1,5 +1,8 @@
 import {
   CacheMissReason,
+  createTokenSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpRuntimeEvent,
   type NnrpTransportClientSecurity,
   type NnrpTransportServerSecurity,
@@ -277,12 +280,7 @@ async function handleProgressClient(options: {
   const client = await connectWithRetry(options);
   const session = client.openSession({ inputProfile: "token" });
   try {
-    await session.submitNoWait({
-      operationId: 301n,
-      frameId: 301,
-      payload: REQUEST_BODY,
-      inputProfile: "token",
-    });
+    await session.submitNoWait(tokenSubmit(301n, 301, REQUEST_BODY));
     const progress = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "progress");
     const credit = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "credit-update");
     const partial = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "partial-result");
@@ -298,6 +296,14 @@ async function handleProgressClient(options: {
     await session.close().catch(() => undefined);
     await client.close().catch(() => undefined);
   }
+}
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
 }
 
 async function connectWithRetry(options: Parameters<typeof handleProgressClient>[0]) {

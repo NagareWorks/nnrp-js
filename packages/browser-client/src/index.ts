@@ -12,6 +12,7 @@ import {
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeSubmitPayload,
   NNRP_PROTOCOL_VERSION,
   type NnrpAbortSignalLike,
   NnrpCapabilityError,
@@ -214,7 +215,6 @@ function objectLifecycleError(objectId: bigint, detail: string): NnrpProtocolErr
     retryable: false,
   });
 }
-const FRAME_SUBMIT_METADATA_SIZE = 72;
 const DEFAULT_BROWSER_WASM_URL = new URL("../wasm/nnrp_wasm_bg.wasm", import.meta.url).href;
 const DEFAULT_BROWSER_WASM_GLUE_URL = new URL("../wasm/nnrp_wasm.js", import.meta.url).href;
 const BROWSER_RUNTIME_CAPABILITIES = [
@@ -669,7 +669,7 @@ export class NnrpBrowserClientSession {
       const role = await this.#role();
       const result = this.#waitForResult(normalized.frameId);
       try {
-        await role.submitNoWait(normalized.frameId, encodeFrameSubmitPayload(normalized));
+        await role.submitNoWait(normalized.frameId, normalized.header, encodeSubmitPayload(normalized));
       } catch (error) {
         this.#resultWaiters.delete(normalized.frameId);
         throw error;
@@ -705,7 +705,8 @@ export class NnrpBrowserClientSession {
       this.#prepareSubmitDispatch(options, deadlineMillis);
       const operationId = await (await this.#role()).submitNoWait(
         normalized.frameId,
-        encodeFrameSubmitPayload(normalized),
+        normalized.header,
+        encodeSubmitPayload(normalized),
       );
       this.#armDetachedSubmitCancellation(normalized.frameId, normalized.operationId, options, deadlineMillis);
       await this.#sendSubmitDeadline(normalized.operationId, deadlineMillis);
@@ -1748,35 +1749,6 @@ function sessionNotOpenError(sessionId: string): NnrpCapabilityError {
     source: "runtime",
     retryable: false,
   });
-}
-
-function encodeFrameSubmitPayload(submit: NnrpNormalizedSubmitRequest): Uint8Array {
-  const bodyParts = submit.tensors?.map((tensor) => tensor.payload) ??
-    (submit.payload === undefined ? [] : [submit.payload]);
-  const bodyBytes = bodyParts.reduce((total, part) => total + part.byteLength, 0);
-  const output = new Uint8Array(FRAME_SUBMIT_METADATA_SIZE + bodyBytes);
-  const view = new DataView(output.buffer);
-  view.setUint16(10, submit.tensors?.length ?? 0, true);
-  view.setBigUint64(40, submit.operationId, true);
-  view.setUint8(52, submit.submitMode === "object-reference" ? 1 : 0);
-  view.setUint8(54, 0xff);
-  view.setUint32(64, payloadKind(submit), true);
-  view.setUint16(68, Math.max(bodyParts.length, 1), true);
-  let offset = FRAME_SUBMIT_METADATA_SIZE;
-  for (const part of bodyParts) {
-    output.set(part, offset);
-    offset += part.byteLength;
-  }
-  return output;
-}
-
-function payloadKind(submit: NnrpNormalizedSubmitRequest): number {
-  const profile = submit.inputProfile ?? submit.descriptor?.profile;
-  if (profile === "tensor" || submit.tensors !== undefined) return 0x01;
-  if (profile === "token") return 0x02;
-  if (profile === "structured_event") return 0x10;
-  if (profile === "tool_delta") return 0x20;
-  return 0x40;
 }
 
 function throwFirstRejected(results: readonly PromiseSettledResult<unknown>[]): void {
