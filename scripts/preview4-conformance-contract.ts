@@ -5,6 +5,7 @@ export const PREVIEW4_ADAPTER_RESULTS_SCHEMA =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/adapter-case-results.schema.json" as const;
 
 export const PREVIEW4_ADAPTER_CAPABILITIES = [
+  "payload.typed",
   "control.cancel_abort",
   "control.supersede",
   "control.priority_update",
@@ -27,6 +28,7 @@ export const PREVIEW4_ADAPTER_CAPABILITIES = [
 
 export const PREVIEW4_ADAPTER_CASE_IDS = [
   "l0.header.fixed_shape.golden",
+  "l0.typed_payload.descriptor.current.golden",
   "l1.control.cancel-abort",
   "l1.control.priority-deadline",
   "l1.control.progress-backpressure",

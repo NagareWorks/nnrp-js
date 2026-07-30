@@ -12,6 +12,7 @@ import {
   PREVIEW4_IMPLEMENTED_CASE_IDS,
   validatePreview4CapabilityCatalog,
 } from "./preview4-conformance-contract.ts";
+import { option } from "./run-conformance-adapter.ts";
 
 Deno.test("Preview4 adapter executes every suite-owned public case", async () => {
   const directory = await Deno.makeTempDir();
@@ -110,6 +111,16 @@ Deno.test("Preview4 adapter rejects unreadable plan paths", async () => {
     () => writePreview4AdapterResults("missing-preview4-plan.json", "unused-results.json"),
     Deno.errors.NotFound,
   );
+});
+
+Deno.test("Preview4 adapter CLI rejects missing option values", () => {
+  assertThrows(() => option(["--plan"], "--plan"), Error, "--plan requires a value");
+  assertThrows(
+    () => option(["--plan", "--output", "results.json"], "--plan"),
+    Error,
+    "--plan requires a value",
+  );
+  assertEquals(option(["--plan", "plan.json"], "--plan"), "plan.json");
 });
 
 function plan(directory: string) {

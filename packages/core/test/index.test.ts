@@ -11,20 +11,29 @@ import {
   createCapabilityManifest,
   createRecoveryToken,
   createSchemaDescriptor,
+  createTensorSubmitRequest,
+  createTokenSubmitRequest,
   createTransportCandidates,
   createTransportSelectionSummary,
+  createTypedPayloadSubmitRequest,
   decodeCacheInvalidateMetadata,
   type DecodedRuntimeObjectMetadata,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
+  decodeTypedPayloadDescriptor,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeSubmitMetadata,
+  encodeSubmitPayload,
+  encodeTypedPayloadDescriptor,
   ErrorScope,
   isStandardInputProfile,
   MemoryLocationHint,
   NNRP_PROTOCOL_VERSION,
+  NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES,
+  NnrpBudgetPolicy,
   type NnrpCacheInvalidateRequest,
   type NnrpCacheInvalidateResult,
   type NnrpCacheKey,
@@ -34,12 +43,17 @@ import {
   type NnrpCachePutResult,
   NnrpCapabilityError,
   type NnrpClientProviderRoutes,
+  NnrpHeaderFlags,
+  NnrpLossTolerancePolicy,
   NnrpMessageType,
+  NnrpPayloadKind,
   NnrpProtocolError,
   NnrpRecoveryError,
   NnrpResultDropError,
   type NnrpServerProviderRoutes,
   type NnrpSubmitRequest,
+  NnrpTensorInputProfile,
+  NnrpTileIndexMode,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
   type NnrpTransportCandidateReadiness,
@@ -49,6 +63,7 @@ import {
   type NnrpTransportProbeMetrics,
   type NnrpTransportProviderObservation,
   NnrpTransportSelectionError,
+  NnrpTypedPayloadDescriptorFlags,
   normalizeCacheInvalidateRequest,
   normalizeCachePutRequest,
   normalizeSessionMigrationRequest,
@@ -67,6 +82,60 @@ import {
   validateEventPollOptions,
   validateSessionMetadata,
 } from "../src/index.ts";
+
+function submitIdentity(operationId: bigint, frameId: number) {
+  return {
+    operationId,
+    frameId,
+    header: {
+      flags: NnrpHeaderFlags.AckRequired,
+      viewId: 3,
+      routeId: 4,
+      traceId: 5n,
+    },
+  };
+}
+
+function submitPolicy() {
+  return {
+    frameClass: 0,
+    latencyBudgetMs: 17,
+    targetFpsX100: 6_000,
+    retryOfFrame: 0,
+    budgetPolicy: NnrpBudgetPolicy.AllowDegraded,
+    lossTolerancePolicy: NnrpLossTolerancePolicy.LowLatency,
+    dependencyFrameId: 0,
+  };
+}
+
+Deno.test("@nnrp/core round-trips the current explicit-kind typed payload descriptor", () => {
+  const descriptor = {
+    profileId: 2,
+    payloadKind: NnrpPayloadKind.TokenChunk,
+    descriptorFlags: NnrpTypedPayloadDescriptorFlags.Partial,
+    schemaId: 0x1001,
+    schemaVersion: 3,
+    streamSemantics: 2,
+    offset: 8,
+    length: 24,
+  };
+  const encoded = encodeTypedPayloadDescriptor(descriptor);
+
+  assertEquals(encoded.byteLength, NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES);
+  assertEquals(
+    Array.from(encoded),
+    [2, 0, 2, 2, 1, 16, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 8, 0, 0, 0, 24, 0, 0, 0],
+  );
+  assertEquals(decodeTypedPayloadDescriptor(encoded), descriptor);
+  assertThrows(
+    () =>
+      encodeTypedPayloadDescriptor({
+        ...descriptor,
+        payloadKind: 0x03 as NnrpPayloadKind,
+      }),
+    RangeError,
+  );
+});
 
 const PREVIEW4_CONTROL_CAPABILITIES = [
   "control.cancel_abort",
@@ -1748,74 +1817,231 @@ Deno.test("@nnrp/core requires explicit IPC and WebSocket provider endpoints", (
 });
 
 Deno.test("@nnrp/core keeps provider-local endpoints out of normalized operation payloads", () => {
-  const normalized = normalizeSubmitRequest({
-    operationId: 8n,
-    frameId: 8,
-    providerEndpoint: "unix:///tmp/nnrp.sock",
-  } as unknown as NnrpSubmitRequest);
+  const request = createTokenSubmitRequest({
+    identity: submitIdentity(8n, 8),
+    policy: submitPolicy(),
+    chunks: [{ payload: new Uint8Array([1]) }],
+  });
+  const normalized = normalizeSubmitRequest(
+    {
+      ...request,
+      providerEndpoint: "unix:///tmp/nnrp.sock",
+    } as NnrpSubmitRequest & { readonly providerEndpoint: string },
+  );
 
-  assertEquals(normalized, { operationId: 8n, frameId: 8 });
   assertEquals("providerEndpoint" in normalized, false);
 });
 
-Deno.test("@nnrp/core normalizes submit payloads with retained ownership", () => {
+Deno.test("@nnrp/core derives typed payload descriptors, offsets, metadata, and owned bytes", () => {
   const source = new Uint8Array([1, 2, 3, 4]);
-  const normalized = normalizeSubmitRequest({
-    operationId: 7n,
-    frameId: 7,
-    payload: source.subarray(1, 3),
-    tensors: [{ payload: new DataView(source.buffer, 2, 2), codecId: 4 }],
-    inputProfile: "tensor",
-    submitMode: "inline",
-    cacheKey: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "model-a", 1),
-    descriptor: {
-      profile: "tensor",
-      schema: createSchemaDescriptor({
-        id: "tensor-frame",
-        name: "TensorFrame",
-        version: "1",
-        flags: ["required", "lossless"],
-      }),
-      cache: {
-        key: createCacheKey(NnrpCacheObjectKind.TensorSectionTable, "model-a", 1),
-        dependencies: [createCacheKey(NnrpCacheObjectKind.StructuredEventSchema, "tensor-frame")],
+  const request = createTypedPayloadSubmitRequest({
+    identity: submitIdentity(7n, 7),
+    policy: submitPolicy(),
+    frames: [
+      {
+        profileId: 9,
+        payloadKind: NnrpPayloadKind.AudioChunk,
+        payload: source.subarray(1, 3),
       },
-    },
+      {
+        profileId: 10,
+        payloadKind: NnrpPayloadKind.StructuredEvent,
+        payload: new DataView(source.buffer, 2, 2),
+      },
+    ],
   });
+  source.fill(0);
+  const metadata = encodeSubmitMetadata(request);
+  const body = request.body;
+  const bodyView = new DataView(body.buffer, body.byteOffset, body.byteLength);
 
-  assertEquals(normalized.payload, new Uint8Array([2, 3]));
-  assertNotStrictEquals(normalized.payload, source.subarray(1, 3));
-  assertEquals(normalized.tensors?.[0]?.payload, new Uint8Array([3, 4]));
-  assertEquals(normalized.descriptor?.schema?.flags, ["required", "lossless"]);
+  assertEquals(request.metadata.payloadKindBitmap, NnrpPayloadKind.AudioChunk | NnrpPayloadKind.StructuredEvent);
+  assertEquals(request.metadata.payloadFrameCount, 2);
+  assertEquals(bodyView.getUint32(8, true), 48);
+  assertEquals(bodyView.getUint32(12, true), 4);
+  assertEquals(body.slice(-4), new Uint8Array([2, 3, 3, 4]));
+  assertEquals(new DataView(metadata.buffer).getBigUint64(40, true), 7n);
+  assertEquals(encodeSubmitPayload(request).slice(0, 72), metadata);
 });
 
 Deno.test("@nnrp/core can skip payload copies when ownership is explicit", () => {
-  const payload = new Uint8Array([5, 6]);
-  const normalized = normalizeSubmitRequest({ operationId: 1n, frameId: 1, payload }, { copyPayloads: false });
+  const request = createTokenSubmitRequest({
+    identity: submitIdentity(1n, 1),
+    policy: submitPolicy(),
+    chunks: [{ payload: new Uint8Array([5, 6]) }],
+  });
+  const normalized = normalizeSubmitRequest(request, { copyPayloads: false });
 
-  assertEquals(normalized.payload, payload);
+  assertEquals(normalized.body, request.body);
 });
 
-Deno.test("@nnrp/core validates cache, schema, profile, and frame shapes", () => {
+Deno.test("@nnrp/core derives tensor regions and validates current submit identities", () => {
+  const request = createTensorSubmitRequest({
+    identity: submitIdentity(3n, 4),
+    policy: submitPolicy(),
+    srcWidth: 64,
+    srcHeight: 64,
+    tileWidth: 16,
+    tileHeight: 16,
+    tileIds: [0, 1],
+    sections: [{
+      roleId: 1,
+      defaultCodecId: 2,
+      dtypeId: 3,
+      layoutId: 4,
+      scalePolicy: 0,
+      elementCountPerTile: 16,
+      tilePayloads: [new Uint8Array([1, 2]), new Uint8Array([3])],
+      codecIds: [],
+      payloadStrideBytes: 0,
+    }],
+    cameraBlock: new Uint8Array(),
+    inputProfile: NnrpTensorInputProfile.ChangedTilesLuma,
+    tileIndexMode: NnrpTileIndexMode.DenseRange,
+    tileBaseId: 0,
+    references: {},
+  });
+  assertEquals(request.metadata.tileCount, 2);
+  assertEquals(request.metadata.sectionCount, 1);
+  assertEquals(request.metadata.payloadKindBitmap, NnrpPayloadKind.Tensor);
+  assertEquals(request.header.traceId, 5n);
+
   assertThrows(
-    () => createCacheKey(NnrpCacheObjectKind.TensorSectionTable, -1),
+    () => createTokenSubmitRequest({ identity: submitIdentity(1n, 0), policy: submitPolicy(), chunks: [] }),
     NnrpProtocolError,
-    "Numeric cache keys must be non-negative safe integers.",
+    "frameId must be between 1",
+  );
+});
+
+Deno.test("@nnrp/core encodes every tensor tile mode and rejects malformed tensor sections", () => {
+  const section = (
+    roleId: number,
+    tilePayloads: readonly Uint8Array[],
+    codecIds: readonly number[] = [],
+    payloadStrideBytes = 0,
+  ) => ({
+    roleId,
+    defaultCodecId: 2,
+    dtypeId: 3,
+    layoutId: 4,
+    scalePolicy: 0,
+    elementCountPerTile: 16,
+    tilePayloads,
+    codecIds,
+    payloadStrideBytes,
+  });
+  const create = (
+    tileIndexMode: NnrpTileIndexMode,
+    tileIds: readonly number[],
+    sections = [section(1, tileIds.map((tileId) => new Uint8Array([tileId + 1])))],
+    references: Parameters<typeof createTensorSubmitRequest>[0]["references"] = {},
+  ) =>
+    createTensorSubmitRequest({
+      identity: submitIdentity(9n, 9),
+      policy: submitPolicy(),
+      srcWidth: 64,
+      srcHeight: 64,
+      tileWidth: 16,
+      tileHeight: 16,
+      tileIds,
+      sections,
+      cameraBlock: new Uint8Array([7, 8]),
+      inputProfile: NnrpTensorInputProfile.ChangedTilesLuma,
+      tileIndexMode,
+      tileBaseId: tileIds[0] ?? 0,
+      references,
+    });
+
+  const raw = create(NnrpTileIndexMode.RawU16, [1, 3]);
+  const delta = create(NnrpTileIndexMode.DeltaU16, [2, 5, 9]);
+  const bitset = create(
+    NnrpTileIndexMode.Bitset,
+    [0, 9],
+    [section(1, [new Uint8Array([1]), new Uint8Array([2])], [2, 3], 4)],
+  );
+  assertEquals(raw.metadata.tileIndexBytes, 4);
+  assertEquals(delta.metadata.tileIndexBytes, 6);
+  assertEquals(bitset.metadata.tileIndexBytes, 2);
+
+  const referenced = create(NnrpTileIndexMode.RawU16, [1], [section(1, [new Uint8Array([1])])], {
+    camera: {
+      objectKind: NnrpCacheObjectKind.CameraBlock,
+      refFlags: 1,
+      cacheNamespace: 2,
+      cacheKeyHi: 3n,
+      cacheKeyLo: 4n,
+    },
+    tileIndex: {
+      objectKind: NnrpCacheObjectKind.TileIndexBlock,
+      refFlags: 0,
+      cacheNamespace: 2,
+      cacheKeyHi: 5n,
+      cacheKeyLo: 6n,
+    },
+    tensorSectionTable: {
+      objectKind: NnrpCacheObjectKind.TensorSectionTable,
+      refFlags: 0,
+      cacheNamespace: 2,
+      cacheKeyHi: 7n,
+      cacheKeyLo: 8n,
+    },
+  });
+  assertEquals(referenced.metadata.objectRefMask, 7);
+  assertEquals(new DataView(referenced.body.buffer, referenced.body.byteOffset).getUint32(4, true), 72);
+
+  assertThrows(
+    () => create(NnrpTileIndexMode.DenseRange, [1, 3]),
+    NnrpProtocolError,
+    "Dense tile ids",
   );
   assertThrows(
-    () => createSchemaDescriptor({ id: "", name: "Frame", version: "1" }),
+    () => create(NnrpTileIndexMode.DeltaU16, [2, 2]),
     NnrpProtocolError,
-    "Schema id must be non-empty",
+    "strictly increasing",
   );
   assertThrows(
-    () => normalizeSubmitRequest({ operationId: 1n, frameId: -1 }),
+    () => create(NnrpTileIndexMode.Bitset, [2, 1]),
     NnrpProtocolError,
-    "frameId must be a non-negative",
+    "strictly increasing",
   );
   assertThrows(
-    () => normalizeSubmitRequest({ operationId: 1n, frameId: 1, inputProfile: "custom" as never }),
+    () => create(99 as NnrpTileIndexMode, [1]),
     NnrpProtocolError,
-    "Unknown NNRP input profile",
+    "Unknown tile index mode",
+  );
+  assertThrows(
+    () => create(NnrpTileIndexMode.RawU16, [1], [section(2, [new Uint8Array([1])]), section(1, [new Uint8Array([2])])]),
+    NnrpProtocolError,
+    "strictly ordered",
+  );
+  assertThrows(
+    () => create(NnrpTileIndexMode.RawU16, [1, 2], [section(1, [new Uint8Array([1])])]),
+    NnrpProtocolError,
+    "tile payload count",
+  );
+  assertThrows(
+    () => create(NnrpTileIndexMode.RawU16, [1, 2], [section(1, [new Uint8Array([1]), new Uint8Array([2])], [2])]),
+    NnrpProtocolError,
+    "codec id count",
+  );
+  assertThrows(
+    () => create(NnrpTileIndexMode.RawU16, [1], [section(1, [new Uint8Array([1, 2])], [], 1)]),
+    NnrpProtocolError,
+    "exceeds payloadStrideBytes",
+  );
+  assertThrows(
+    () =>
+      create(NnrpTileIndexMode.RawU16, [1], [section(1, [new Uint8Array([1])])], {
+        camera: {
+          objectKind: NnrpCacheObjectKind.TileIndexBlock,
+          refFlags: 0,
+          cacheNamespace: 0,
+          cacheKeyHi: 0n,
+          cacheKeyLo: 1n,
+        },
+      }),
+    NnrpProtocolError,
+    "wrong object kind",
   );
 });
 
@@ -1915,10 +2141,8 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
     },
     transportCandidate("tcp", { probe: DEFAULT_PROBE }),
   ]));
-  const normalized = normalizeSubmitRequest({
-    operationId: 12n,
-    frameId: 12,
-    metadata: { request: "agent" },
+  const normalized = normalizeCachePutRequest({
+    key: createCacheKey(NnrpCacheObjectKind.PromptSegment, "stream"),
     descriptor: {
       profile: "token",
       metadata: { format: "delta" },
@@ -1932,7 +2156,6 @@ Deno.test("@nnrp/core covers transport diagnostics and optional descriptor field
 
   assertEquals(summary.selected, "tcp");
   assertEquals(summary.rejected[0]?.diagnostic, diagnostic);
-  assertEquals(normalized.metadata, { request: "agent" });
   assertEquals(normalized.descriptor?.metadata, { format: "delta" });
   assertEquals(normalized.descriptor?.cache?.dependencies?.[0]?.kind, NnrpCacheObjectKind.StructuredEventSchema);
 });

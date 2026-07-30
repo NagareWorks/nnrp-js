@@ -1,4 +1,10 @@
-import { type NnrpRuntimeEvent, type NnrpTransportConnection } from "@nnrp/core";
+import {
+  createTokenSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
+  type NnrpRuntimeEvent,
+  type NnrpTransportConnection,
+} from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import {
@@ -113,12 +119,7 @@ async function connectAndSubmit(
     });
     const session = client.openSession({ sessionId: `wire-browser-${attempt}`, inputProfile: "token" });
     try {
-      await session.submitNoWait({
-        operationId: 301n,
-        frameId: 301,
-        payload: REQUEST_BODY,
-        inputProfile: "token",
-      });
+      await session.submitNoWait(tokenSubmit(301n, 301, REQUEST_BODY));
       return { client, session };
     } catch (error) {
       lastError = error;
@@ -128,6 +129,14 @@ async function connectAndSubmit(
     }
   }
   throw new Error("browser wire target could not connect to the suite WebSocket listener", { cause: lastError });
+}
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
 }
 
 function expectEvent<T extends NnrpRuntimeEvent["type"]>(

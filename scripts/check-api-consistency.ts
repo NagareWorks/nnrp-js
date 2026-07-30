@@ -1,4 +1,7 @@
 import {
+  createTokenSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpCapabilityError,
   NnrpError,
   NnrpProtocolError,
@@ -99,29 +102,33 @@ function checkServerControlSurface(): void {
 
 function checkBinaryPayloadOwnership(): void {
   const retained = new Uint8Array([1, 2, 3]);
-  const retainedSubmit = normalizeSubmitRequest({ operationId: 1n, frameId: 1, payload: retained });
-  retained[0] = 99;
-  if (retainedSubmit.payload === retained || retainedSubmit.payload?.[0] !== 1) {
+  const retainedRequest = tokenSubmit(1n, 1, retained);
+  const retainedSubmit = normalizeSubmitRequest(retainedRequest);
+  retainedRequest.body[0] = 99;
+  if (retainedSubmit.body === retainedRequest.body || retainedSubmit.body[0] !== 0) {
     failures.push("retained submit payloads must be copied by default");
   }
 
-  const buffer = new ArrayBuffer(4);
-  const view = new DataView(buffer, 1, 2);
-  view.setUint8(0, 7);
-  const viewSubmit = normalizeSubmitRequest({ operationId: 2n, frameId: 2, payload: view });
-  view.setUint8(0, 8);
-  if (viewSubmit.payload?.[0] !== 7) {
-    failures.push("ArrayBufferView submit payloads must be normalized and copied by default");
+  const backing = new Uint8Array([0, 7, 8, 0]);
+  const viewRequest = tokenSubmit(2n, 2, backing.subarray(1, 3));
+  backing[1] = 9;
+  if (viewRequest.body.at(-2) !== 7) {
+    failures.push("Uint8Array views must be normalized and copied by builders");
   }
 
-  const transferred = new Uint8Array([4, 5, 6]);
-  const transferredSubmit = normalizeSubmitRequest(
-    { operationId: 3n, frameId: 3, payload: transferred },
-    { copyPayloads: false },
-  );
-  if (transferredSubmit.payload !== transferred) {
+  const transferred = tokenSubmit(3n, 3, new Uint8Array([4, 5, 6]));
+  const transferredSubmit = normalizeSubmitRequest(transferred, { copyPayloads: false });
+  if (transferredSubmit.body !== transferred.body) {
     failures.push("explicit ownership transfer must avoid unnecessary Uint8Array copies");
   }
+}
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
 }
 
 function checkDiagnosticErrorFamilies(): void {

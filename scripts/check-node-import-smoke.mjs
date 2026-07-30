@@ -164,6 +164,7 @@ async function verifyNativeTransportLoopbacks() {
       { createWebSocketTransportProvider },
       { openNativeClient },
       { openBackendRuntime },
+      { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY },
     ] =
       await Promise.all([
         import(${JSON.stringify(moduleUrl("@nnrp/transport-tcp"))}),
@@ -171,6 +172,7 @@ async function verifyNativeTransportLoopbacks() {
         import(${JSON.stringify(moduleUrl("@nnrp/transport-websocket"))}),
         import(${JSON.stringify(moduleUrl("@nnrp/native-client"))}),
         import(${JSON.stringify(moduleUrl("@nnrp/native-server"))}),
+        import(${JSON.stringify(moduleUrl("@nnrp/core"))}),
       ]);
     const nonce = process.pid + "-" + Date.now();
     const providers = [
@@ -231,12 +233,15 @@ async function verifyNativeTransportLoopbacks() {
     const clientSession = client.openSession({ sessionId: "node-role-smoke", inputProfile: "token" });
     const serverSession = await accepting;
     for (let exchange = 1; exchange <= 2; exchange += 1) {
-      await clientSession.submitNoWait({
-        operationId: BigInt(exchange),
-        frameId: exchange,
-        payload: new Uint8Array([exchange]),
-        inputProfile: "token",
-      });
+      await clientSession.submitNoWait(createTokenSubmitRequest({
+        identity: {
+          operationId: BigInt(exchange),
+          frameId: exchange,
+          header: NNRP_DEFAULT_SUBMIT_HEADER,
+        },
+        policy: NNRP_DEFAULT_SUBMIT_POLICY,
+        chunks: [{ payload: new Uint8Array([exchange]) }],
+      }));
       const submitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
       if (submitEvent.type !== "submit" || submitEvent.submit.frameId !== exchange) {
         throw new Error("Node role smoke did not observe submit " + exchange);

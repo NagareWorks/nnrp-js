@@ -1,5 +1,14 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { encodeRuntimeControlMetadata, NnrpMessageType, type NnrpTransportConnection, RuntimeRole } from "@nnrp/core";
+import {
+  createTokenSubmitRequest,
+  encodeRuntimeControlMetadata,
+  encodeSubmitPayload,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpMessageType,
+  type NnrpTransportConnection,
+  RuntimeRole,
+} from "@nnrp/core";
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { loadBrowserWasmModule, openBrowserWasmRole } from "../src/wasm-role.ts";
@@ -96,7 +105,7 @@ Deno.test({
       await serverSession.sendTraceContext(metadata);
       assertEquals((await pendingEvent).type, "trace-context");
 
-      await role.submitNoWait(9, frameSubmitPayload(42n, new Uint8Array([7])));
+      await role.submitNoWait(9, NNRP_DEFAULT_SUBMIT_HEADER, frameSubmitPayload(42n, new Uint8Array([7])));
       assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
       const pendingAfterSubmit = role.awaitEvent("browser-wasm-duplex").catch((error) => error);
       await within(
@@ -146,14 +155,11 @@ Deno.test({
 });
 
 function frameSubmitPayload(operationId: bigint, body: Uint8Array): Uint8Array {
-  const output = new Uint8Array(72 + body.byteLength);
-  const view = new DataView(output.buffer);
-  view.setBigUint64(40, operationId, true);
-  view.setUint8(54, 0xff);
-  view.setUint32(64, 1, true);
-  view.setUint16(68, 1, true);
-  output.set(body, 72);
-  return output;
+  return encodeSubmitPayload(createTokenSubmitRequest({
+    identity: { operationId, frameId: 9, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload: body }],
+  }));
 }
 
 async function within<T>(operation: Promise<T>, message: string): Promise<T> {

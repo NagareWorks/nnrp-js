@@ -19,11 +19,11 @@ const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
 const HANDLE_KIND_SECURITY_CONFIG = 12;
 const HANDLE_KIND_SERVER_ACCEPT = 13;
-const ABI_VERSION = "4.1.1";
+const ABI_VERSION = "4.3.0";
 const HANDLE_SIZE = 24;
 const BUFFER_VIEW_SIZE = 16;
 const STATUS_SIZE = 16;
-const ROLE_EVENT_SIZE = 176;
+const ROLE_EVENT_SIZE = 200;
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 
@@ -46,7 +46,9 @@ const SERVER_BIND_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT
 const SESSION_OPEN_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u32", "u32", "u16", "u32", "u32"],
 } as const;
-const SUBMIT_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u64", "u32", BUFFER_VIEW_STRUCT] } as const;
+const SUBMIT_REQUEST_STRUCT = {
+  struct: [HANDLE_STRUCT, "u64", "u32", "u32", "u16", "u16", "u64", BUFFER_VIEW_STRUCT],
+} as const;
 const ROLE_EVENT_POLL_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u32", "u32", "u32", "u32"],
 } as const;
@@ -239,10 +241,17 @@ interface FfiHandle {
 interface InternalRoleEvent {
   readonly kind: number;
   readonly messageType: number;
+  readonly versionMajor: number;
+  readonly wireFormat: number;
+  readonly headerFlags: number;
+  readonly wireSessionId: number;
   readonly connection: FfiHandle;
   readonly session: FfiHandle;
   readonly operation: FfiHandle;
   readonly frameId: number;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
   readonly payload: Uint8Array;
 }
 
@@ -576,15 +585,27 @@ class DenoClientRoleSession {
 
   constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
 
-  async submit(operationId: bigint, frameId: number, payload: Uint8Array): Promise<FfiHandle> {
+  async submit(
+    operationId: bigint,
+    frameId: number,
+    headerFlags: number,
+    viewId: number,
+    routeId: number,
+    traceId: bigint,
+    payload: Uint8Array,
+  ): Promise<FfiHandle> {
     this.#requireOpen();
     const output = bytes(HANDLE_SIZE);
-    const request = bytes(56);
+    const request = bytes(72);
     const view = dataView(request);
     writeHandle(view, 0, this.handle);
     view.setBigUint64(24, operationId, true);
     view.setUint32(32, frameId, true);
-    writeBufferView(view, 40, new Uint8Array(payload));
+    view.setUint32(36, headerFlags, true);
+    view.setUint16(40, viewId, true);
+    view.setUint16(42, routeId, true);
+    view.setBigUint64(48, traceId, true);
+    writeBufferView(view, 56, new Uint8Array(payload));
     assertStatus(await this.library.symbols.nnrp_client_submit(request, output), "client submit");
     return decodeHandle(output);
   }
@@ -809,16 +830,23 @@ async function pollRoleEvents(
 
 function copyRoleEvent(library: DenoTransportLibrary, source: Uint8Array): InternalRoleEvent {
   const view = dataView(source);
-  const owner = decodeHandle(source.subarray(88, 112));
+  const owner = decodeHandle(source.subarray(112, 136));
   try {
     return {
       kind: view.getUint32(0, true),
-      messageType: view.getUint32(4, true),
-      connection: decodeHandle(source.subarray(8, 32)),
-      session: decodeHandle(source.subarray(32, 56)),
-      operation: decodeHandle(source.subarray(56, 80)),
-      frameId: view.getUint32(80, true),
-      payload: copyNativeBytes(view.getBigUint64(112, true), view.getBigUint64(120, true)),
+      messageType: view.getUint8(11),
+      versionMajor: view.getUint8(9),
+      wireFormat: view.getUint8(10),
+      headerFlags: view.getUint32(12, true),
+      wireSessionId: view.getUint32(16, true),
+      connection: decodeHandle(source.subarray(40, 64)),
+      session: decodeHandle(source.subarray(64, 88)),
+      operation: decodeHandle(source.subarray(88, 112)),
+      frameId: view.getUint32(20, true),
+      viewId: view.getUint16(24, true),
+      routeId: view.getUint16(26, true),
+      traceId: view.getBigUint64(32, true),
+      payload: copyNativeBytes(view.getBigUint64(136, true), view.getBigUint64(144, true)),
     };
   } finally {
     if (owner.kind === HANDLE_KIND_BUFFER) releaseBuffer(library, owner);

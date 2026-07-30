@@ -7,13 +7,13 @@
   - [x] Native server multi-listener ownership and rollback pass suite-owned E2E.
   - [x] Native and browser security-intent matrices pass.
   - [x] Public declarations contain route sets and no production singular route overrides.
-- [x] Pin reviewed Rust artifact `1.0.0-preview.4.19`, containing the complete route/security and shutdown ABI.
+- [x] Pin reviewed Rust artifact `1.0.0-preview.4.20`, containing the complete unified role-event ABI.
 - [x] Reinspect every npm tarball for role, transport-native, and browser-WASM ownership boundaries.
 - [x] Publish only after the cross-SDK design-to-code audit has no unresolved findings.
 
 ## Rust Preview4 Artifact Adoption
 
-- [x] Set the default Rust artifact version to `1.0.0-preview.4.19`.
+- [x] Set the default Rust artifact version to `1.0.0-preview.4.20`.
   - [x] Update release workflow inputs and fallback values.
   - [x] Update local artifact preparation defaults.
   - [x] Record the resolved Rust release tag and checksums in dry-run evidence.

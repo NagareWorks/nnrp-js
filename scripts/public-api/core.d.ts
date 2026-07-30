@@ -1,5 +1,38 @@
 export declare const NNRP_PROTOCOL_NAME = "NNRP";
 export declare const NNRP_PROTOCOL_VERSION = "1.0.0";
+export declare const NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES = 24;
+export declare enum NnrpPayloadKind {
+    Tensor = 1,
+    TokenChunk = 2,
+    AudioChunk = 4,
+    VideoChunk = 8,
+    StructuredEvent = 16,
+    ToolDelta = 32,
+    OpaqueBytes = 64
+}
+export declare enum NnrpTypedPayloadDescriptorFlags {
+    None = 0,
+    Terminal = 1,
+    Partial = 2,
+    SchemaOverride = 4,
+    ProfileHintPresent = 8
+}
+export interface NnrpTypedPayloadDescriptor {
+    profileId: number;
+    payloadKind: NnrpPayloadKind;
+    descriptorFlags: NnrpTypedPayloadDescriptorFlags;
+    schemaId: number;
+    schemaVersion: number;
+    streamSemantics: number;
+    offset: number;
+    length: number;
+}
+export interface NnrpTypedPayloadFrame {
+    descriptor: NnrpTypedPayloadDescriptor;
+    payload: Uint8Array;
+}
+export declare function encodeTypedPayloadDescriptor(descriptor: NnrpTypedPayloadDescriptor): Uint8Array;
+export declare function decodeTypedPayloadDescriptor(source: Uint8Array): NnrpTypedPayloadDescriptor;
 export declare enum NnrpMessageType {
     ClientHello = 1,
     ServerHelloAck = 2,
@@ -372,7 +405,7 @@ export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
 export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefer-ipc" | "prefer-websocket" | "force-quic" | "force-tcp" | "force-ipc" | "force-websocket";
 export type NnrpOperationId = bigint;
 export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
-export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
+export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "payload.typed" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
     readonly code: string;
@@ -538,12 +571,127 @@ export interface NnrpRejectedTransportCandidate {
 }
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
-export type NnrpSubmitMode = "inline" | "object-reference";
+export declare enum NnrpSubmitMode {
+    Inline = 0,
+    Reference = 1,
+    Mixed = 2
+}
+export declare enum NnrpHeaderFlags {
+    None = 0,
+    AckRequired = 1,
+    CanDrop = 2,
+    Stale = 4,
+    EndOfStream = 8,
+    Retransmit = 16,
+    Keyframe = 32
+}
+export declare enum NnrpBudgetPolicy {
+    None = 0,
+    AllowPartial = 1,
+    AllowStaleReuse = 2,
+    AllowDegraded = 4,
+    AllowDrop = 8
+}
+export declare enum NnrpLossTolerancePolicy {
+    Strict = 0,
+    BestEffort = 1,
+    LowLatency = 2,
+    FireAndForget = 3,
+    InheritSession = 255
+}
+export declare enum NnrpTensorInputProfile {
+    Unspecified = 0,
+    ChangedTilesLuma = 1,
+    DenseLumaFrame = 2
+}
+export declare enum NnrpTileIndexMode {
+    DenseRange = 0,
+    RawU16 = 1,
+    DeltaU16 = 2,
+    Bitset = 3
+}
 export type NnrpSubmitCapacityPolicy = "reject" | "await";
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
+export interface NnrpSubmitHeaderContext {
+    readonly flags: NnrpHeaderFlags | number;
+    readonly viewId: number;
+    readonly routeId: number;
+    readonly traceId: bigint;
+}
+export interface NnrpSubmitIdentity {
+    readonly operationId: bigint;
+    readonly frameId: number;
+    readonly header: NnrpSubmitHeaderContext;
+}
+export interface NnrpSubmitPolicy {
+    readonly frameClass: number;
+    readonly latencyBudgetMs: number;
+    readonly targetFpsX100: number;
+    readonly retryOfFrame: number;
+    readonly budgetPolicy: NnrpBudgetPolicy | number;
+    readonly lossTolerancePolicy: NnrpLossTolerancePolicy | number;
+    readonly dependencyFrameId: number;
+}
 export interface NnrpTensorSection {
+    readonly roleId: number;
+    readonly defaultCodecId: number;
+    readonly dtypeId: number;
+    readonly layoutId: number;
+    readonly scalePolicy: number;
+    readonly elementCountPerTile: number;
+    readonly tilePayloads: readonly NnrpBinaryPayload[];
+    readonly codecIds: readonly number[];
+    readonly payloadStrideBytes: number;
+}
+export interface NnrpObjectReferenceBlock {
+    readonly objectKind: NnrpCacheObjectKind;
+    readonly refFlags: number;
+    readonly cacheNamespace: number;
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
+}
+export interface NnrpSubmitObjectReferences {
+    readonly camera?: NnrpObjectReferenceBlock;
+    readonly tileIndex?: NnrpObjectReferenceBlock;
+    readonly tensorSectionTable?: NnrpObjectReferenceBlock;
+}
+export interface NnrpTensorSubmitInput {
+    readonly identity: NnrpSubmitIdentity;
+    readonly policy: NnrpSubmitPolicy;
+    readonly srcWidth: number;
+    readonly srcHeight: number;
+    readonly tileWidth: number;
+    readonly tileHeight: number;
+    readonly tileIds: readonly number[];
+    readonly sections: readonly NnrpTensorSection[];
+    readonly cameraBlock: NnrpBinaryPayload;
+    readonly inputProfile: NnrpTensorInputProfile;
+    readonly tileIndexMode: NnrpTileIndexMode;
+    readonly tileBaseId: number;
+    readonly references: NnrpSubmitObjectReferences;
+}
+export interface NnrpTokenChunk {
     readonly payload: NnrpBinaryPayload;
-    readonly codecId?: number;
+    readonly descriptorFlags?: NnrpTypedPayloadDescriptorFlags;
+}
+export interface NnrpTokenSubmitInput {
+    readonly identity: NnrpSubmitIdentity;
+    readonly policy: NnrpSubmitPolicy;
+    readonly chunks: readonly NnrpTokenChunk[];
+}
+export interface NnrpTypedPayloadInputFrame {
+    readonly profileId: number;
+    readonly payloadKind: NnrpPayloadKind;
+    readonly descriptorFlags?: NnrpTypedPayloadDescriptorFlags;
+    readonly schemaId?: number;
+    readonly schemaVersion?: number;
+    readonly streamSemantics?: number;
+    readonly payload: NnrpBinaryPayload;
+}
+export interface NnrpTypedPayloadSubmitInput {
+    readonly identity: NnrpSubmitIdentity;
+    readonly policy: NnrpSubmitPolicy;
+    readonly frames: readonly NnrpTypedPayloadInputFrame[];
 }
 export interface NnrpCacheKey {
     readonly kind: NnrpCacheObjectKind;
@@ -600,29 +748,35 @@ export interface NnrpPayloadDescriptor {
 export interface NnrpSubmitRequest {
     readonly operationId: bigint;
     readonly frameId: number;
-    readonly payload?: NnrpBinaryPayload;
-    readonly tensors?: readonly NnrpTensorSection[];
-    readonly inputProfile?: NnrpInputProfile;
-    readonly submitMode?: NnrpSubmitMode;
-    readonly cacheKey?: NnrpCacheKey;
-    readonly descriptor?: NnrpPayloadDescriptor;
-    readonly metadata?: Readonly<Record<string, string>>;
+    readonly header: NnrpSubmitHeaderContext;
+    readonly metadata: NnrpSubmitMetadata;
+    readonly body: Uint8Array;
 }
-export interface NnrpNormalizedTensorSection {
-    readonly payload: Uint8Array;
-    readonly codecId?: number;
+export interface NnrpSubmitMetadata {
+    readonly srcWidth: number;
+    readonly srcHeight: number;
+    readonly tileWidth: number;
+    readonly tileHeight: number;
+    readonly tileCount: number;
+    readonly sectionCount: number;
+    readonly frameClass: number;
+    readonly inputProfile: NnrpTensorInputProfile;
+    readonly tileIndexMode: NnrpTileIndexMode;
+    readonly latencyBudgetMs: number;
+    readonly targetFpsX100: number;
+    readonly retryOfFrame: number;
+    readonly tileBaseId: number;
+    readonly cameraBytes: number;
+    readonly tileIndexBytes: number;
+    readonly submitMode: NnrpSubmitMode;
+    readonly budgetPolicy: NnrpBudgetPolicy | number;
+    readonly lossTolerancePolicy: NnrpLossTolerancePolicy | number;
+    readonly objectRefMask: number;
+    readonly dependencyFrameId: number;
+    readonly payloadKindBitmap: number;
+    readonly payloadFrameCount: number;
 }
-export interface NnrpNormalizedSubmitRequest {
-    readonly operationId: bigint;
-    readonly frameId: number;
-    readonly payload?: Uint8Array;
-    readonly tensors?: readonly NnrpNormalizedTensorSection[];
-    readonly inputProfile?: NnrpInputProfile;
-    readonly submitMode?: NnrpSubmitMode;
-    readonly cacheKey?: NnrpCacheKey;
-    readonly descriptor?: NnrpPayloadDescriptor;
-    readonly metadata?: Readonly<Record<string, string>>;
-}
+export type NnrpNormalizedSubmitRequest = NnrpSubmitRequest;
 export interface NnrpResult {
     readonly frameId: number;
     readonly payload?: Uint8Array;
@@ -788,13 +942,24 @@ export declare function parseApplicationEndpoint(endpoint: string | URL): URL;
 export declare function resolveProviderEndpoint(endpoint: string | URL, transport: NnrpTransportKind, providerEndpoint?: string | URL): string;
 export interface NormalizeSubmitRequestOptions {
     readonly copyPayloads?: boolean;
-    readonly strictProfiles?: boolean;
 }
 export declare function createCacheKey(kind: NnrpCacheObjectKind, key: bigint | number | string, namespaceId?: number): NnrpCacheKey;
 export declare function createSchemaDescriptor(descriptor: NnrpSchemaDescriptor): NnrpSchemaDescriptor;
 export declare function normalizeCachePutRequest(request: NnrpCachePutRequest): NnrpCachePutRequest;
 export declare function normalizeCacheInvalidateRequest(request: NnrpCacheInvalidateRequest): NnrpCacheInvalidateRequest;
 export declare function isStandardInputProfile(profile: string): profile is NnrpInputProfile;
+export declare const NNRP_DEFAULT_SUBMIT_HEADER: NnrpSubmitHeaderContext;
+export declare const NNRP_DEFAULT_SUBMIT_POLICY: NnrpSubmitPolicy;
+export declare function createTensorSubmitRequest(input: NnrpTensorSubmitInput): NnrpSubmitRequest;
+export declare function createTokenSubmitRequest(input: NnrpTokenSubmitInput): NnrpSubmitRequest;
+export declare function createTypedPayloadSubmitRequest(input: NnrpTypedPayloadSubmitInput): NnrpSubmitRequest;
+export declare function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array;
+export declare function encodeSubmitPayload(request: NnrpSubmitRequest): Uint8Array;
+export declare function decodeSubmitPayload(payload: Uint8Array): {
+    readonly operationId: bigint;
+    readonly metadata: NnrpSubmitMetadata;
+    readonly body: Uint8Array;
+};
 export declare function normalizeSubmitRequest(request: NnrpSubmitRequest, options?: NormalizeSubmitRequestOptions): NnrpNormalizedSubmitRequest;
 export declare function createRecoveryToken(token: string | NnrpBinaryPayload, metadata?: Readonly<Record<string, string>>): NnrpRecoveryToken;
 export declare function normalizeSessionMigrationRequest(request: NnrpSessionMigrationRequest): NnrpSessionMigrationRequest;

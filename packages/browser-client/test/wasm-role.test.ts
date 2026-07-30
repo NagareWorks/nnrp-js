@@ -1,4 +1,9 @@
-import { NnrpMessageType, type NnrpTransportConnection, type NnrpTransportReceiveOptions } from "@nnrp/core";
+import {
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NnrpMessageType,
+  type NnrpTransportConnection,
+  type NnrpTransportReceiveOptions,
+} from "@nnrp/core";
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { NnrpWasmBindingUnavailableError } from "../src/errors.ts";
 import {
@@ -45,7 +50,7 @@ Deno.test("browser WASM role owns carrier callbacks, patch encoding, events, and
       closeCarrier = close;
       return {
         sessionId: 17,
-        submitNoWait: async (frameId, payload) => {
+        submitNoWait: async (frameId, _headerFlags, _viewId, _routeId, _traceId, payload) => {
           await send(new Uint8Array([frameId, ...payload]));
           return 41;
         },
@@ -68,7 +73,7 @@ Deno.test("browser WASM role owns carrier callbacks, patch encoding, events, and
   const role = await openBrowserWasmRole(wasm, connection, roleConfig());
 
   assertEquals(role.sessionId, 17);
-  assertEquals(await role.submitNoWait(7, new Uint8Array([1, 2])), 41n);
+  assertEquals(await role.submitNoWait(7, NNRP_DEFAULT_SUBMIT_HEADER, new Uint8Array([1, 2])), 41n);
   await role.sendRuntimeFrame(NnrpMessageType.Cancel, 8, new Uint8Array([3]));
   assertEquals(sent, [
     new Uint8Array([7, 1, 2]),
@@ -140,7 +145,7 @@ Deno.test("browser WASM role preserves the actual carrier failure", async () => 
   const wasm = testWasmModule({
     open: (send) => ({
       sessionId: 1,
-      submitNoWait: async (_frameId, payload) => {
+      submitNoWait: async (_frameId, _headerFlags, _viewId, _routeId, _traceId, payload) => {
         await send(payload);
         return 1;
       },
@@ -152,7 +157,7 @@ Deno.test("browser WASM role preserves the actual carrier failure", async () => 
   });
   const role = await openBrowserWasmRole(wasm, connection, roleConfig());
 
-  const error = await assertRejects(() => role.submitNoWait(1, new Uint8Array([1])));
+  const error = await assertRejects(() => role.submitNoWait(1, NNRP_DEFAULT_SUBMIT_HEADER, new Uint8Array([1])));
   assertEquals(error, carrierFailure);
   await role.close();
 });
@@ -196,7 +201,14 @@ function testWasmModule(options: {
 
 interface TestRoleBinding {
   readonly sessionId: number;
-  submitNoWait(frameId: number, payload: Uint8Array): Promise<number>;
+  submitNoWait(
+    frameId: number,
+    headerFlags: number,
+    viewId: number,
+    routeId: number,
+    traceId: bigint,
+    payload: Uint8Array,
+  ): Promise<number>;
   sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
   patchSession(metadata: Uint8Array): Promise<Uint8Array>;
   awaitEvent(): Promise<BrowserRoleEventPacket>;

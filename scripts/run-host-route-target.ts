@@ -1,4 +1,7 @@
 import {
+  createTokenSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpClientProviderRoutes,
   type NnrpServerProviderRoutes,
   type NnrpTransportClientSecurity,
@@ -340,12 +343,11 @@ async function runClientCase(
     });
     try {
       const session = client.openSession({ sessionId: `host-route-${scenario.id}`, inputProfile: "token" });
-      await session.submitNoWait({
-        operationId: 1n,
-        frameId: 1,
-        payload: new Uint8Array(),
-        inputProfile: "token",
-      }).catch(() => undefined);
+      await session.submitNoWait(createTokenSubmitRequest({
+        identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
+        policy: NNRP_DEFAULT_SUBMIT_POLICY,
+        chunks: [{ payload: new Uint8Array() }],
+      })).catch(() => undefined);
       // The conformance peer accepts concurrently and records the real carrier.
       // Keep the selected connection alive long enough for that independent
       // observation before closing the SDK host.

@@ -1,5 +1,107 @@
 export const NNRP_PROTOCOL_NAME = "NNRP";
 export const NNRP_PROTOCOL_VERSION = "1.0.0";
+export const NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES = 24;
+
+export enum NnrpPayloadKind {
+  Tensor = 0x01,
+  TokenChunk = 0x02,
+  AudioChunk = 0x04,
+  VideoChunk = 0x08,
+  StructuredEvent = 0x10,
+  ToolDelta = 0x20,
+  OpaqueBytes = 0x40,
+}
+
+export enum NnrpTypedPayloadDescriptorFlags {
+  None = 0,
+  Terminal = 0x01,
+  Partial = 0x02,
+  SchemaOverride = 0x04,
+  ProfileHintPresent = 0x08,
+}
+
+export interface NnrpTypedPayloadDescriptor {
+  profileId: number;
+  payloadKind: NnrpPayloadKind;
+  descriptorFlags: NnrpTypedPayloadDescriptorFlags;
+  schemaId: number;
+  schemaVersion: number;
+  streamSemantics: number;
+  offset: number;
+  length: number;
+}
+
+export interface NnrpTypedPayloadFrame {
+  descriptor: NnrpTypedPayloadDescriptor;
+  payload: Uint8Array;
+}
+
+export function encodeTypedPayloadDescriptor(
+  descriptor: NnrpTypedPayloadDescriptor,
+): Uint8Array {
+  validateTypedPayloadDescriptor(descriptor);
+  const bytes = new Uint8Array(NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES);
+  const view = new DataView(bytes.buffer);
+  view.setUint16(0, descriptor.profileId, true);
+  view.setUint8(2, descriptor.payloadKind);
+  view.setUint8(3, descriptor.descriptorFlags);
+  view.setUint32(4, descriptor.schemaId, true);
+  view.setUint32(8, descriptor.schemaVersion, true);
+  view.setUint16(12, descriptor.streamSemantics, true);
+  view.setUint32(16, descriptor.offset, true);
+  view.setUint32(20, descriptor.length, true);
+  return bytes;
+}
+
+export function decodeTypedPayloadDescriptor(
+  source: Uint8Array,
+): NnrpTypedPayloadDescriptor {
+  if (source.byteLength !== NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES) {
+    throw new RangeError(
+      `typed payload descriptor must be ${NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES} bytes`,
+    );
+  }
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  if (view.getUint16(14, true) !== 0) {
+    throw new RangeError("typed payload descriptor reserved0 must be zero");
+  }
+  const descriptor: NnrpTypedPayloadDescriptor = {
+    profileId: view.getUint16(0, true),
+    payloadKind: view.getUint8(2) as NnrpPayloadKind,
+    descriptorFlags: view.getUint8(3) as NnrpTypedPayloadDescriptorFlags,
+    schemaId: view.getUint32(4, true),
+    schemaVersion: view.getUint32(8, true),
+    streamSemantics: view.getUint16(12, true),
+    offset: view.getUint32(16, true),
+    length: view.getUint32(20, true),
+  };
+  validateTypedPayloadDescriptor(descriptor);
+  return descriptor;
+}
+
+function validateTypedPayloadDescriptor(
+  descriptor: NnrpTypedPayloadDescriptor,
+): void {
+  const kind = Number(descriptor.payloadKind);
+  if (kind === 0 || (kind & (kind - 1)) !== 0 || (kind & ~0x7f) !== 0) {
+    throw new RangeError("payloadKind must contain exactly one current payload kind");
+  }
+  if ((descriptor.descriptorFlags & ~0x0f) !== 0) {
+    throw new RangeError("descriptorFlags contains reserved bits");
+  }
+  assertUnsigned("profileId", descriptor.profileId, 0xffff);
+  assertUnsigned("schemaId", descriptor.schemaId, 0xffff_ffff);
+  assertUnsigned("schemaVersion", descriptor.schemaVersion, 0xffff_ffff);
+  assertUnsigned("streamSemantics", descriptor.streamSemantics, 0xffff);
+  assertUnsigned("offset", descriptor.offset, 0xffff_ffff);
+  assertUnsigned("length", descriptor.length, 0xffff_ffff);
+}
+
+function assertUnsigned(name: string, value: number, maximum: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > maximum) {
+    throw new RangeError(`${name} is outside its unsigned wire range`);
+  }
+}
 
 export enum NnrpMessageType {
   ClientHello = 0x01,
@@ -574,6 +676,7 @@ export type NnrpCapability =
   | "cache"
   | "schema"
   | "recovery"
+  | "payload.typed"
   | "control.cancel_abort"
   | "control.supersede"
   | "control.priority_update"
@@ -607,6 +710,7 @@ const NNRP_CAPABILITY_TOKENS = new Set<NnrpCapability>([
   "cache",
   "schema",
   "recovery",
+  "payload.typed",
   "control.cancel_abort",
   "control.supersede",
   "control.priority_update",
@@ -858,15 +962,145 @@ export const NNRP_STANDARD_INPUT_PROFILES = ["tensor", "token", "structured_even
 
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
 
-export type NnrpSubmitMode = "inline" | "object-reference";
+export enum NnrpSubmitMode {
+  Inline = 0,
+  Reference = 1,
+  Mixed = 2,
+}
+
+export enum NnrpHeaderFlags {
+  None = 0,
+  AckRequired = 0x0000_0001,
+  CanDrop = 0x0000_0002,
+  Stale = 0x0000_0004,
+  EndOfStream = 0x0000_0008,
+  Retransmit = 0x0000_0010,
+  Keyframe = 0x0000_0020,
+}
+
+export enum NnrpBudgetPolicy {
+  None = 0,
+  AllowPartial = 0x01,
+  AllowStaleReuse = 0x02,
+  AllowDegraded = 0x04,
+  AllowDrop = 0x08,
+}
+
+export enum NnrpLossTolerancePolicy {
+  Strict = 0,
+  BestEffort = 1,
+  LowLatency = 2,
+  FireAndForget = 3,
+  InheritSession = 0xff,
+}
+
+export enum NnrpTensorInputProfile {
+  Unspecified = 0,
+  ChangedTilesLuma = 1,
+  DenseLumaFrame = 2,
+}
+
+export enum NnrpTileIndexMode {
+  DenseRange = 0,
+  RawU16 = 1,
+  DeltaU16 = 2,
+  Bitset = 3,
+}
 
 export type NnrpSubmitCapacityPolicy = "reject" | "await";
 
 export type NnrpBinaryPayload = Uint8Array | ArrayBufferView;
 
+export interface NnrpSubmitHeaderContext {
+  readonly flags: NnrpHeaderFlags | number;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
+}
+
+export interface NnrpSubmitIdentity {
+  readonly operationId: bigint;
+  readonly frameId: number;
+  readonly header: NnrpSubmitHeaderContext;
+}
+
+export interface NnrpSubmitPolicy {
+  readonly frameClass: number;
+  readonly latencyBudgetMs: number;
+  readonly targetFpsX100: number;
+  readonly retryOfFrame: number;
+  readonly budgetPolicy: NnrpBudgetPolicy | number;
+  readonly lossTolerancePolicy: NnrpLossTolerancePolicy | number;
+  readonly dependencyFrameId: number;
+}
+
 export interface NnrpTensorSection {
+  readonly roleId: number;
+  readonly defaultCodecId: number;
+  readonly dtypeId: number;
+  readonly layoutId: number;
+  readonly scalePolicy: number;
+  readonly elementCountPerTile: number;
+  readonly tilePayloads: readonly NnrpBinaryPayload[];
+  readonly codecIds: readonly number[];
+  readonly payloadStrideBytes: number;
+}
+
+export interface NnrpObjectReferenceBlock {
+  readonly objectKind: NnrpCacheObjectKind;
+  readonly refFlags: number;
+  readonly cacheNamespace: number;
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
+}
+
+export interface NnrpSubmitObjectReferences {
+  readonly camera?: NnrpObjectReferenceBlock;
+  readonly tileIndex?: NnrpObjectReferenceBlock;
+  readonly tensorSectionTable?: NnrpObjectReferenceBlock;
+}
+
+export interface NnrpTensorSubmitInput {
+  readonly identity: NnrpSubmitIdentity;
+  readonly policy: NnrpSubmitPolicy;
+  readonly srcWidth: number;
+  readonly srcHeight: number;
+  readonly tileWidth: number;
+  readonly tileHeight: number;
+  readonly tileIds: readonly number[];
+  readonly sections: readonly NnrpTensorSection[];
+  readonly cameraBlock: NnrpBinaryPayload;
+  readonly inputProfile: NnrpTensorInputProfile;
+  readonly tileIndexMode: NnrpTileIndexMode;
+  readonly tileBaseId: number;
+  readonly references: NnrpSubmitObjectReferences;
+}
+
+export interface NnrpTokenChunk {
   readonly payload: NnrpBinaryPayload;
-  readonly codecId?: number;
+  readonly descriptorFlags?: NnrpTypedPayloadDescriptorFlags;
+}
+
+export interface NnrpTokenSubmitInput {
+  readonly identity: NnrpSubmitIdentity;
+  readonly policy: NnrpSubmitPolicy;
+  readonly chunks: readonly NnrpTokenChunk[];
+}
+
+export interface NnrpTypedPayloadInputFrame {
+  readonly profileId: number;
+  readonly payloadKind: NnrpPayloadKind;
+  readonly descriptorFlags?: NnrpTypedPayloadDescriptorFlags;
+  readonly schemaId?: number;
+  readonly schemaVersion?: number;
+  readonly streamSemantics?: number;
+  readonly payload: NnrpBinaryPayload;
+}
+
+export interface NnrpTypedPayloadSubmitInput {
+  readonly identity: NnrpSubmitIdentity;
+  readonly policy: NnrpSubmitPolicy;
+  readonly frames: readonly NnrpTypedPayloadInputFrame[];
 }
 
 export interface NnrpCacheKey {
@@ -934,31 +1168,37 @@ export interface NnrpPayloadDescriptor {
 export interface NnrpSubmitRequest {
   readonly operationId: bigint;
   readonly frameId: number;
-  readonly payload?: NnrpBinaryPayload;
-  readonly tensors?: readonly NnrpTensorSection[];
-  readonly inputProfile?: NnrpInputProfile;
-  readonly submitMode?: NnrpSubmitMode;
-  readonly cacheKey?: NnrpCacheKey;
-  readonly descriptor?: NnrpPayloadDescriptor;
-  readonly metadata?: Readonly<Record<string, string>>;
+  readonly header: NnrpSubmitHeaderContext;
+  readonly metadata: NnrpSubmitMetadata;
+  readonly body: Uint8Array;
 }
 
-export interface NnrpNormalizedTensorSection {
-  readonly payload: Uint8Array;
-  readonly codecId?: number;
+export interface NnrpSubmitMetadata {
+  readonly srcWidth: number;
+  readonly srcHeight: number;
+  readonly tileWidth: number;
+  readonly tileHeight: number;
+  readonly tileCount: number;
+  readonly sectionCount: number;
+  readonly frameClass: number;
+  readonly inputProfile: NnrpTensorInputProfile;
+  readonly tileIndexMode: NnrpTileIndexMode;
+  readonly latencyBudgetMs: number;
+  readonly targetFpsX100: number;
+  readonly retryOfFrame: number;
+  readonly tileBaseId: number;
+  readonly cameraBytes: number;
+  readonly tileIndexBytes: number;
+  readonly submitMode: NnrpSubmitMode;
+  readonly budgetPolicy: NnrpBudgetPolicy | number;
+  readonly lossTolerancePolicy: NnrpLossTolerancePolicy | number;
+  readonly objectRefMask: number;
+  readonly dependencyFrameId: number;
+  readonly payloadKindBitmap: number;
+  readonly payloadFrameCount: number;
 }
 
-export interface NnrpNormalizedSubmitRequest {
-  readonly operationId: bigint;
-  readonly frameId: number;
-  readonly payload?: Uint8Array;
-  readonly tensors?: readonly NnrpNormalizedTensorSection[];
-  readonly inputProfile?: NnrpInputProfile;
-  readonly submitMode?: NnrpSubmitMode;
-  readonly cacheKey?: NnrpCacheKey;
-  readonly descriptor?: NnrpPayloadDescriptor;
-  readonly metadata?: Readonly<Record<string, string>>;
-}
+export type NnrpNormalizedSubmitRequest = NnrpSubmitRequest;
 
 export interface NnrpResult {
   readonly frameId: number;
@@ -1568,7 +1808,6 @@ export function resolveProviderEndpoint(
 
 export interface NormalizeSubmitRequestOptions {
   readonly copyPayloads?: boolean;
-  readonly strictProfiles?: boolean;
 }
 
 export function createCacheKey(
@@ -1621,28 +1860,273 @@ export function isStandardInputProfile(profile: string): profile is NnrpInputPro
   return (NNRP_STANDARD_INPUT_PROFILES as readonly string[]).includes(profile);
 }
 
+export const NNRP_DEFAULT_SUBMIT_HEADER: NnrpSubmitHeaderContext = Object.freeze({
+  flags: NnrpHeaderFlags.None,
+  viewId: 0,
+  routeId: 0,
+  traceId: 0n,
+});
+
+export const NNRP_DEFAULT_SUBMIT_POLICY: NnrpSubmitPolicy = Object.freeze({
+  frameClass: 0,
+  latencyBudgetMs: 0,
+  targetFpsX100: 0,
+  retryOfFrame: 0,
+  budgetPolicy: NnrpBudgetPolicy.None,
+  lossTolerancePolicy: NnrpLossTolerancePolicy.InheritSession,
+  dependencyFrameId: 0,
+});
+
+export function createTensorSubmitRequest(input: NnrpTensorSubmitInput): NnrpSubmitRequest {
+  validateSubmitIdentity(input.identity);
+  validateSubmitPolicy(input.policy);
+  assertUnsigned("srcWidth", input.srcWidth, 0xffff);
+  assertUnsigned("srcHeight", input.srcHeight, 0xffff);
+  assertUnsigned("tileWidth", input.tileWidth, 0xffff);
+  assertUnsigned("tileHeight", input.tileHeight, 0xffff);
+  assertUnsigned("tileBaseId", input.tileBaseId, 0xffff_ffff);
+  if (input.tileIds.length > 0xffff || input.sections.length > 0xffff) {
+    throw submitProtocolError("NNRP_SUBMIT_COUNT_OVERFLOW", "Tensor tile and section counts must fit in u16.");
+  }
+
+  const tileIndex = encodeSubmitTileIndices(input.tileIds, input.tileIndexMode, input.tileBaseId);
+  const sectionTable = encodeSubmitTensorSections(input.sections, input.tileIds.length);
+  const camera = normalizeBinaryPayload(input.cameraBlock, true);
+  const references = input.references;
+  validateSubmitReference(references.camera, NnrpCacheObjectKind.CameraBlock, "camera");
+  validateSubmitReference(references.tileIndex, NnrpCacheObjectKind.TileIndexBlock, "tileIndex");
+  validateSubmitReference(
+    references.tensorSectionTable,
+    NnrpCacheObjectKind.TensorSectionTable,
+    "tensorSectionTable",
+  );
+
+  const inlineRegion: number[] = [];
+  if (references.camera === undefined && camera.byteLength > 0) {
+    appendInlineSubmitObject(inlineRegion, NnrpCacheObjectKind.CameraBlock, camera);
+  }
+  if (references.tileIndex === undefined && input.tileIds.length > 0) {
+    appendInlineSubmitObject(inlineRegion, NnrpCacheObjectKind.TileIndexBlock, tileIndex);
+  }
+  if (references.tensorSectionTable === undefined && input.sections.length > 0) {
+    appendInlineSubmitObject(inlineRegion, NnrpCacheObjectKind.TensorSectionTable, sectionTable);
+  }
+
+  const referenceBlocks = [references.camera, references.tileIndex, references.tensorSectionTable]
+    .filter((value): value is NnrpObjectReferenceBlock => value !== undefined);
+  const referenceRegion = concatBytes(referenceBlocks.map(encodeSubmitObjectReference));
+  const hasInline = inlineRegion.length > 0;
+  const hasReferences = referenceBlocks.length > 0;
+  const submitMode = hasInline && hasReferences
+    ? NnrpSubmitMode.Mixed
+    : hasReferences
+    ? NnrpSubmitMode.Reference
+    : NnrpSubmitMode.Inline;
+  const objectRefMask = (references.camera === undefined ? 0 : 1) |
+    (references.tileIndex === undefined ? 0 : 2) |
+    (references.tensorSectionTable === undefined ? 0 : 4);
+  const body = encodeSubmitBody(new Uint8Array(inlineRegion), referenceRegion, new Uint8Array(), new Uint8Array());
+  return normalizedSubmitFromParts(input.identity, {
+    srcWidth: input.srcWidth,
+    srcHeight: input.srcHeight,
+    tileWidth: input.tileWidth,
+    tileHeight: input.tileHeight,
+    tileCount: input.tileIds.length,
+    sectionCount: input.sections.length,
+    frameClass: input.policy.frameClass,
+    inputProfile: input.inputProfile,
+    tileIndexMode: input.tileIndexMode,
+    latencyBudgetMs: input.policy.latencyBudgetMs,
+    targetFpsX100: input.policy.targetFpsX100,
+    retryOfFrame: input.policy.retryOfFrame,
+    tileBaseId: input.tileBaseId,
+    cameraBytes: references.camera === undefined ? camera.byteLength : 0,
+    tileIndexBytes: references.tileIndex === undefined ? tileIndex.byteLength : 0,
+    submitMode,
+    budgetPolicy: input.policy.budgetPolicy,
+    lossTolerancePolicy: input.policy.lossTolerancePolicy,
+    objectRefMask,
+    dependencyFrameId: input.policy.dependencyFrameId,
+    payloadKindBitmap: NnrpPayloadKind.Tensor,
+    payloadFrameCount: 0,
+  }, body);
+}
+
+export function createTokenSubmitRequest(input: NnrpTokenSubmitInput): NnrpSubmitRequest {
+  return createTypedPayloadSubmitRequest({
+    identity: input.identity,
+    policy: input.policy,
+    frames: input.chunks.map((chunk) => ({
+      profileId: 2,
+      payloadKind: NnrpPayloadKind.TokenChunk,
+      descriptorFlags: chunk.descriptorFlags ?? NnrpTypedPayloadDescriptorFlags.Partial,
+      schemaId: 0x0000_1001,
+      schemaVersion: 3,
+      streamSemantics: 2,
+      payload: chunk.payload,
+    })),
+  });
+}
+
+export function createTypedPayloadSubmitRequest(input: NnrpTypedPayloadSubmitInput): NnrpSubmitRequest {
+  validateSubmitIdentity(input.identity);
+  validateSubmitPolicy(input.policy);
+  if (input.frames.length === 0 || input.frames.length > 0xffff) {
+    throw submitProtocolError(
+      "NNRP_TYPED_PAYLOAD_FRAME_COUNT_INVALID",
+      "Typed payload submits require between one and 65535 frames.",
+    );
+  }
+
+  const descriptors: Uint8Array[] = [];
+  const payloads: Uint8Array[] = [];
+  let payloadOffset = 0;
+  let payloadKindBitmap = 0;
+  for (const frame of input.frames) {
+    const payload = normalizeBinaryPayload(frame.payload, true);
+    const descriptor = encodeTypedPayloadDescriptor({
+      profileId: frame.profileId,
+      payloadKind: frame.payloadKind,
+      descriptorFlags: frame.descriptorFlags ?? NnrpTypedPayloadDescriptorFlags.None,
+      schemaId: frame.schemaId ?? 0,
+      schemaVersion: frame.schemaVersion ?? 0,
+      streamSemantics: frame.streamSemantics ?? 0,
+      offset: payloadOffset,
+      length: payload.byteLength,
+    });
+    descriptors.push(descriptor);
+    payloads.push(payload);
+    payloadOffset = checkedSubmitU32(payloadOffset + payload.byteLength, "typed payload bytes");
+    payloadKindBitmap |= frame.payloadKind;
+  }
+  const body = encodeSubmitBody(
+    new Uint8Array(),
+    new Uint8Array(),
+    concatBytes(descriptors),
+    concatBytes(payloads),
+  );
+  return normalizedSubmitFromParts(input.identity, {
+    srcWidth: 0,
+    srcHeight: 0,
+    tileWidth: 0,
+    tileHeight: 0,
+    tileCount: 0,
+    sectionCount: 0,
+    frameClass: input.policy.frameClass,
+    inputProfile: NnrpTensorInputProfile.Unspecified,
+    tileIndexMode: NnrpTileIndexMode.RawU16,
+    latencyBudgetMs: input.policy.latencyBudgetMs,
+    targetFpsX100: input.policy.targetFpsX100,
+    retryOfFrame: input.policy.retryOfFrame,
+    tileBaseId: 0,
+    cameraBytes: 0,
+    tileIndexBytes: 0,
+    submitMode: NnrpSubmitMode.Inline,
+    budgetPolicy: input.policy.budgetPolicy,
+    lossTolerancePolicy: input.policy.lossTolerancePolicy,
+    objectRefMask: 0,
+    dependencyFrameId: input.policy.dependencyFrameId,
+    payloadKindBitmap,
+    payloadFrameCount: input.frames.length,
+  }, body);
+}
+
+export function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array {
+  validateSubmitRequestShape(request);
+  const metadata = request.metadata;
+  const output = new Uint8Array(72);
+  const view = new DataView(output.buffer);
+  view.setUint16(0, metadata.srcWidth, true);
+  view.setUint16(2, metadata.srcHeight, true);
+  view.setUint16(4, metadata.tileWidth, true);
+  view.setUint16(6, metadata.tileHeight, true);
+  view.setUint16(8, metadata.tileCount, true);
+  view.setUint16(10, metadata.sectionCount, true);
+  view.setUint8(12, metadata.frameClass);
+  view.setUint8(13, metadata.inputProfile);
+  view.setUint8(14, metadata.tileIndexMode);
+  view.setUint16(16, metadata.latencyBudgetMs, true);
+  view.setUint16(18, metadata.targetFpsX100, true);
+  view.setUint32(20, metadata.retryOfFrame, true);
+  view.setUint32(24, metadata.tileBaseId, true);
+  view.setUint32(28, metadata.cameraBytes, true);
+  view.setUint32(32, metadata.tileIndexBytes, true);
+  view.setBigUint64(40, request.operationId, true);
+  view.setUint8(52, metadata.submitMode);
+  view.setUint8(53, metadata.budgetPolicy);
+  view.setUint8(54, metadata.lossTolerancePolicy);
+  view.setUint32(56, metadata.objectRefMask, true);
+  view.setUint32(60, metadata.dependencyFrameId, true);
+  view.setUint32(64, metadata.payloadKindBitmap, true);
+  view.setUint16(68, metadata.payloadFrameCount, true);
+  return output;
+}
+
+export function encodeSubmitPayload(request: NnrpSubmitRequest): Uint8Array {
+  return concatBytes([encodeSubmitMetadata(request), request.body]);
+}
+
+export function decodeSubmitPayload(payload: Uint8Array): {
+  readonly operationId: bigint;
+  readonly metadata: NnrpSubmitMetadata;
+  readonly body: Uint8Array;
+} {
+  if (payload.byteLength < 104) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_PAYLOAD_TRUNCATED",
+      "FRAME_SUBMIT payload must contain 72-byte metadata and a BodyRegionPrelude.",
+    );
+  }
+  const view = new DataView(payload.buffer, payload.byteOffset, 72);
+  if (
+    view.getUint8(15) !== 0 || view.getUint32(36, true) !== 0 || view.getUint32(48, true) !== 0 ||
+    view.getUint8(55) !== 0 || view.getUint16(70, true) !== 0
+  ) {
+    throw submitProtocolError("NNRP_SUBMIT_METADATA_RESERVED", "FRAME_SUBMIT metadata reserved fields must be zero.");
+  }
+  const metadata: NnrpSubmitMetadata = {
+    srcWidth: view.getUint16(0, true),
+    srcHeight: view.getUint16(2, true),
+    tileWidth: view.getUint16(4, true),
+    tileHeight: view.getUint16(6, true),
+    tileCount: view.getUint16(8, true),
+    sectionCount: view.getUint16(10, true),
+    frameClass: view.getUint8(12),
+    inputProfile: view.getUint8(13) as NnrpTensorInputProfile,
+    tileIndexMode: view.getUint8(14) as NnrpTileIndexMode,
+    latencyBudgetMs: view.getUint16(16, true),
+    targetFpsX100: view.getUint16(18, true),
+    retryOfFrame: view.getUint32(20, true),
+    tileBaseId: view.getUint32(24, true),
+    cameraBytes: view.getUint32(28, true),
+    tileIndexBytes: view.getUint32(32, true),
+    submitMode: view.getUint8(52) as NnrpSubmitMode,
+    budgetPolicy: view.getUint8(53),
+    lossTolerancePolicy: view.getUint8(54),
+    objectRefMask: view.getUint32(56, true),
+    dependencyFrameId: view.getUint32(60, true),
+    payloadKindBitmap: view.getUint32(64, true),
+    payloadFrameCount: view.getUint16(68, true),
+  };
+  return {
+    operationId: view.getBigUint64(40, true),
+    metadata,
+    body: payload.slice(72),
+  };
+}
+
 export function normalizeSubmitRequest(
   request: NnrpSubmitRequest,
   options: NormalizeSubmitRequestOptions = {},
 ): NnrpNormalizedSubmitRequest {
-  validateSubmitRequestShape(request, options);
-
-  const copyPayloads = options.copyPayloads ?? true;
+  validateSubmitRequestShape(request);
+  const body = options.copyPayloads ?? true ? request.body.slice() : request.body;
   return {
     operationId: request.operationId,
     frameId: request.frameId,
-    ...(request.payload === undefined ? {} : { payload: normalizeBinaryPayload(request.payload, copyPayloads) }),
-    ...(request.tensors === undefined ? {} : {
-      tensors: request.tensors.map((section) => ({
-        payload: normalizeBinaryPayload(section.payload, copyPayloads),
-        ...(section.codecId === undefined ? {} : { codecId: section.codecId }),
-      })),
-    }),
-    ...(request.inputProfile === undefined ? {} : { inputProfile: request.inputProfile }),
-    ...(request.submitMode === undefined ? {} : { submitMode: request.submitMode }),
-    ...(request.cacheKey === undefined ? {} : { cacheKey: request.cacheKey }),
-    ...(request.descriptor === undefined ? {} : { descriptor: createPayloadDescriptor(request.descriptor) }),
-    ...(request.metadata === undefined ? {} : { metadata: normalizeMetadataMap(request.metadata) }),
+    header: { ...request.header },
+    metadata: { ...request.metadata },
+    body,
   };
 }
 
@@ -2250,10 +2734,272 @@ function createCacheMetadata(metadata: NnrpCacheMetadata): NnrpCacheMetadata {
   };
 }
 
-function validateSubmitRequestShape(
-  request: NnrpSubmitRequest,
-  options: NormalizeSubmitRequestOptions,
+function normalizedSubmitFromParts(
+  identity: NnrpSubmitIdentity,
+  metadata: NnrpSubmitMetadata,
+  body: Uint8Array,
+): NnrpSubmitRequest {
+  const request: NnrpSubmitRequest = {
+    operationId: identity.operationId,
+    frameId: identity.frameId,
+    header: { ...identity.header },
+    metadata,
+    body,
+  };
+  validateSubmitRequestShape(request);
+  return request;
+}
+
+function validateSubmitIdentity(identity: NnrpSubmitIdentity): void {
+  if (identity.operationId <= 0n || identity.operationId > 0xffff_ffff_ffff_ffffn) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_OPERATION_ID_INVALID",
+      "Submit request operationId must be between 1 and 2^64-1.",
+    );
+  }
+  if (!Number.isSafeInteger(identity.frameId) || identity.frameId <= 0 || identity.frameId > 0xffff_ffff) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_FRAME_ID_INVALID",
+      "Submit request frameId must be between 1 and 2^32-1.",
+    );
+  }
+  assertUnsigned("header.flags", identity.header.flags, 0x3f);
+  assertUnsigned("header.viewId", identity.header.viewId, 0xffff);
+  assertUnsigned("header.routeId", identity.header.routeId, 0xffff);
+  assertSubmitU64("header.traceId", identity.header.traceId);
+}
+
+function validateSubmitPolicy(policy: NnrpSubmitPolicy): void {
+  assertUnsigned("policy.frameClass", policy.frameClass, 0xff);
+  assertUnsigned("policy.latencyBudgetMs", policy.latencyBudgetMs, 0xffff);
+  assertUnsigned("policy.targetFpsX100", policy.targetFpsX100, 0xffff);
+  assertUnsigned("policy.retryOfFrame", policy.retryOfFrame, 0xffff_ffff);
+  assertUnsigned("policy.budgetPolicy", policy.budgetPolicy, 0x0f);
+  if (![0, 1, 2, 3, 0xff].includes(policy.lossTolerancePolicy)) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_LOSS_TOLERANCE_INVALID",
+      "Submit lossTolerancePolicy is not a frozen wire value.",
+    );
+  }
+  assertUnsigned("policy.dependencyFrameId", policy.dependencyFrameId, 0xffff_ffff);
+}
+
+function validateSubmitReference(
+  reference: NnrpObjectReferenceBlock | undefined,
+  expectedKind: NnrpCacheObjectKind,
+  slot: string,
 ): void {
+  if (reference === undefined) return;
+  if (reference.objectKind !== expectedKind) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_REFERENCE_SLOT_INVALID",
+      `Submit ${slot} reference uses the wrong object kind.`,
+    );
+  }
+  assertUnsigned(`${slot}.refFlags`, reference.refFlags, 0xffff);
+  assertUnsigned(`${slot}.cacheNamespace`, reference.cacheNamespace, 0xffff_ffff);
+  assertSubmitU64(`${slot}.cacheKeyHi`, reference.cacheKeyHi);
+  assertSubmitU64(`${slot}.cacheKeyLo`, reference.cacheKeyLo);
+}
+
+function encodeSubmitObjectReference(reference: NnrpObjectReferenceBlock): Uint8Array {
+  const output = new Uint8Array(24);
+  const view = new DataView(output.buffer);
+  view.setUint16(0, reference.objectKind, true);
+  view.setUint16(2, reference.refFlags, true);
+  view.setUint32(4, reference.cacheNamespace, true);
+  view.setBigUint64(8, reference.cacheKeyHi, true);
+  view.setBigUint64(16, reference.cacheKeyLo, true);
+  return output;
+}
+
+function appendInlineSubmitObject(target: number[], objectKind: NnrpCacheObjectKind, payload: Uint8Array): void {
+  checkedSubmitU32(payload.byteLength, "inline object bytes");
+  const header = new Uint8Array(16);
+  const view = new DataView(header.buffer);
+  view.setUint16(0, objectKind, true);
+  view.setUint32(8, payload.byteLength, true);
+  target.push(...header, ...payload);
+  while (target.length % 8 !== 0) target.push(0);
+}
+
+function encodeSubmitTileIndices(
+  tileIds: readonly number[],
+  mode: NnrpTileIndexMode,
+  tileBaseId: number,
+): Uint8Array {
+  for (const tileId of tileIds) assertUnsigned("tileId", tileId, 0xffff);
+  switch (mode) {
+    case NnrpTileIndexMode.DenseRange:
+      tileIds.forEach((tileId, index) => {
+        if (tileId !== tileBaseId + index) {
+          throw submitProtocolError(
+            "NNRP_DENSE_TILE_IDS_INVALID",
+            "Dense tile ids must be contiguous from tileBaseId.",
+          );
+        }
+      });
+      return new Uint8Array();
+    case NnrpTileIndexMode.RawU16: {
+      const output = new Uint8Array(tileIds.length * 2);
+      const view = new DataView(output.buffer);
+      tileIds.forEach((tileId, index) => view.setUint16(index * 2, tileId, true));
+      return output;
+    }
+    case NnrpTileIndexMode.DeltaU16: {
+      const output = new Uint8Array(tileIds.length * 2);
+      const view = new DataView(output.buffer);
+      let previous: number | undefined;
+      tileIds.forEach((tileId, index) => {
+        if (previous !== undefined && tileId <= previous) {
+          throw submitProtocolError(
+            "NNRP_DELTA_TILE_IDS_INVALID",
+            "Delta tile ids must be strictly increasing.",
+          );
+        }
+        const delta = previous === undefined ? tileId : tileId - previous;
+        assertUnsigned("tileId delta", delta, 0xffff);
+        view.setUint16(index * 2, delta, true);
+        previous = tileId;
+      });
+      return output;
+    }
+    case NnrpTileIndexMode.Bitset: {
+      for (let index = 1; index < tileIds.length; index += 1) {
+        if (tileIds[index - 1]! >= tileIds[index]!) {
+          throw submitProtocolError(
+            "NNRP_BITSET_TILE_IDS_INVALID",
+            "Bitset tile ids must be strictly increasing.",
+          );
+        }
+      }
+      const output = new Uint8Array(tileIds.length === 0 ? 0 : Math.floor(tileIds[tileIds.length - 1]! / 8) + 1);
+      for (const tileId of tileIds) output[Math.floor(tileId / 8)]! |= 1 << (tileId % 8);
+      return output;
+    }
+    default:
+      throw submitProtocolError("NNRP_TILE_INDEX_MODE_INVALID", "Unknown tile index mode.");
+  }
+}
+
+function encodeSubmitTensorSections(sections: readonly NnrpTensorSection[], tileCount: number): Uint8Array {
+  const table: number[] = [];
+  let previousRole: number | undefined;
+  for (const section of sections) {
+    assertUnsigned("section.roleId", section.roleId, 0xffff);
+    if (previousRole !== undefined && section.roleId <= previousRole) {
+      throw submitProtocolError(
+        "NNRP_TENSOR_SECTION_ORDER_INVALID",
+        "Tensor sections must be strictly ordered by roleId.",
+      );
+    }
+    previousRole = section.roleId;
+    assertUnsigned("section.defaultCodecId", section.defaultCodecId, 0xff);
+    assertUnsigned("section.dtypeId", section.dtypeId, 0xff);
+    assertUnsigned("section.layoutId", section.layoutId, 0xff);
+    assertUnsigned("section.scalePolicy", section.scalePolicy, 0xff);
+    assertUnsigned("section.elementCountPerTile", section.elementCountPerTile, 0xffff_ffff);
+    assertUnsigned("section.payloadStrideBytes", section.payloadStrideBytes, 0xffff_ffff);
+    if (section.tilePayloads.length !== tileCount) {
+      throw submitProtocolError(
+        "NNRP_TENSOR_TILE_PAYLOAD_COUNT_INVALID",
+        "Tensor section tile payload count must match tile count.",
+      );
+    }
+    if (section.codecIds.length !== 0 && section.codecIds.length !== tileCount) {
+      throw submitProtocolError(
+        "NNRP_TENSOR_CODEC_COUNT_INVALID",
+        "Tensor codec id count must be zero or match tile count.",
+      );
+    }
+    section.codecIds.forEach((codec) => assertUnsigned("section.codecId", codec, 0xff));
+    const mixedCodec = section.codecIds.some((codec) => codec !== section.defaultCodecId);
+    const codecTable = mixedCodec ? new Uint8Array(section.codecIds) : new Uint8Array();
+    const lengthTable = new Uint8Array(tileCount * 4);
+    const lengthView = new DataView(lengthTable.buffer);
+    const payloadParts: Uint8Array[] = [];
+    section.tilePayloads.forEach((value, index) => {
+      const payload = normalizeBinaryPayload(value, true);
+      lengthView.setUint32(index * 4, checkedSubmitU32(payload.byteLength, "tensor tile payload bytes"), true);
+      if (section.payloadStrideBytes === 0) {
+        payloadParts.push(payload);
+      } else {
+        if (payload.byteLength > section.payloadStrideBytes) {
+          throw submitProtocolError(
+            "NNRP_TENSOR_STRIDE_INVALID",
+            "Tensor tile payload exceeds payloadStrideBytes.",
+          );
+        }
+        const padded = new Uint8Array(section.payloadStrideBytes);
+        padded.set(payload);
+        payloadParts.push(padded);
+      }
+    });
+    const payload = concatBytes(payloadParts);
+    const descriptor = new Uint8Array(32);
+    const descriptorView = new DataView(descriptor.buffer);
+    descriptorView.setUint16(0, section.roleId, true);
+    descriptorView.setUint8(2, section.defaultCodecId);
+    descriptorView.setUint8(3, section.dtypeId);
+    descriptorView.setUint8(4, section.layoutId);
+    descriptorView.setUint8(5, section.scalePolicy);
+    descriptorView.setUint16(6, (mixedCodec ? 1 : 0) | (section.payloadStrideBytes === 0 ? 0 : 2), true);
+    descriptorView.setUint32(8, section.elementCountPerTile, true);
+    descriptorView.setUint32(12, codecTable.byteLength, true);
+    descriptorView.setUint32(16, lengthTable.byteLength, true);
+    descriptorView.setUint32(20, checkedSubmitU32(payload.byteLength, "tensor section payload bytes"), true);
+    descriptorView.setUint32(24, section.payloadStrideBytes, true);
+    while (table.length % 8 !== 0) table.push(0);
+    table.push(...descriptor, ...codecTable, ...lengthTable, ...payload);
+  }
+  return new Uint8Array(table);
+}
+
+function encodeSubmitBody(
+  inlineRegion: Uint8Array,
+  referenceRegion: Uint8Array,
+  descriptorRegion: Uint8Array,
+  payloadRegion: Uint8Array,
+): Uint8Array {
+  const prelude = new Uint8Array(32);
+  const view = new DataView(prelude.buffer);
+  view.setUint32(0, checkedSubmitU32(inlineRegion.byteLength, "inline object region"), true);
+  view.setUint32(4, checkedSubmitU32(referenceRegion.byteLength, "object reference region"), true);
+  view.setUint32(8, checkedSubmitU32(descriptorRegion.byteLength, "typed descriptor region"), true);
+  view.setUint32(12, checkedSubmitU32(payloadRegion.byteLength, "typed payload region"), true);
+  return concatBytes([prelude, inlineRegion, referenceRegion, descriptorRegion, payloadRegion]);
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const length = parts.reduce((total, part) => total + part.byteLength, 0);
+  checkedSubmitU32(length, "submit payload bytes");
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.byteLength;
+  }
+  return output;
+}
+
+function checkedSubmitU32(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
+    throw submitProtocolError("NNRP_SUBMIT_LENGTH_OVERFLOW", `${name} must fit in u32.`);
+  }
+  return value;
+}
+
+function assertSubmitU64(name: string, value: bigint): void {
+  if (value < 0n || value > 0xffff_ffff_ffff_ffffn) {
+    throw submitProtocolError("NNRP_SUBMIT_U64_INVALID", `${name} is outside its unsigned wire range.`);
+  }
+}
+
+function submitProtocolError(code: string, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({ code, message, source: "core", retryable: false });
+}
+
+function validateSubmitRequestShape(request: NnrpSubmitRequest): void {
   if (request.operationId <= 0n || request.operationId > 0xffff_ffff_ffff_ffffn) {
     throw new NnrpProtocolError({
       code: "NNRP_SUBMIT_OPERATION_ID_INVALID",
@@ -2263,38 +3009,74 @@ function validateSubmitRequestShape(
     });
   }
 
-  if (!Number.isSafeInteger(request.frameId) || request.frameId < 0) {
+  if (!Number.isSafeInteger(request.frameId) || request.frameId <= 0 || request.frameId > 0xffff_ffff) {
     throw new NnrpProtocolError({
       code: "NNRP_SUBMIT_FRAME_ID_INVALID",
-      message: "Submit request frameId must be a non-negative safe integer.",
+      message: "Submit request frameId must be between 1 and 2^32-1.",
       source: "core",
       retryable: false,
     });
   }
 
-  if (request.inputProfile !== undefined) {
-    validateInputProfile(request.inputProfile, options.strictProfiles ?? true);
+  validateSubmitIdentity({ operationId: request.operationId, frameId: request.frameId, header: request.header });
+  const metadata = request.metadata;
+  assertUnsigned("metadata.srcWidth", metadata.srcWidth, 0xffff);
+  assertUnsigned("metadata.srcHeight", metadata.srcHeight, 0xffff);
+  assertUnsigned("metadata.tileWidth", metadata.tileWidth, 0xffff);
+  assertUnsigned("metadata.tileHeight", metadata.tileHeight, 0xffff);
+  assertUnsigned("metadata.tileCount", metadata.tileCount, 0xffff);
+  assertUnsigned("metadata.sectionCount", metadata.sectionCount, 0xffff);
+  assertUnsigned("metadata.frameClass", metadata.frameClass, 0xff);
+  assertUnsigned("metadata.inputProfile", metadata.inputProfile, 2);
+  assertUnsigned("metadata.tileIndexMode", metadata.tileIndexMode, 3);
+  assertUnsigned("metadata.latencyBudgetMs", metadata.latencyBudgetMs, 0xffff);
+  assertUnsigned("metadata.targetFpsX100", metadata.targetFpsX100, 0xffff);
+  assertUnsigned("metadata.retryOfFrame", metadata.retryOfFrame, 0xffff_ffff);
+  assertUnsigned("metadata.tileBaseId", metadata.tileBaseId, 0xffff_ffff);
+  assertUnsigned("metadata.cameraBytes", metadata.cameraBytes, 0xffff_ffff);
+  assertUnsigned("metadata.tileIndexBytes", metadata.tileIndexBytes, 0xffff_ffff);
+  assertUnsigned("metadata.submitMode", metadata.submitMode, 2);
+  assertUnsigned("metadata.budgetPolicy", metadata.budgetPolicy, 0x0f);
+  if (![0, 1, 2, 3, 0xff].includes(metadata.lossTolerancePolicy)) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_LOSS_TOLERANCE_INVALID",
+      "Submit metadata lossTolerancePolicy is not a frozen wire value.",
+    );
   }
-
-  if (request.cacheKey !== undefined) {
-    validateCacheKey(request.cacheKey);
+  assertUnsigned("metadata.objectRefMask", metadata.objectRefMask, 0x0f);
+  assertUnsigned("metadata.dependencyFrameId", metadata.dependencyFrameId, 0xffff_ffff);
+  if (metadata.payloadKindBitmap === 0 || (metadata.payloadKindBitmap & ~0x7f) !== 0) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_PAYLOAD_BITMAP_INVALID",
+      "Submit payloadKindBitmap must contain current payload kinds.",
+    );
   }
-
-  if (request.metadata !== undefined) {
-    normalizeMetadataMap(request.metadata);
+  assertUnsigned("metadata.payloadFrameCount", metadata.payloadFrameCount, 0xffff);
+  if (
+    (metadata.payloadKindBitmap & NnrpPayloadKind.Tensor) === 0 && (
+      metadata.srcWidth !== 0 || metadata.srcHeight !== 0 || metadata.tileWidth !== 0 ||
+      metadata.tileHeight !== 0 || metadata.tileCount !== 0 || metadata.sectionCount !== 0 ||
+      metadata.tileBaseId !== 0 || metadata.cameraBytes !== 0 || metadata.tileIndexBytes !== 0 ||
+      metadata.inputProfile !== NnrpTensorInputProfile.Unspecified
+    )
+  ) {
+    throw submitProtocolError(
+      "NNRP_NON_TENSOR_FIELDS_INVALID",
+      "Non-tensor submits must clear tensor tile fields.",
+    );
   }
-
-  if (request.tensors !== undefined) {
-    for (const section of request.tensors) {
-      if (section.codecId !== undefined && (!Number.isSafeInteger(section.codecId) || section.codecId < 0)) {
-        throw new NnrpProtocolError({
-          code: "NNRP_TENSOR_CODEC_ID_INVALID",
-          message: "Tensor section codecId must be a non-negative safe integer.",
-          source: "core",
-          retryable: false,
-        });
-      }
-    }
+  if (!(request.body instanceof Uint8Array) || request.body.byteLength < 32) {
+    throw submitProtocolError("NNRP_SUBMIT_BODY_INVALID", "Submit body must contain a BodyRegionPrelude.");
+  }
+  const prelude = new DataView(request.body.buffer, request.body.byteOffset, 32);
+  if (prelude.getUint32(24, true) !== 0 || prelude.getUint32(28, true) !== 0) {
+    throw submitProtocolError("NNRP_SUBMIT_BODY_RESERVED", "Submit body prelude reserved fields must be zero.");
+  }
+  const regionBytes = prelude.getUint32(0, true) + prelude.getUint32(4, true) +
+    prelude.getUint32(8, true) + prelude.getUint32(12, true) + prelude.getUint32(16, true) +
+    prelude.getUint32(20, true);
+  if (regionBytes !== request.body.byteLength - 32) {
+    throw submitProtocolError("NNRP_SUBMIT_BODY_LENGTH_INVALID", "Submit body region lengths do not cover the body.");
   }
 }
 

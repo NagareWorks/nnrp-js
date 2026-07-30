@@ -10,6 +10,7 @@ import {
   decodeCacheInvalidateMetadata,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
+  decodeSubmitPayload,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
@@ -28,6 +29,7 @@ import {
   type NnrpRuntimeFrameEvent,
   type NnrpServerProviderRoutes,
   type NnrpSessionFlowControlOptions,
+  type NnrpSubmitRequest,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
   type NnrpTransportCandidateReadiness,
@@ -205,8 +207,8 @@ function objectLifecycleError(objectId: bigint, detail: string): NnrpProtocolErr
   });
 }
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
-const EXPECTED_ABI_MAJOR = 3;
-const EXPECTED_ABI_MINOR = 0;
+const EXPECTED_ABI_MAJOR = 4;
+const EXPECTED_ABI_MINOR = 3;
 const EXPECTED_ABI_PATCH = 0;
 const NATIVE_RUNTIME_CAPABILITIES = [
   "cache",
@@ -299,10 +301,17 @@ interface InternalNativeHandle {
 interface InternalRoleEvent {
   readonly kind: number;
   readonly messageType: number;
+  readonly versionMajor: number;
+  readonly wireFormat: number;
+  readonly headerFlags: number;
+  readonly wireSessionId: number;
   readonly connection: InternalNativeHandle;
   readonly session: InternalNativeHandle;
   readonly operation: InternalNativeHandle;
   readonly frameId: number;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
   readonly payload: Uint8Array;
 }
 
@@ -1197,27 +1206,23 @@ function decodeServerSubmitEvent(event: InternalRoleEvent, sessionId: string): N
       retryable: false,
     });
   }
-  const view = new DataView(event.payload.buffer, event.payload.byteOffset, event.payload.byteLength);
-  const payloadKind = view.getUint32(64, true);
-  const inputProfile = payloadKind === 0x01
-    ? "tensor"
-    : payloadKind === 0x02
-    ? "token"
-    : payloadKind === 0x10
-    ? "structured_event"
-    : payloadKind === 0x20
-    ? "tool_delta"
-    : undefined;
+  const decoded = decodeSubmitPayload(event.payload);
+  const submit: NnrpSubmitRequest = {
+    operationId: decoded.operationId,
+    frameId: event.frameId,
+    header: {
+      flags: event.headerFlags,
+      viewId: event.viewId,
+      routeId: event.routeId,
+      traceId: event.traceId,
+    },
+    metadata: decoded.metadata,
+    body: decoded.body,
+  };
   return {
     type: "submit",
     sessionId,
-    submit: {
-      operationId: view.getBigUint64(40, true),
-      frameId: event.frameId,
-      payload: event.payload.slice(FRAME_SUBMIT_METADATA_SIZE),
-      ...(inputProfile === undefined ? {} : { inputProfile }),
-      submitMode: view.getUint8(52) === 1 ? "object-reference" : "inline",
-    },
+    submit,
   };
 }
 

@@ -15,6 +15,12 @@ npm install @nnrp/browser-client @nnrp/transport-websocket
 ```
 
 ```ts
+import {
+  createTypedPayloadSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpPayloadKind,
+} from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 
@@ -28,13 +34,15 @@ const client = runtime.connect({
 });
 const session = client.openSession({ inputProfile: "structured_event" });
 
-await session.submit({
-  operationId: 1n,
-  frameId: 1,
-  payload: new TextEncoder().encode("hello"),
-  inputProfile: "structured_event",
-  submitMode: "inline",
-});
+await session.submit(createTypedPayloadSubmitRequest({
+  identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
+  policy: NNRP_DEFAULT_SUBMIT_POLICY,
+  frames: [{
+    profileId: 4,
+    payloadKind: NnrpPayloadKind.StructuredEvent,
+    payload: new TextEncoder().encode("hello"),
+  }],
+}));
 
 await session.close();
 await client.close();

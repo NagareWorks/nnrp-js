@@ -1,4 +1,5 @@
 import { NnrpNativeBindingUnavailableError, openNativeClient } from "@nnrp/native-client";
+import { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY } from "@nnrp/core";
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
@@ -6,19 +7,17 @@ const client = await openNativeClient({
   endpoint: "nnrp://127.0.0.1:4433/session/default",
   transports: [createTcpTransportProvider(), createQuicTransportProvider()],
   transportPolicy: "auto",
-  sessionDefaults: { inputProfile: "tensor", metadata: { app: "nnrp-native-client-example" } },
+  sessionDefaults: { inputProfile: "token", metadata: { app: "nnrp-native-client-example" } },
 });
 
 const session = client.openSession();
 
 try {
-  const result = await session.submit({
-    operationId: 1n,
-    frameId: 1,
-    payload: new Uint8Array([1, 2, 3, 4]),
-    inputProfile: "tensor",
-    submitMode: "inline",
-  });
+  const result = await session.submit(createTokenSubmitRequest({
+    identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload: new Uint8Array([1, 2, 3, 4]) }],
+  }));
 
   console.log("NNRP result", result.frameId, result.payload?.byteLength ?? 0);
 } catch (error) {

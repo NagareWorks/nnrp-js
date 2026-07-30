@@ -4,13 +4,17 @@ import {
   decodeCacheInvalidateMetadata,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
+  decodeTypedPayloadDescriptor,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeTypedPayloadDescriptor,
   ErrorScope,
   MemoryLocationHint,
   NnrpMessageType,
+  NnrpPayloadKind,
+  NnrpTypedPayloadDescriptorFlags,
   ObjectReleaseReason,
   OwnershipHint,
   type RuntimeControlMetadata,
@@ -116,6 +120,57 @@ const CASE_EXECUTORS: Readonly<
       await verifyNativeRuntimeFrame();
     }
     return { case_id: "l0.header.fixed_shape.golden", action: "native-runtime-frame-roundtrip", header_bytes: 40 };
+  },
+  "l0.typed_payload.descriptor.current.golden": () => {
+    const descriptor = {
+      profileId: 2,
+      payloadKind: NnrpPayloadKind.TokenChunk,
+      descriptorFlags: NnrpTypedPayloadDescriptorFlags.Partial,
+      schemaId: 0x1001,
+      schemaVersion: 3,
+      streamSemantics: 2,
+      offset: 8,
+      length: 24,
+    };
+    const encoded = encodeTypedPayloadDescriptor(descriptor);
+    const expected = Uint8Array.from([
+      0x02,
+      0x00,
+      0x02,
+      0x02,
+      0x01,
+      0x10,
+      0x00,
+      0x00,
+      0x03,
+      0x00,
+      0x00,
+      0x00,
+      0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x08,
+      0x00,
+      0x00,
+      0x00,
+      0x18,
+      0x00,
+      0x00,
+      0x00,
+    ]);
+    if (!encoded.every((value, index) => value === expected[index])) {
+      throw new Error("current typed payload descriptor golden bytes changed");
+    }
+    const decoded = decodeTypedPayloadDescriptor(encoded);
+    if (JSON.stringify(decoded) !== JSON.stringify(descriptor)) {
+      throw new Error("current typed payload descriptor roundtrip changed");
+    }
+    return {
+      case_id: "l0.typed_payload.descriptor.current.golden",
+      action: "typed-payload-descriptor-roundtrip",
+      descriptor_bytes: encoded.length,
+    };
   },
   "l1.control.cancel-abort": () => {
     const frames = [

@@ -1,23 +1,39 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 
 const releaseWorkflow = await Deno.readTextFile(".github/workflows/release.yml");
+const ciWorkflow = await Deno.readTextFile(".github/workflows/ci.yml");
+const denoConfig = await Deno.readTextFile("deno.json");
 const artifactPreparation = await Deno.readTextFile("scripts/prepare-rust-artifact-packages.ts");
 const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "4cd50456a317bb0ae7a7726b8f3d9026c8efb7ec";
+const CONFORMANCE_REVISION = "ef031b8a77c59f33068cd20e584a7f802347a4ff";
 
-Deno.test("release workflow and local preparation pin Rust preview4.19", () => {
-  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.19/g)?.length ?? 0) >= 3, true);
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.19"');
-  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.19"');
+Deno.test("release workflow and local preparation pin Rust preview4.20", () => {
+  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.20/g)?.length ?? 0) >= 3, true);
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.20"');
+  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.20"');
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.17"), false);
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.18"), false);
   assertEquals(artifactPreparation.includes("1.0.0-preview.4.17"), false);
   assertEquals(sdkReporting.includes("1.0.0-preview.4.17"), false);
   assertStringIncludes(dryRunArtifacts, "await writeJson(`${outputDir}/rust-artifacts.json`, rustArtifacts)");
   assertStringIncludes(dryRunArtifacts, 'readRequiredString(manifest, "source_archive_sha256", manifestPath)');
+});
+
+Deno.test("CI consumes an immutable successful Rust workflow artifact without weakening release inputs", () => {
+  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "30557000535"');
+  assertStringIncludes(
+    ciWorkflow,
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: 9a6ac67081aa490ec48e272b706fcdd6d168ff8c",
+  );
+  assertStringIncludes(artifactPreparation, "run.headSha !== expectedCommit");
+  assertStringIncludes(artifactPreparation, 'run.status !== "completed" || run.conclusion !== "success"');
+  assertStringIncludes(artifactPreparation, "nnrp-rs-release-${artifactVersion}");
+  assertStringIncludes(denoConfig, "NNRP_JS_RUST_ARTIFACT_RUN_ID,NNRP_JS_RUST_ARTIFACT_COMMIT");
+  assertEquals(releaseWorkflow.includes("NNRP_JS_RUST_ARTIFACT_RUN_ID"), false);
+  assertEquals(releaseWorkflow.includes("NNRP_JS_RUST_ARTIFACT_COMMIT"), false);
 });
 
 Deno.test("generated Rust artifacts stay out of source control for every package owner", () => {

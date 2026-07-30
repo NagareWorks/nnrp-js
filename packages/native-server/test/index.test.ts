@@ -2,12 +2,16 @@ import {
   CacheMissReason,
   CacheReuseScope,
   createBackendNativeManifest,
+  createTokenSubmitRequest,
   decodeRuntimeObjectMetadata,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
+  encodeSubmitPayload,
   ErrorScope,
   MemoryLocationHint,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpCapabilityError,
   NnrpMessageType,
   type NnrpNativeTransportBinding,
@@ -991,10 +995,11 @@ function roleRuntimeEvent(messageType: NnrpMessageType, payload: Uint8Array) {
 }
 
 function roleSubmitEvent(operationId: bigint, frameId: number) {
-  const payload = new Uint8Array(72);
-  const view = new DataView(payload.buffer);
-  view.setBigUint64(40, operationId, true);
-  view.setUint32(64, 0x40, true);
+  const payload = encodeSubmitPayload(createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload: new Uint8Array() }],
+  }));
   return {
     ...roleRuntimeEvent(NnrpMessageType.FrameSubmit, payload),
     kind: 5,
@@ -1144,8 +1149,8 @@ function fakeTransportBinding(kind: "tcp" | "quic"): NnrpNativeTransportBinding 
 
 function preview4RuntimeCapabilities(): NnrpNativeRuntimeCapabilities {
   return {
-    abiMajor: 3,
-    abiMinor: 0,
+    abiMajor: 4,
+    abiMinor: 3,
     abiPatch: 0,
     protocolMajor: 1,
     protocolWireFormat: 0,

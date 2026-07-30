@@ -13,6 +13,7 @@ import {
   type NnrpRuntimeEvent,
   type NnrpRuntimeFrameEvent,
   type NnrpSessionPatchRequest,
+  type NnrpSubmitHeaderContext,
   type NnrpTransportConnection,
   type ObjectDeltaMetadata,
   type ObjectDescriptorMetadata,
@@ -52,7 +53,14 @@ export interface BrowserRoleEventPacket {
 
 interface BrowserClientRoleBinding {
   readonly sessionId: number;
-  submitNoWait(frameId: number, payload: Uint8Array): Promise<number>;
+  submitNoWait(
+    frameId: number,
+    headerFlags: number,
+    viewId: number,
+    routeId: number,
+    traceId: bigint,
+    payload: Uint8Array,
+  ): Promise<number>;
   sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
   patchSession(metadata: Uint8Array): Promise<Uint8Array>;
   awaitEvent(): Promise<BrowserRoleEventPacket>;
@@ -84,7 +92,7 @@ export interface BrowserWasmModule {
 
 export interface BrowserWasmRole {
   readonly sessionId: number;
-  submitNoWait(frameId: number, payload: Uint8Array): Promise<bigint>;
+  submitNoWait(frameId: number, header: NnrpSubmitHeaderContext, payload: Uint8Array): Promise<bigint>;
   sendRuntimeFrame(messageType: NnrpMessageType, frameId: number, payload: Uint8Array): Promise<void>;
   patchSession(request: NnrpSessionPatchRequest, activeProfile: NnrpInputProfile | undefined): Promise<BrowserPatchAck>;
   awaitEvent(sessionId: string): Promise<NnrpRuntimeEvent>;
@@ -192,10 +200,18 @@ export async function openBrowserWasmRole(
   });
   return {
     sessionId: binding.sessionId,
-    submitNoWait: async (frameId, payload) =>
+    submitNoWait: async (frameId, header, payload) =>
       BigInt(
         await withCallbackError(
-          () => binding.submitNoWait(frameId, payload),
+          () =>
+            binding.submitNoWait(
+              frameId,
+              header.flags,
+              header.viewId,
+              header.routeId,
+              header.traceId,
+              payload,
+            ),
           () => callbackError,
           resetCallbackError,
         ),

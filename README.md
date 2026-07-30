@@ -50,6 +50,7 @@ npm install @nnrp/native-client @nnrp/transport-tcp
 ```
 
 ```ts
+import { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY } from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
@@ -59,14 +60,12 @@ const client = await openNativeClient({
   transportPolicy: "auto",
 });
 
-const session = client.openSession({ inputProfile: "tensor" });
-const result = await session.submit({
-  operationId: 1n,
-  frameId: 1,
-  payload: new Uint8Array([1, 2, 3]),
-  inputProfile: "tensor",
-  submitMode: "inline",
-});
+const session = client.openSession({ inputProfile: "token" });
+const result = await session.submit(createTokenSubmitRequest({
+  identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
+  policy: NNRP_DEFAULT_SUBMIT_POLICY,
+  chunks: [{ payload: new Uint8Array([1, 2, 3]) }],
+}));
 
 await session.close();
 await client.close();

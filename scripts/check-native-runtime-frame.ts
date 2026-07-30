@@ -1,4 +1,9 @@
-import { RuntimeRole } from "@nnrp/core";
+import {
+  createTokenSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
+  RuntimeRole,
+} from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
@@ -39,12 +44,7 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
       transportPolicy: "force-tcp",
     });
     clientSession = client.openSession({ sessionId: "native-runtime-frame-smoke", inputProfile: "token" });
-    const bootstrapResult = clientSession.submit({
-      operationId: 1n,
-      frameId: 1,
-      payload: new Uint8Array([0x62, 0x6f, 0x6f, 0x74]),
-      inputProfile: "token",
-    });
+    const bootstrapResult = clientSession.submit(tokenSubmit(1n, 1, new Uint8Array([0x62, 0x6f, 0x6f, 0x74])));
     serverSession = await accepting;
     const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
     if (bootstrapEvent.type !== "submit") {
@@ -53,12 +53,7 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
     await serverSession.sendResult({ frameId: bootstrapEvent.submit.frameId, payload: new Uint8Array() });
     await bootstrapResult;
 
-    await clientSession.submitNoWait({
-      operationId: 2n,
-      frameId: 2,
-      payload: new Uint8Array([0x77, 0x6f, 0x72, 0x6b]),
-      inputProfile: "token",
-    });
+    await clientSession.submitNoWait(tokenSubmit(2n, 2, new Uint8Array([0x77, 0x6f, 0x72, 0x6b])));
     const pendingSubmit = await serverSession.receive({ timeoutMillis: 5_000 });
     if (pendingSubmit.type !== "submit") {
       throw new Error(`expected pending submit event, got ${pendingSubmit.type}`);
@@ -92,6 +87,14 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
     await client?.runtime.close().catch(() => undefined);
     await serverRuntime.close().catch(() => undefined);
   }
+}
+
+function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
+  return createTokenSubmitRequest({
+    identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload }],
+  });
 }
 
 async function reserveTcpEndpoint(): Promise<string> {
