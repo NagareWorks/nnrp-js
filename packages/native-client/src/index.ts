@@ -561,6 +561,15 @@ class NnrpBackendRuntime {
         event.kind === EVENT_KIND_RESULT_PUSHED && event.relatedOperationId === validated.submit.operationId
       );
       if (result !== undefined) {
+        if (result.relatedFrameId !== validated.submit.frameId) {
+          throw new NnrpProtocolError({
+            code: "NNRP_OPERATION_FRAME_MISMATCH",
+            message:
+              `Operation ${validated.submit.operationId} is bound to frame ${validated.submit.frameId}, but the native result referenced frame ${result.relatedFrameId}.`,
+            source: "native",
+            retryable: false,
+          });
+        }
         const decoded = decodeClientRoleEvent(result, validated.sessionOptions.sessionId);
         if (decoded.type !== "result") throw new Error("Native result event decoding lost its terminal result kind.");
         return decoded.result;

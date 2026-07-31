@@ -918,12 +918,12 @@ function copyRoleEvent(symbols: NodeSymbols, event: NativeEvent): InternalRoleEv
       connection: requiredHandle(event.connection),
       session: requiredHandle(event.session),
       operation: requiredHandle(event.operation),
-      relatedOperationId: BigInt(event.diagnostic.related_operation_id),
+      relatedOperationId: requiredBigInt(event.diagnostic.related_operation_id, "related operation id"),
       relatedFrameId: event.diagnostic.related_frame_id,
       frameId: event.header.frame_id,
       viewId: event.header.view_id,
       routeId: event.header.route_id,
-      traceId: BigInt(event.header.trace_id),
+      traceId: requiredBigInt(event.header.trace_id, "trace id"),
       payload: copyNativeBytes(event.payload),
     };
   } finally {
@@ -1277,10 +1277,16 @@ function requiredNumber(value: unknown, label: string): number {
 }
 
 function requiredBigInt(value: unknown, label: string): bigint {
-  if ((typeof value !== "number" && typeof value !== "bigint") || value < 0) {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw transportError("NNRP_NATIVE_RESULT_INVALID", `Native ${label} is invalid.`);
+    }
+    return BigInt(value);
+  }
+  if (typeof value !== "bigint" || value < 0n) {
     throw transportError("NNRP_NATIVE_RESULT_INVALID", `Native ${label} is invalid.`);
   }
-  return BigInt(value);
+  return value;
 }
 
 function transportError(code: string, message: string, retryable = false): NnrpTransportError {

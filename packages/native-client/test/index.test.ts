@@ -589,6 +589,7 @@ Deno.test("@nnrp/native-client starts the Rust session handshake when the sessio
 Deno.test("@nnrp/native-client matches role results by protocol operation id", async () => {
   const resultPayload = new Uint8Array(65);
   resultPayload[64] = 42;
+  let openedSessions = 0;
   const roleEvent = (relatedOperationId: bigint, frameId: number, opaqueHandleId: bigint) => ({
     kind: 6,
     messageType: 0,
@@ -619,18 +620,21 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
         close: () => {},
         [CLIENT_ROLE_ADOPT]: () =>
           Promise.resolve({
-            openSession: () =>
-              Promise.resolve({
+            openSession: () => {
+              const openedSession = ++openedSessions;
+              return Promise.resolve({
                 handle: { kind: 2, id: 1n, generation: 1, flags: 0 },
                 submit: () => Promise.resolve({ kind: 4, id: 70_042n, generation: 1, flags: 0 }),
                 poll: () =>
-                  Promise.resolve([
-                    roleEvent(99n, 7, 70_099n),
-                    roleEvent(42n, 8, 70_042n),
-                  ]),
+                  Promise.resolve(
+                    openedSession === 1
+                      ? [roleEvent(99n, 7, 70_099n), roleEvent(42n, 7, 70_042n)]
+                      : [roleEvent(43n, 10, 70_043n)],
+                  ),
                 sendRuntimeFrame: () => Promise.resolve(),
                 close: () => Promise.resolve(),
-              }),
+              });
+            },
             close: () => Promise.resolve(),
           }),
       } as NnrpTransportConnection),
@@ -644,8 +648,16 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
 
   const result = await session.submit(tokenSubmit(42n, 7));
 
-  assertEquals(result.frameId, 8);
+  assertEquals(result.frameId, 7);
   assertEquals(result.payload, new Uint8Array([42]));
+
+  const mismatchSession = client.openSession({ sessionId: "operation-frame-mismatch" });
+  const mismatch = await assertRejects(
+    () => mismatchSession.submit(tokenSubmit(43n, 9)),
+    NnrpProtocolError,
+  );
+  assertEquals(mismatch.diagnostic.code, "NNRP_OPERATION_FRAME_MISMATCH");
+  await mismatchSession.close();
   await session.close();
   await client.close();
 });
