@@ -586,6 +586,70 @@ Deno.test("@nnrp/native-client starts the Rust session handshake when the sessio
   await client.close();
 });
 
+Deno.test("@nnrp/native-client matches role results by protocol operation id", async () => {
+  const resultPayload = new Uint8Array(65);
+  resultPayload[64] = 42;
+  const roleEvent = (relatedOperationId: bigint, frameId: number, opaqueHandleId: bigint) => ({
+    kind: 6,
+    messageType: 0,
+    versionMajor: 1,
+    wireFormat: 0,
+    headerFlags: 0,
+    wireSessionId: 1,
+    connection: { kind: 1, id: 1n, generation: 1, flags: 0 },
+    session: { kind: 2, id: 1n, generation: 1, flags: 0 },
+    operation: { kind: 4, id: opaqueHandleId, generation: 1, flags: 0 },
+    relatedOperationId,
+    relatedFrameId: frameId,
+    frameId,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+    payload: resultPayload,
+  });
+  const binding: NnrpNativeTransportBinding = {
+    ...fakeTransportBinding("tcp"),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "tcp",
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+        [CLIENT_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            openSession: () =>
+              Promise.resolve({
+                handle: { kind: 2, id: 1n, generation: 1, flags: 0 },
+                submit: () => Promise.resolve({ kind: 4, id: 70_042n, generation: 1, flags: 0 }),
+                poll: () =>
+                  Promise.resolve([
+                    roleEvent(99n, 7, 70_099n),
+                    roleEvent(42n, 8, 70_042n),
+                  ]),
+                sendRuntimeFrame: () => Promise.resolve(),
+                close: () => Promise.resolve(),
+              }),
+            close: () => Promise.resolve(),
+          }),
+      } as NnrpTransportConnection),
+  };
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding })],
+    transportPolicy: "force-tcp",
+  });
+  const session = client.openSession({ sessionId: "operation-id-match" });
+
+  const result = await session.submit(tokenSubmit(42n, 7));
+
+  assertEquals(result.frameId, 8);
+  assertEquals(result.payload, new Uint8Array([42]));
+  await session.close();
+  await client.close();
+});
+
 Deno.test("@nnrp/native-client rejects missing transport providers at connect time", async () => {
   const error = await assertRejects(
     () =>
@@ -663,6 +727,7 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
     ffi: {
       mode: "test",
       sendRuntimeFrame: () => {},
+      submitNoWait: ({ submit }) => submit.operationId,
       awaitEvents: () => {
         if (polled) {
           return [];
@@ -673,6 +738,7 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
     },
   });
   const session = client.openSession({ sessionId });
+  assertEquals(await session.submitNoWait(tokenSubmit(7n, 70)), 7n);
 
   await session.cancel({
     operationId: 7n,
@@ -739,7 +805,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
     diagnosticBytes: 0,
   });
   const controller = new AbortController();
-  const pending = session.submit(tokenSubmit(41n, 41), {
+  const pending = session.submit(tokenSubmit(41n, 4_101), {
     signal: controller.signal,
     timeoutMillis: 10_000,
   });
@@ -758,7 +824,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
   assertEquals(controls[2]?.metadata.controlSequence, 12n);
   assertEquals(controls[2]?.metadata.reasonCode, 1);
 
-  resolveResult?.({ frameId: 41 });
+  resolveResult?.({ frameId: 4_101 });
 });
 
 Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal listeners", async () => {
@@ -775,7 +841,7 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
       },
       submitNoWait: ({ submit }) => {
         submitCalls += 1;
-        return BigInt(submit.frameId);
+        return submit.operationId;
       },
       sendRuntimeFrame: ({ messageType, payload }) => {
         controls.push({
@@ -797,13 +863,13 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   assertEquals(submitCalls, 0);
 
   const signal = new TrackingAbortSignal();
-  assertEquals(await session.submitNoWait(tokenSubmit(52n, 52), { signal }), 52n);
+  assertEquals(await session.submitNoWait(tokenSubmit(52n, 5_202), { signal }), 52n);
   assertEquals(signal.addCount, 1);
   assertEquals(signal.removeCount, 0);
-  session.completeEvent({ type: "result", result: { frameId: 52 } });
+  session.completeEvent({ type: "result", result: { frameId: 5_202 } });
   assertEquals(signal.removeCount, 1);
 
-  assertEquals(await session.submitNoWait(tokenSubmit(53n, 53), { timeoutMillis: 5 }), 53n);
+  assertEquals(await session.submitNoWait(tokenSubmit(53n, 5_303), { timeoutMillis: 5 }), 53n);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
   assertEquals(controls[1]?.metadata.operationId, 53n);
@@ -1215,7 +1281,7 @@ function cancelledOperationEvents(sessionId: string) {
     sessionId,
   }, {
     type: "result",
-    result: { frameId: 7, payload: new Uint8Array([2]) },
+    result: { frameId: 70, payload: new Uint8Array([2]) },
     sessionId,
   }, {
     type: "progress",

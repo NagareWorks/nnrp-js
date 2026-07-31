@@ -85,6 +85,10 @@ interface NativeEvent {
   operation: NativeHandle;
   payload_owner: NativeHandle;
   payload: NativeBufferView;
+  diagnostic: {
+    related_operation_id: number | bigint;
+    related_frame_id: number;
+  };
 }
 
 interface NativeServerAcceptResult {
@@ -103,6 +107,8 @@ interface InternalRoleEvent {
   readonly connection: NativeHandle;
   readonly session: NativeHandle;
   readonly operation: NativeHandle;
+  readonly relatedOperationId: bigint;
+  readonly relatedFrameId: number;
   readonly frameId: number;
   readonly viewId: number;
   readonly routeId: number;
@@ -912,6 +918,8 @@ function copyRoleEvent(symbols: NodeSymbols, event: NativeEvent): InternalRoleEv
       connection: requiredHandle(event.connection),
       session: requiredHandle(event.session),
       operation: requiredHandle(event.operation),
+      relatedOperationId: BigInt(event.diagnostic.related_operation_id),
+      relatedFrameId: event.diagnostic.related_frame_id,
       frameId: event.header.frame_id,
       viewId: event.header.view_id,
       routeId: event.header.route_id,
