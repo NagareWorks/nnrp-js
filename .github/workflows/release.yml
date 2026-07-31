@@ -164,7 +164,7 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/release-assets
           deno task build
-          deno task artifacts:prepare
+          env -u LD_LIBRARY_PATH deno task artifacts:prepare
           deno run \
             --allow-read \
             --allow-write=artifacts/npm-publish \
@@ -187,7 +187,7 @@ jobs:
             args+=(--dry-run)
           fi
           deno task build
-          deno task artifacts:prepare
+          env -u LD_LIBRARY_PATH deno task artifacts:prepare
           deno run \
             --allow-read \
             --allow-write=artifacts/npm-publish \

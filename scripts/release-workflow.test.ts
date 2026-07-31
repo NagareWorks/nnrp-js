@@ -73,6 +73,19 @@ Deno.test("release validates the complete Preview4 adapter suite before publishi
   assertEquals(publishIndex > conformanceIndex, true);
 });
 
+Deno.test("release sanitizes Python linker state before preparing Rust artifacts", () => {
+  const artifactPreparationLines = releaseWorkflow
+    .split("\n")
+    .filter((line) => line.includes("deno task artifacts:prepare"));
+  assertEquals(artifactPreparationLines.length > 0, true);
+  for (const line of artifactPreparationLines) {
+    const sanitizeIndex = line.indexOf("env -u LD_LIBRARY_PATH");
+    const preparationIndex = line.indexOf("deno task artifacts:prepare");
+    assertEquals(sanitizeIndex >= 0, true);
+    assertEquals(preparationIndex > sanitizeIndex, true);
+  }
+});
+
 Deno.test("release publishes packages before creating the immutable git tag", () => {
   const publishIndex = releaseWorkflow.indexOf("- name: Publish packages");
   const tagIndex = releaseWorkflow.indexOf("- name: Create or verify git tag");
