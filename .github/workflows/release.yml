@@ -162,9 +162,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          unset LD_LIBRARY_PATH
           mkdir -p artifacts/release-assets
           deno task build
-          env -u LD_LIBRARY_PATH deno task artifacts:prepare
+          deno task artifacts:prepare
           deno run \
             --allow-read \
             --allow-write=artifacts/npm-publish \
@@ -182,12 +183,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          unset LD_LIBRARY_PATH
           args=(--tag "$NPM_TAG")
           if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
           fi
           deno task build
-          env -u LD_LIBRARY_PATH deno task artifacts:prepare
+          deno task artifacts:prepare
           deno run \
             --allow-read \
             --allow-write=artifacts/npm-publish \
