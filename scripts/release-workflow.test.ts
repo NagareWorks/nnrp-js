@@ -73,16 +73,23 @@ Deno.test("release validates the complete Preview4 adapter suite before publishi
   assertEquals(publishIndex > conformanceIndex, true);
 });
 
-Deno.test("release sanitizes Python linker state before preparing Rust artifacts", () => {
-  const artifactPreparationLines = releaseWorkflow
-    .split("\n")
-    .filter((line) => line.includes("deno task artifacts:prepare"));
-  assertEquals(artifactPreparationLines.length > 0, true);
-  for (const line of artifactPreparationLines) {
-    const sanitizeIndex = line.indexOf("env -u LD_LIBRARY_PATH");
-    const preparationIndex = line.indexOf("deno task artifacts:prepare");
+Deno.test("release sanitizes Python linker state across packaging subprocesses", () => {
+  const stepNames = ["Pack GitHub release assets", "Publish packages"];
+  for (const [index, stepName] of stepNames.entries()) {
+    const stepStart = releaseWorkflow.indexOf(`- name: ${stepName}`);
+    const stepEnd = index + 1 < stepNames.length
+      ? releaseWorkflow.indexOf(`- name: ${stepNames[index + 1]}`, stepStart)
+      : releaseWorkflow.indexOf("- name: Create or verify git tag", stepStart);
+    assertEquals(stepStart >= 0, true);
+    assertEquals(stepEnd > stepStart, true);
+
+    const step = releaseWorkflow.slice(stepStart, stepEnd);
+    const sanitizeIndex = step.indexOf("unset LD_LIBRARY_PATH");
+    const firstDenoIndex = step.indexOf("deno ");
     assertEquals(sanitizeIndex >= 0, true);
-    assertEquals(preparationIndex > sanitizeIndex, true);
+    assertEquals(firstDenoIndex > sanitizeIndex, true);
+    assertStringIncludes(step, "deno task artifacts:prepare");
+    assertStringIncludes(step, "scripts/publish-packages.ts");
   }
 });
 
