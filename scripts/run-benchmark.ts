@@ -21,7 +21,7 @@ import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson
 
 const RESULT_SCHEMA_URL =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/benchmark-results.schema.json";
-const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.20";
+const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.21";
 const DEFAULT_DURATION_SECONDS = 3;
 const DEFAULT_WARMUP_ITERATIONS = 100;
 const DEFAULT_PAYLOAD_BYTES = 1024;

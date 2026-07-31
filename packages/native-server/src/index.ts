@@ -308,6 +308,8 @@ interface InternalRoleEvent {
   readonly connection: InternalNativeHandle;
   readonly session: InternalNativeHandle;
   readonly operation: InternalNativeHandle;
+  readonly relatedOperationId: bigint;
+  readonly relatedFrameId: number;
   readonly frameId: number;
   readonly viewId: number;
   readonly routeId: number;

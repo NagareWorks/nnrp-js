@@ -300,6 +300,8 @@ interface InternalRoleEvent {
   readonly connection: InternalNativeHandle;
   readonly session: InternalNativeHandle;
   readonly operation: InternalNativeHandle;
+  readonly relatedOperationId: bigint;
+  readonly relatedFrameId: number;
   readonly frameId: number;
   readonly viewId: number;
   readonly routeId: number;
@@ -555,12 +557,23 @@ class NnrpBackendRuntime {
     );
     while (true) {
       const events = await session.poll(Math.max(validated.maxEvents ?? 1, 1), 1);
-      const result = events.map((event) => decodeClientRoleEvent(event, validated.sessionOptions.sessionId)).find(
-        (event): event is Extract<NnrpRuntimeEvent, { readonly type: "result" }> =>
-          event.type === "result" &&
-          event.result.frameId === validated.submit.frameId,
+      const result = events.find((event) =>
+        event.kind === EVENT_KIND_RESULT_PUSHED && event.relatedOperationId === validated.submit.operationId
       );
-      if (result !== undefined) return result.result;
+      if (result !== undefined) {
+        if (result.relatedFrameId !== validated.submit.frameId) {
+          throw new NnrpProtocolError({
+            code: "NNRP_OPERATION_FRAME_MISMATCH",
+            message:
+              `Operation ${validated.submit.operationId} is bound to frame ${validated.submit.frameId}, but the native result referenced frame ${result.relatedFrameId}.`,
+            source: "native",
+            retryable: false,
+          });
+        }
+        const decoded = decodeClientRoleEvent(result, validated.sessionOptions.sessionId);
+        if (decoded.type !== "result") throw new Error("Native result event decoding lost its terminal result kind.");
+        return decoded.result;
+      }
     }
   }
 
@@ -1234,6 +1247,7 @@ export class NnrpClientSession {
   readonly #runtimeObjects = new RuntimeObjectLifecycle();
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
+  readonly #operationByFrame = new Map<number, bigint>();
   readonly #cancelledOperations = new Set<bigint>();
   readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
@@ -1266,17 +1280,22 @@ export class NnrpClientSession {
         await capacityWait;
       }
       normalized = normalizeSubmitRequest(request, { copyPayloads: false });
-      this.#beginFrame(normalized.frameId);
+      this.#beginFrame(normalized.frameId, normalized.operationId);
     } catch (error) {
       return Promise.reject(error);
     }
 
     try {
-      const preparation = this.#prepareSubmitDispatch(normalized.frameId, options, deadlineMillis);
+      const preparation = this.#prepareSubmitDispatch(normalized.operationId, options, deadlineMillis);
       if (preparation !== undefined) {
         await preparation;
       }
-      const cancellation = this.#armSubmitCancellation(normalized.frameId, options, deadlineMillis);
+      const cancellation = this.#armSubmitCancellation(
+        normalized.operationId,
+        normalized.frameId,
+        options,
+        deadlineMillis,
+      );
       return await Promise.race([
         this.#state.client.runtime.submitResultCompact({
           sessionOptions: this.#state.options,
@@ -1297,17 +1316,17 @@ export class NnrpClientSession {
       this.#ensureOpen();
       this.#reserveImmediateCapacity();
       normalized = normalizeSubmitRequest(request, { copyPayloads: false });
-      this.#beginFrame(normalized.frameId);
+      this.#beginFrame(normalized.frameId, normalized.operationId);
     } catch (error) {
       return Promise.reject(error);
     }
 
     try {
-      const preparation = this.#prepareSubmitDispatch(normalized.frameId, options, deadlineMillis);
+      const preparation = this.#prepareSubmitDispatch(normalized.operationId, options, deadlineMillis);
       if (preparation !== undefined) {
         await preparation;
       }
-      this.#armDetachedSubmitCancellation(normalized.frameId, options, deadlineMillis);
+      this.#armDetachedSubmitCancellation(normalized.operationId, normalized.frameId, options, deadlineMillis);
       return await this.#state.client.runtime.submitNoWait({
         sessionOptions: this.#state.options,
         submit: normalized,
@@ -1462,6 +1481,7 @@ export class NnrpClientSession {
     if (event.type === "close") {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
+      this.#operationByFrame.clear();
       this.#cancelledOperations.clear();
       this.#drainCapacityWaiters();
     }
@@ -1545,6 +1565,7 @@ export class NnrpClientSession {
     this.#closed = true;
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
+    this.#operationByFrame.clear();
     this.#cancelledOperations.clear();
     this.#runtimeObjects.clear();
     for (const cleanup of this.#submitCancellationCleanups.values()) {
@@ -1568,7 +1589,7 @@ export class NnrpClientSession {
     }
   }
 
-  #beginFrame(frameId: number): void {
+  #beginFrame(frameId: number, operationId: bigint): void {
     if (this.#inFlightFrames.has(frameId)) {
       throw new NnrpProtocolError({
         code: "NNRP_FRAME_IN_FLIGHT",
@@ -1580,10 +1601,11 @@ export class NnrpClientSession {
 
     this.#inFlightFrames.add(frameId);
     this.#terminalFrames.delete(frameId);
+    this.#operationByFrame.set(frameId, operationId);
   }
 
   #prepareSubmitDispatch(
-    frameId: number,
+    operationId: bigint,
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
   ): Promise<void> | undefined {
@@ -1592,7 +1614,7 @@ export class NnrpClientSession {
       return undefined;
     }
     return this.updateDeadline({
-      operationId: BigInt(frameId),
+      operationId,
       controlSequence: this.#allocateControlSequence(),
       priorityClass: 0,
       priorityDelta: 0,
@@ -1604,6 +1626,7 @@ export class NnrpClientSession {
   }
 
   #armSubmitCancellation(
+    operationId: bigint,
     frameId: number,
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
@@ -1613,6 +1636,7 @@ export class NnrpClientSession {
       rejectCancellation = reject;
     });
     const cleanup = this.#installSubmitCancellation(
+      operationId,
       frameId,
       options,
       deadlineMillis,
@@ -1622,14 +1646,16 @@ export class NnrpClientSession {
   }
 
   #armDetachedSubmitCancellation(
+    operationId: bigint,
     frameId: number,
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
   ): void {
-    this.#installSubmitCancellation(frameId, options, deadlineMillis);
+    this.#installSubmitCancellation(operationId, frameId, options, deadlineMillis);
   }
 
   #installSubmitCancellation(
+    operationId: bigint,
     frameId: number,
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
@@ -1657,11 +1683,11 @@ export class NnrpClientSession {
         return;
       }
       triggered = true;
-      this.#cancelledOperations.add(BigInt(frameId));
+      this.#cancelledOperations.add(operationId);
       onCancelled?.(error);
       cleanup();
       void this.cancel({
-        operationId: BigInt(frameId),
+        operationId,
         controlSequence: this.#allocateControlSequence(),
         reasonCode,
         sourceRole: RuntimeRole.Client,
@@ -1770,6 +1796,7 @@ export class NnrpClientSession {
     this.#submitCancellationCleanups.get(frameId)?.();
     this.#submitCancellationCleanups.delete(frameId);
     this.#inFlightFrames.delete(frameId);
+    this.#operationByFrame.delete(frameId);
   }
 
   #finishTerminalFrame(frameId: number): void {
@@ -1806,7 +1833,10 @@ export class NnrpClientSession {
       return this.#cancelledOperations.has(event.metadata.operationId);
     }
 
-    if (event.type === "result" && this.#cancelledOperations.has(BigInt(event.result.frameId))) {
+    const resultOperationId = event.type === "result" ? this.#operationByFrame.get(event.result.frameId) : undefined;
+    if (
+      event.type === "result" && resultOperationId !== undefined && this.#cancelledOperations.has(resultOperationId)
+    ) {
       this.#terminalFrames.add(event.result.frameId);
       this.#finishFrame(event.result.frameId);
       return true;

@@ -233,6 +233,8 @@ interface InternalRoleEvent {
   readonly connection: FfiHandle;
   readonly session: FfiHandle;
   readonly operation: FfiHandle;
+  readonly relatedOperationId: bigint;
+  readonly relatedFrameId: number;
   readonly frameId: number;
   readonly viewId: number;
   readonly routeId: number;
@@ -815,6 +817,8 @@ function copyRoleEvent(library: DenoTransportLibrary, source: Uint8Array): Inter
       connection: decodeHandle(source.subarray(40, 64)),
       session: decodeHandle(source.subarray(64, 88)),
       operation: decodeHandle(source.subarray(88, 112)),
+      relatedOperationId: view.getBigUint64(184, true),
+      relatedFrameId: view.getUint32(192, true),
       frameId: view.getUint32(20, true),
       viewId: view.getUint16(24, true),
       routeId: view.getUint16(26, true),

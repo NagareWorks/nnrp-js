@@ -989,6 +989,8 @@ function roleRuntimeEvent(messageType: NnrpMessageType, payload: Uint8Array) {
     connection: { kind: 1, id: 1n, generation: 1, flags: 0 },
     session: { kind: 3, id: 1n, generation: 1, flags: 0 },
     operation: { kind: 4, id: 1n, generation: 1, flags: 0 },
+    relatedOperationId: 1n,
+    relatedFrameId: 1,
     frameId: 1,
     payload,
   };
