@@ -3,6 +3,20 @@ const prohibitedTerms = [
   `Clau${"de"}`,
 ] as const;
 
+const removedPublicApiPatterns = [
+  { pattern: /\bNnrpRuntimeFrameEvent\b/, label: "removed NnrpRuntimeFrameEvent type" },
+  { pattern: /\bNnrpClientEvent\b/, label: "removed NnrpClientEvent type" },
+  { pattern: /\bNnrpServerEvent\b/, label: "removed NnrpServerEvent type" },
+  { pattern: /\bif\s*\(\s*event\.type\s*===/, label: "removed flat event.type discriminant" },
+  { pattern: /\.sendResult\s*\(\s*\{\s*frameId\s*:/, label: "removed flat terminal result shape" },
+] as const;
+
+const currentPublicApiRoots = [
+  "README.md",
+  "examples",
+  "packages",
+] as const;
+
 const scannedRoots = [
   ".github",
   "assets",
@@ -32,6 +46,10 @@ const failures: string[] = [];
 
 for (const root of scannedRoots) {
   await scanPath(root);
+}
+
+for (const root of currentPublicApiRoots) {
+  await scanRemovedPublicApi(root);
 }
 
 if (failures.length > 0) {
@@ -76,6 +94,36 @@ async function scanTextFile(path: string): Promise<void> {
       if (line.toLowerCase().includes(term.toLowerCase())) {
         failures.push(`${path}:${index + 1}: prohibited vendor/model reference '${term}'`);
       }
+    }
+  }
+}
+
+async function scanRemovedPublicApi(path: string): Promise<void> {
+  let stat: Deno.FileInfo;
+  try {
+    stat = await Deno.stat(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+
+  if (stat.isDirectory) {
+    for await (const entry of Deno.readDir(path)) {
+      if (
+        entry.name === "dist" || entry.name === "node_modules" || entry.name === "artifacts" || entry.name === "test"
+      ) {
+        continue;
+      }
+      await scanRemovedPublicApi(`${path}/${entry.name}`);
+    }
+    return;
+  }
+
+  if (!stat.isFile || !shouldScanTextFile(path)) return;
+  const lines = (await Deno.readTextFile(path)).split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    for (const { pattern, label } of removedPublicApiPatterns) {
+      if (pattern.test(line)) failures.push(`${path}:${index + 1}: ${label}`);
     }
   }
 }

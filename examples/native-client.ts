@@ -19,7 +19,10 @@ try {
     chunks: [{ payload: new Uint8Array([1, 2, 3, 4]) }],
   }));
 
-  console.log("NNRP result", result.frameId, result.payload?.byteLength ?? 0);
+  const bodyBytes = result.event.type === "runtime" && result.event.event.tail.type === "body"
+    ? result.event.event.tail.body.byteLength
+    : 0;
+  console.log("NNRP result", result.operationId, result.terminalState, bodyBytes);
 } catch (error) {
   if (error instanceof NnrpNativeBindingUnavailableError) {
     console.log("Native runtime is not connected yet:", error.diagnostic.code);

@@ -34,6 +34,7 @@ import {
 } from "../src/index.ts";
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
+import { createSuccessResult } from "../../../scripts/runtime-event-fixtures.ts";
 
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 
@@ -577,19 +578,19 @@ Deno.test("@nnrp/native-server decodes ordered control, object, and cache role e
   const delta = await session.receive();
   const invalidation = await session.receive();
 
-  assertEquals(cancel.type, "cancel");
-  if (cancel.type === "cancel") assertEquals(cancel.diagnostic, new Uint8Array([4, 5]));
-  assertEquals(priority.type, "priority-update");
-  assertEquals(capability.type, "capability-negotiation");
-  if (capability.type === "capability-negotiation") assertEquals(capability.body, new Uint8Array([7]));
-  assertEquals(declaration.type, "object-declare");
-  if (declaration.type === "object-declare") assertEquals(declaration.body, new Uint8Array([8]));
-  assertEquals(delta.type, "object-delta");
-  if (delta.type === "object-delta") {
-    assertEquals(delta.metadataBody, new Uint8Array([9]));
-    assertEquals(delta.delta, new Uint8Array([10, 11]));
+  assertEquals(cancel.metadata.type, "control_request");
+  assertEquals(cancel.tail, { type: "diagnostic", diagnostic: new Uint8Array([4, 5]) });
+  assertEquals(priority.metadata.type, "scheduling");
+  assertEquals(capability.metadata.type, "capability");
+  assertEquals(capability.tail, { type: "body", body: new Uint8Array([7]) });
+  assertEquals(declaration.metadata.type, "object_descriptor");
+  assertEquals(declaration.tail, { type: "body", body: new Uint8Array([8]) });
+  assertEquals(delta.metadata.type, "object_delta");
+  if (delta.tail.type === "metadata_body_and_delta") {
+    assertEquals(delta.tail.metadataBody, new Uint8Array([9]));
+    assertEquals(delta.tail.delta, new Uint8Array([10, 11]));
   }
-  assertEquals(invalidation.type, "cache-invalidate");
+  assertEquals(invalidation.metadata.type, "cache_invalidate");
 
   await session.close();
   await server.close();
@@ -616,7 +617,7 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
   const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
   const session = await server.accept();
   const submit = await session.receive();
-  assertEquals(submit.type, "submit");
+  assertEquals(submit.metadata.type, "frame_submit");
 
   await session.sendProgress({
     operationId: 9n,
@@ -626,7 +627,7 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
     objectId: 0n,
     bodyBytes: 0,
   });
-  await session.sendResult({ frameId: 7, payload: new Uint8Array([1]) });
+  await session.sendResult(createSuccessResult(9n, 7, new Uint8Array([1])));
   assertEquals(resultCount, 1);
 
   const progressError = await assertRejects(
@@ -644,7 +645,7 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
   assertEquals(progressError.diagnostic.code, "NNRP_SERVER_INCREMENTAL_AFTER_TERMINAL");
 
   const duplicateError = await assertRejects(
-    () => session.sendResult({ frameId: 7, payload: new Uint8Array([2]) }),
+    () => session.sendResult(createSuccessResult(9n, 7, new Uint8Array([2]))),
     NnrpProtocolError,
   );
   assertEquals(duplicateError.diagnostic.code, "NNRP_SERVER_RESULT_TERMINAL_DUPLICATE");
@@ -958,7 +959,7 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
     "does not advance 1",
   );
 
-  assertEquals((await session.receive()).type, "cancel");
+  assertEquals((await session.receive()).metadata.type, "control_request");
   assertEquals(runtimeFrames.map(({ messageType }) => messageType), [
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
@@ -985,13 +986,21 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
 function roleRuntimeEvent(messageType: NnrpMessageType, payload: Uint8Array) {
   return {
     kind: 13,
+    headerPresent: true,
     messageType,
+    versionMajor: 1,
+    wireFormat: 0,
+    headerFlags: 0,
+    wireSessionId: 1,
     connection: { kind: 1, id: 1n, generation: 1, flags: 0 },
     session: { kind: 3, id: 1n, generation: 1, flags: 0 },
     operation: { kind: 4, id: 1n, generation: 1, flags: 0 },
     relatedOperationId: 1n,
     relatedFrameId: 1,
     frameId: 1,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
     payload,
   };
 }

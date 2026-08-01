@@ -38,7 +38,7 @@
     "release-dry-run": "deno task package-smoke && deno run --allow-read --allow-write=artifacts/release-dry-run --allow-env=ComSpec,NNRP_JS_FORCE_NPM_PACK --allow-run=deno,npm,cmd scripts/create-release-dry-run-artifacts.ts artifacts/release-dry-run && deno task installed-package-smoke",
     "publish:dry-run": "deno task build && deno task artifacts:prepare && deno run --allow-read --allow-write=artifacts/npm-publish --allow-env=ComSpec,NODE_AUTH_TOKEN,NPM_CONFIG_TOKEN,NPM_CONFIG_OTP --allow-run=npm,cmd scripts/publish-packages.ts --dry-run",
     "publish": "deno task build && deno task artifacts:prepare && deno run --allow-read --allow-write=artifacts/npm-publish --allow-env=ComSpec,NODE_AUTH_TOKEN,NPM_CONFIG_TOKEN,NPM_CONFIG_OTP --allow-run=npm,cmd scripts/publish-packages.ts",
-    "api-consistency": "deno run --unstable-sloppy-imports scripts/check-api-consistency.ts",
+    "api-consistency": "deno run --unstable-sloppy-imports --allow-env=NNRP_DOC_ROOT --allow-read scripts/check-api-consistency.ts",
     "format": "deno fmt",
     "format:check": "deno fmt --check",
     "lint": "deno fmt --check && deno lint && deno task runtime-policy && deno task todo:check && deno task api-consistency && deno task typecheck",
@@ -58,9 +58,10 @@
     "indentWidth": 2,
     "semiColons": true,
     "singleQuote": false,
-    "exclude": ["scripts/public-api"]
+    "exclude": ["scripts/public-api", ".docs"]
   },
   "lint": {
+    "exclude": [".docs"],
     "rules": {
       "tags": ["recommended"]
     }

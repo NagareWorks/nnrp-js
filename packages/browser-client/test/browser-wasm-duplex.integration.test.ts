@@ -11,6 +11,7 @@ import {
 } from "@nnrp/core";
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
+import { assertRuntimeMetadata } from "../../../scripts/runtime-event-fixtures.ts";
 import { loadBrowserWasmModule, openBrowserWasmRole } from "../src/wasm-role.ts";
 
 Deno.test({
@@ -100,13 +101,22 @@ Deno.test({
         throw new Error(`WASM role send waited ${sendElapsedMillis.toFixed(0)}ms for the pending event receive`);
       }
       assertEquals(sentMessageTypes.at(-1), NnrpMessageType.TraceContext);
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "trace-context");
+      assertEquals(
+        (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+        NnrpMessageType.TraceContext,
+      );
 
       await serverSession.sendTraceContext(metadata);
-      assertEquals((await pendingEvent).type, "trace-context");
+      const trace = await pendingEvent;
+      if (trace instanceof Error) throw trace;
+      assertEquals(trace.header.messageType, NnrpMessageType.TraceContext);
+      assertRuntimeMetadata(trace, "trace_context");
 
       await role.submitNoWait(9, NNRP_DEFAULT_SUBMIT_HEADER, frameSubmitPayload(42n, new Uint8Array([7])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(
+        (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+        NnrpMessageType.FrameSubmit,
+      );
       const pendingAfterSubmit = role.awaitEvent("browser-wasm-duplex").catch((error) => error);
       await within(
         role.sendRuntimeFrame(
@@ -123,16 +133,25 @@ Deno.test({
         ),
         "WASM role CANCEL did not complete while event receive was pending",
       );
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cancel");
+      assertEquals(
+        (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+        NnrpMessageType.Cancel,
+      );
       await serverSession.sendTraceContext({ ...metadata, traceId: 42n });
-      assertEquals((await pendingAfterSubmit).type, "trace-context");
+      const traceAfterSubmit = await pendingAfterSubmit;
+      if (traceAfterSubmit instanceof Error) throw traceAfterSubmit;
+      assertEquals(traceAfterSubmit.header.messageType, NnrpMessageType.TraceContext);
+      assertRuntimeMetadata(traceAfterSubmit, "trace_context");
     } catch (error) {
       failure = error;
     } finally {
       if (failure === undefined) {
         const clientClosing = role.close();
         try {
-          assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "close");
+          assertEquals(
+            (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+            NnrpMessageType.SessionClose,
+          );
           await serverSession.close();
           await within(clientClosing, "WASM role close did not complete");
         } catch (error) {

@@ -23,10 +23,10 @@ Deno.test("release workflow and local preparation pin Rust preview4.21", () => {
 });
 
 Deno.test("CI consumes an immutable successful Rust workflow artifact without weakening release inputs", () => {
-  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "30580835592"');
+  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "30698665598"');
   assertStringIncludes(
     ciWorkflow,
-    "NNRP_JS_RUST_ARTIFACT_COMMIT: bcebd1b309326a787f68c5b196dd733527fc1d81",
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: bc0a5fcf4ed1f6c175a30ad788d4e34c458f96b3",
   );
   assertStringIncludes(artifactPreparation, "run.headSha !== expectedCommit");
   assertStringIncludes(artifactPreparation, 'run.status !== "completed" || run.conclusion !== "success"');

@@ -4,8 +4,10 @@ import {
   CacheReuseScope,
   createBackendNativeManifest,
   createTokenSubmitRequest,
+  decodeNnrpRuntimeEvent,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
+  encodeRuntimeControlMetadata,
   MemoryLocationHint,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
@@ -21,9 +23,11 @@ import {
   NnrpTransportSelectionError,
   ObjectReleaseReason,
   OwnershipHint,
+  type RuntimeControlMetadata,
   RuntimeObjectKind,
   RuntimeRole,
 } from "@nnrp/core";
+import { createSuccessResult } from "../../../scripts/runtime-event-fixtures.ts";
 import {
   NnrpNativeBindingUnavailableError,
   type NnrpNativeRuntimeCapabilities,
@@ -592,7 +596,8 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
   let openedSessions = 0;
   const roleEvent = (relatedOperationId: bigint, frameId: number, opaqueHandleId: bigint) => ({
     kind: 6,
-    messageType: 0,
+    headerPresent: true,
+    messageType: NnrpMessageType.ResultPush,
     versionMajor: 1,
     wireFormat: 0,
     headerFlags: 0,
@@ -648,8 +653,12 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
 
   const result = await session.submit(tokenSubmit(42n, 7));
 
-  assertEquals(result.frameId, 7);
-  assertEquals(result.payload, new Uint8Array([42]));
+  assertEquals(result.operationId, 42n);
+  assertEquals(result.terminalState, "success");
+  assertEquals(result.event.type, "runtime");
+  if (result.event.type === "runtime") {
+    assertEquals(result.event.event.tail, { type: "body", body: new Uint8Array([42]) });
+  }
 
   const mismatchSession = client.openSession({ sessionId: "operation-frame-mismatch" });
   const mismatch = await assertRejects(
@@ -700,7 +709,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
       mode: "test",
       submitResultCompact: ({ submit }) => {
         submitCalls += 1;
-        return { frameId: submit.frameId };
+        return createSuccessResult(submit.operationId, submit.frameId, new Uint8Array());
       },
       sendRuntimeFrame: ({ messageType }) => {
         runtimeFrames.push(messageType);
@@ -768,16 +777,18 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
   ];
   assertEquals(
     interleaved.map((event) =>
-      event.type === "progress" ? `${event.metadata.operationId}:${event.metadata.progressSequence}` : event.type
+      event.metadata.type === "progress"
+        ? `${event.metadata.value.operationId}:${event.metadata.value.progressSequence}`
+        : event.metadata.type
     ),
     ["8:1", "9:1", "8:2"],
   );
 
-  assertEquals((await session.nextEvent()).type, "trace-context");
+  assertEquals((await session.nextEvent()).metadata.type, "trace_context");
   const dropEvidence = await session.nextEvent();
-  assertEquals(dropEvidence.type, "result-drop-reason");
-  if (dropEvidence.type === "result-drop-reason") {
-    assertEquals(dropEvidence.metadata.operationId, 7n);
+  assertEquals(dropEvidence.metadata.type, "result_drop_reason");
+  if (dropEvidence.metadata.type === "result_drop_reason") {
+    assertEquals(dropEvidence.metadata.value.operationId, 7n);
   }
 });
 
@@ -787,7 +798,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
   const dispatched = new Promise<void>((resolve) => {
     markDispatched = resolve;
   });
-  let resolveResult: ((result: { readonly frameId: number }) => void) | undefined;
+  let resolveResult: (() => void) | undefined;
   const client = await openNativeClient({
     endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
@@ -796,7 +807,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
       submitResultCompact: ({ submit }) => {
         markDispatched?.();
         return new Promise((resolve) => {
-          resolveResult = () => resolve({ frameId: submit.frameId });
+          resolveResult = () => resolve(createSuccessResult(submit.operationId, submit.frameId, new Uint8Array()));
         });
       },
       sendRuntimeFrame: ({ messageType, payload }) => {
@@ -836,7 +847,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
   assertEquals(controls[2]?.metadata.controlSequence, 12n);
   assertEquals(controls[2]?.metadata.reasonCode, 1);
 
-  resolveResult?.({ frameId: 4_101 });
+  resolveResult?.();
 });
 
 Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal listeners", async () => {
@@ -849,7 +860,7 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
       mode: "test",
       submitResultCompact: ({ submit }) => {
         submitCalls += 1;
-        return { frameId: submit.frameId };
+        return createSuccessResult(submit.operationId, submit.frameId, new Uint8Array());
       },
       submitNoWait: ({ submit }) => {
         submitCalls += 1;
@@ -878,7 +889,9 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   assertEquals(await session.submitNoWait(tokenSubmit(52n, 5_202), { signal }), 52n);
   assertEquals(signal.addCount, 1);
   assertEquals(signal.removeCount, 0);
-  session.completeEvent({ type: "result", result: { frameId: 5_202 } });
+  const terminal = createSuccessResult(52n, 5_202, new Uint8Array());
+  if (terminal.event.type !== "runtime") throw new Error("expected runtime terminal evidence");
+  session.completeEvent(terminal.event.event);
   assertEquals(signal.removeCount, 1);
 
   assertEquals(await session.submitNoWait(tokenSubmit(53n, 5_303), { timeoutMillis: 5 }), 53n);
@@ -1277,90 +1290,83 @@ function fakeTransportBinding(kind: "tcp" | "quic" | "ipc" | "websocket"): NnrpN
   };
 }
 
-function cancelledOperationEvents(sessionId: string) {
-  return [{
-    type: "partial-result",
-    messageType: NnrpMessageType.PartialResult,
-    metadata: {
+function cancelledOperationEvents(_sessionId: string) {
+  return [
+    runtimeControlEvent(NnrpMessageType.PartialResult, 70, {
       operationId: 7n,
       resultSequence: 1n,
       objectId: 1n,
       deltaSequence: 1n,
       bodyBytes: 1,
       flags: 0,
-    },
-    body: new Uint8Array([1]),
-    sessionId,
-  }, {
-    type: "result",
-    result: { frameId: 70, payload: new Uint8Array([2]) },
-    sessionId,
-  }, {
-    type: "progress",
-    messageType: NnrpMessageType.Progress,
-    metadata: {
+    }, new Uint8Array([1])),
+    createSuccessRuntimeEvent(7n, 70, new Uint8Array([2])),
+    runtimeControlEvent(NnrpMessageType.Progress, 80, {
       operationId: 8n,
       progressSequence: 1n,
       stageCode: 2,
       percentX100: 5000,
       objectId: 0n,
       bodyBytes: 0,
-    },
-    body: new Uint8Array(),
-    sessionId,
-  }, {
-    type: "progress",
-    messageType: NnrpMessageType.Progress,
-    metadata: {
+    }),
+    runtimeControlEvent(NnrpMessageType.Progress, 90, {
       operationId: 9n,
       progressSequence: 1n,
       stageCode: 2,
       percentX100: 5000,
       objectId: 0n,
       bodyBytes: 0,
-    },
-    body: new Uint8Array(),
-    sessionId,
-  }, {
-    type: "progress",
-    messageType: NnrpMessageType.Progress,
-    metadata: {
+    }),
+    runtimeControlEvent(NnrpMessageType.Progress, 81, {
       operationId: 8n,
       progressSequence: 2n,
       stageCode: 2,
       percentX100: 7500,
       objectId: 0n,
       bodyBytes: 0,
-    },
-    body: new Uint8Array(),
-    sessionId,
-  }, {
-    type: "trace-context",
-    messageType: NnrpMessageType.TraceContext,
-    metadata: {
+    }),
+    runtimeControlEvent(NnrpMessageType.TraceContext, 82, {
       traceId: 7n,
       spanId: 8n,
       parentSpanId: 6n,
       stageCode: 2,
       flags: 0,
       bodyBytes: 1,
-    },
-    body: new Uint8Array([7]),
-    sessionId,
-  }, {
-    type: "result-drop-reason",
-    messageType: NnrpMessageType.ResultDropReason,
-    metadata: {
+    }, new Uint8Array([7])),
+    runtimeControlEvent(NnrpMessageType.ResultDropReason, 70, {
       operationId: 7n,
       resultSequence: 1n,
       dropReasonCode: 3,
       sourceRole: RuntimeRole.Server,
       flags: 0,
       diagnosticBytes: 1,
-    },
-    diagnostic: new Uint8Array([3]),
-    sessionId,
-  }] as const;
+    }, new Uint8Array([3])),
+  ];
+}
+
+function runtimeControlEvent(
+  messageType: NnrpMessageType,
+  frameId: number,
+  metadata: RuntimeControlMetadata,
+  tail = new Uint8Array(),
+) {
+  return decodeNnrpRuntimeEvent({
+    versionMajor: 1,
+    wireFormat: 0,
+    messageType,
+    flags: 0,
+    sessionId: 1,
+    frameId,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+  }, encodeRuntimeControlMetadata(messageType, metadata, tail));
+}
+
+function createSuccessRuntimeEvent(operationId: bigint, frameId: number, body: Uint8Array) {
+  const result = createSuccessResult(operationId, frameId, body);
+  if (result.event.type !== "runtime") throw new Error("expected runtime terminal evidence");
+  return result.event.event;
 }
 
 class TrackingAbortSignal {

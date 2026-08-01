@@ -240,6 +240,7 @@ interface FfiHandle {
 
 interface InternalRoleEvent {
   readonly kind: number;
+  readonly headerPresent: boolean;
   readonly messageType: number;
   readonly versionMajor: number;
   readonly wireFormat: number;
@@ -831,6 +832,7 @@ function copyRoleEvent(library: DenoTransportLibrary, source: Uint8Array): Inter
   try {
     return {
       kind: view.getUint32(0, true),
+      headerPresent: view.getUint8(8) !== 0,
       messageType: view.getUint8(11),
       versionMajor: view.getUint8(9),
       wireFormat: view.getUint8(10),

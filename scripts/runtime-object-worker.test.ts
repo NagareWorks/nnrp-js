@@ -2,6 +2,9 @@ import { assertEquals } from "jsr:@std/assert@1";
 import {
   CacheMissReason,
   CacheReuseScope,
+  decodeNnrpRuntimeEvent,
+  encodeCacheInvalidateMetadata,
+  encodeRuntimeObjectMetadata,
   MemoryLocationHint,
   NnrpMessageType,
   type NnrpRuntimeEvent,
@@ -22,11 +25,9 @@ Deno.test("runtime object events are structured-clone-safe across native and bro
   }
 });
 
-function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
-  return [{
-    type: "object-declare",
-    messageType: NnrpMessageType.ObjectDeclare,
-    metadata: {
+function runtimeObjectEvents(_sessionId: string): NnrpRuntimeEvent[] {
+  return [
+    runtimeObjectEvent(NnrpMessageType.ObjectDeclare, {
       objectId: 1n,
       objectKind: RuntimeObjectKind.ImageTile,
       producerRole: RuntimeRole.Runtime,
@@ -38,13 +39,8 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
       ownershipHint: OwnershipHint.ConsumerOwned,
       lifetimeHintMs: 1_000,
       metadataBytes: 1,
-    },
-    body: new Uint8Array([0x01]),
-    sessionId,
-  }, {
-    type: "object-ref",
-    messageType: NnrpMessageType.ObjectRef,
-    metadata: {
+    }, new Uint8Array([0x01])),
+    runtimeObjectEvent(NnrpMessageType.ObjectRef, {
       objectId: 1n,
       operationId: 2n,
       objectVersion: 3n,
@@ -52,26 +48,16 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
       length: 2n,
       flags: 0,
       metadataBytes: 1,
-    },
-    body: new Uint8Array([0x02]),
-    sessionId,
-  }, {
-    type: "object-release",
-    messageType: NnrpMessageType.ObjectRelease,
-    metadata: {
+    }, new Uint8Array([0x02])),
+    runtimeObjectEvent(NnrpMessageType.ObjectRelease, {
       objectId: 1n,
       operationId: 2n,
       releaseReason: ObjectReleaseReason.Completed,
       sourceRole: RuntimeRole.Client,
       flags: 0,
       diagnosticBytes: 1,
-    },
-    diagnostic: new Uint8Array([0x03]),
-    sessionId,
-  }, {
-    type: "object-patch",
-    messageType: NnrpMessageType.ObjectPatch,
-    metadata: {
+    }, new Uint8Array([0x03])),
+    runtimeObjectEvent(NnrpMessageType.ObjectPatch, {
       objectId: 1n,
       deltaSequence: 4n,
       regionOffset: 0n,
@@ -79,14 +65,8 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
       deltaBytes: 2,
       flags: 0,
       metadataBytes: 1,
-    },
-    metadataBody: new Uint8Array([0x04]),
-    delta: new Uint8Array([0x05, 0x06]),
-    sessionId,
-  }, {
-    type: "object-delta",
-    messageType: NnrpMessageType.ObjectDelta,
-    metadata: {
+    }, new Uint8Array([0x04, 0x05, 0x06])),
+    runtimeObjectEvent(NnrpMessageType.ObjectDelta, {
       objectId: 1n,
       deltaSequence: 5n,
       regionOffset: 2n,
@@ -94,14 +74,8 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
       deltaBytes: 2,
       flags: 0,
       metadataBytes: 1,
-    },
-    metadataBody: new Uint8Array([0x07]),
-    delta: new Uint8Array([0x08, 0x09]),
-    sessionId,
-  }, {
-    type: "cache-reference",
-    messageType: NnrpMessageType.CacheReference,
-    metadata: {
+    }, new Uint8Array([0x07, 0x08, 0x09])),
+    runtimeObjectEvent(NnrpMessageType.CacheReference, {
       cacheNamespace: 5,
       cacheKeyHi: 6n,
       cacheKeyLo: 7n,
@@ -112,32 +86,48 @@ function runtimeObjectEvents(sessionId: string): NnrpRuntimeEvent[] {
       expirationHintMs: 1_000,
       metadataBytes: 1,
       flags: 0,
-    },
-    body: new Uint8Array([0x0a]),
-    sessionId,
-  }, {
-    type: "cache-miss",
-    messageType: NnrpMessageType.CacheMiss,
-    metadata: {
+    }, new Uint8Array([0x0a])),
+    runtimeObjectEvent(NnrpMessageType.CacheMiss, {
       cacheNamespace: 5,
       cacheKeyHi: 6n,
       cacheKeyLo: 7n,
       missReason: CacheMissReason.NotFound,
       profileId: 8,
       diagnosticBytes: 1,
-    },
-    diagnostic: new Uint8Array([0x0b]),
-    sessionId,
-  }, {
-    type: "cache-invalidate",
-    messageType: NnrpMessageType.CacheInvalidate,
-    metadata: {
-      invalidateScope: 1,
-      cacheNamespace: 2,
-      cacheKeyHi: 0n,
-      cacheKeyLo: 0n,
-      reasonCode: 5,
-    },
-    sessionId,
-  }];
+    }, new Uint8Array([0x0b])),
+    runtimeEvent(
+      NnrpMessageType.CacheInvalidate,
+      encodeCacheInvalidateMetadata({
+        invalidateScope: 1,
+        cacheNamespace: 2,
+        cacheKeyHi: 0n,
+        cacheKeyLo: 0n,
+        reasonCode: 5,
+      }),
+    ),
+  ];
+}
+
+function runtimeObjectEvent(
+  messageType: NnrpMessageType,
+  metadata: Parameters<typeof encodeRuntimeObjectMetadata>[1],
+  tail: Uint8Array,
+): NnrpRuntimeEvent {
+  return runtimeEvent(messageType, encodeRuntimeObjectMetadata(messageType, metadata, tail));
+}
+
+let nextFrameId = 1;
+
+function runtimeEvent(messageType: NnrpMessageType, payload: Uint8Array): NnrpRuntimeEvent {
+  return decodeNnrpRuntimeEvent({
+    versionMajor: 1,
+    wireFormat: 0,
+    messageType,
+    flags: 0,
+    sessionId: 7,
+    frameId: nextFrameId++,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+  }, payload);
 }

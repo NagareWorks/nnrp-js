@@ -13,8 +13,8 @@ permissions:
 
 env:
   NNRP_JS_RUST_ARTIFACT_VERSION: 1.0.0-preview.4.21
-  NNRP_JS_RUST_ARTIFACT_RUN_ID: "30580835592"
-  NNRP_JS_RUST_ARTIFACT_COMMIT: bcebd1b309326a787f68c5b196dd733527fc1d81
+  NNRP_JS_RUST_ARTIFACT_RUN_ID: "30698665598"
+  NNRP_JS_RUST_ARTIFACT_COMMIT: bc0a5fcf4ed1f6c175a30ad788d4e34c458f96b3
 
 jobs:
   content-policy:
@@ -169,6 +169,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Checkout frozen SDK contract
+        uses: actions/checkout@v5
+        with:
+          repository: NagareWorks/nnrp-doc
+          ref: master
+          path: .docs
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
@@ -182,6 +188,8 @@ jobs:
       - name: Preview4 todo contract
         run: deno task todo:check
       - name: Public API consistency
+        env:
+          NNRP_DOC_ROOT: ${{ github.workspace }}/.docs
         run: deno task api-consistency
       - name: Prepare Rust artifact packages
         env:

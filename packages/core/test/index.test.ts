@@ -9,6 +9,8 @@ import {
   createBrowserWasmManifest,
   createCacheKey,
   createCapabilityManifest,
+  createNnrpResultFromLifecycle,
+  createNnrpResultFromRuntimeEvent,
   createRecoveryToken,
   createSchemaDescriptor,
   createTensorSubmitRequest,
@@ -18,10 +20,12 @@ import {
   createTypedPayloadSubmitRequest,
   decodeCacheInvalidateMetadata,
   type DecodedRuntimeObjectMetadata,
+  decodeNnrpRuntimeEvent,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
   decodeTypedPayloadDescriptor,
   encodeCacheInvalidateMetadata,
+  encodeResultPushPayload,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
@@ -33,6 +37,7 @@ import {
   MemoryLocationHint,
   NNRP_PROTOCOL_VERSION,
   NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES,
+  NnrpBackpressureLevel,
   NnrpBudgetPolicy,
   type NnrpCacheInvalidateRequest,
   type NnrpCacheInvalidateResult,
@@ -43,14 +48,22 @@ import {
   type NnrpCachePutResult,
   NnrpCapabilityError,
   type NnrpClientProviderRoutes,
+  NnrpFlowScopeKind,
+  NnrpFlowUpdateReason,
   NnrpHeaderFlags,
+  NnrpInFlightPolicy,
   NnrpLossTolerancePolicy,
   NnrpMessageType,
   NnrpPayloadKind,
   NnrpProtocolError,
   NnrpRecoveryError,
+  NnrpResultClass,
   NnrpResultDropError,
+  NnrpResultHintBudgetPolicy,
+  NnrpResultHintCongestionState,
+  NnrpResultHintReason,
   type NnrpServerProviderRoutes,
+  NnrpSessionCloseReason,
   type NnrpSubmitRequest,
   NnrpTensorInputProfile,
   NnrpTileIndexMode,
@@ -577,6 +590,72 @@ Deno.test("@nnrp/core round-trips every Preview4 runtime control metadata layout
   }
 });
 
+Deno.test("@nnrp/core projects every runtime control frame into the frozen event union", () => {
+  const metadataTypes = new Map<NnrpMessageType, string>([
+    [NnrpMessageType.Cancel, "control_request"],
+    [NnrpMessageType.Abort, "control_request"],
+    [NnrpMessageType.PriorityUpdate, "scheduling"],
+    [NnrpMessageType.Deadline, "scheduling"],
+    [NnrpMessageType.ExpireAt, "scheduling"],
+    [NnrpMessageType.Supersede, "supersede"],
+    [NnrpMessageType.BudgetUpdate, "budget"],
+    [NnrpMessageType.Progress, "progress"],
+    [NnrpMessageType.PartialResult, "partial_result"],
+    [NnrpMessageType.Backpressure, "pressure"],
+    [NnrpMessageType.CreditUpdate, "pressure"],
+    [NnrpMessageType.CapabilityNegotiation, "capability"],
+    [NnrpMessageType.DegradeProfile, "capability"],
+    [NnrpMessageType.RouteHint, "route_hint"],
+    [NnrpMessageType.ExecutionHint, "route_hint"],
+    [NnrpMessageType.TraceContext, "trace_context"],
+    [NnrpMessageType.ResultDropReason, "result_drop_reason"],
+    [NnrpMessageType.ErrorRecoverable, "recoverable_error"],
+    [NnrpMessageType.RetryAfter, "retry_after"],
+  ]);
+  const diagnosticTypes = new Set([
+    NnrpMessageType.Cancel,
+    NnrpMessageType.Abort,
+    NnrpMessageType.Supersede,
+    NnrpMessageType.ResultDropReason,
+    NnrpMessageType.ErrorRecoverable,
+    NnrpMessageType.RetryAfter,
+  ]);
+  const bodyTypes = new Set([
+    NnrpMessageType.Progress,
+    NnrpMessageType.PartialResult,
+    NnrpMessageType.CapabilityNegotiation,
+    NnrpMessageType.DegradeProfile,
+    NnrpMessageType.RouteHint,
+    NnrpMessageType.ExecutionHint,
+    NnrpMessageType.TraceContext,
+  ]);
+
+  for (const testCase of RUNTIME_CONTROL_CODEC_CASES) {
+    for (const messageType of testCase.messageTypes) {
+      const header = runtimeHeader(messageType, 100 + messageType);
+      const event = decodeNnrpRuntimeEvent(
+        header,
+        encodeRuntimeControlMetadata(messageType, testCase.metadata, testCase.tail),
+      );
+      assertEquals(event.header, header);
+      assertEquals(event.metadata.type, metadataTypes.get(messageType));
+      assertEquals("value" in event.metadata ? event.metadata.value : undefined, testCase.metadata);
+      assertEquals(
+        event.tail.type,
+        diagnosticTypes.has(messageType) ? "diagnostic" : bodyTypes.has(messageType) ? "body" : "none",
+      );
+      assertEquals(
+        event.tail.type === "diagnostic"
+          ? event.tail.diagnostic
+          : event.tail.type === "body"
+          ? event.tail.body
+          : new Uint8Array(),
+        testCase.tail,
+      );
+    }
+  }
+});
+
 Deno.test("@nnrp/core uses frozen little-endian runtime control offsets", () => {
   const control = encodeRuntimeControlMetadata(
     NnrpMessageType.Cancel,
@@ -889,6 +968,294 @@ Deno.test("@nnrp/core round-trips every Preview4 runtime object metadata layout"
       assertEquals(decoded.tail, testCase.tail);
     }
   }
+});
+
+Deno.test("@nnrp/core projects every runtime object frame into the frozen event union", () => {
+  const metadataTypes = new Map<NnrpMessageType, string>([
+    [NnrpMessageType.ObjectDeclare, "object_descriptor"],
+    [NnrpMessageType.ObjectRef, "object_reference"],
+    [NnrpMessageType.ObjectRelease, "object_release"],
+    [NnrpMessageType.ObjectPatch, "object_delta"],
+    [NnrpMessageType.ObjectDelta, "object_delta"],
+    [NnrpMessageType.CacheReference, "cache_reference"],
+    [NnrpMessageType.CacheMiss, "cache_miss"],
+  ]);
+
+  for (const testCase of RUNTIME_OBJECT_CODEC_CASES) {
+    for (const messageType of testCase.messageTypes) {
+      const event = decodeNnrpRuntimeEvent(
+        runtimeHeader(messageType, 200 + messageType),
+        encodeRuntimeObjectMetadata(messageType, testCase.metadata, testCase.tail),
+      );
+      assertEquals(event.metadata.type, metadataTypes.get(messageType));
+      assertEquals("value" in event.metadata ? event.metadata.value : undefined, testCase.metadata);
+      if (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta) {
+        assertEquals(event.tail.type, "metadata_body_and_delta");
+        if (event.tail.type === "metadata_body_and_delta") {
+          assertEquals(event.tail.metadataBody, testCase.tail.slice(0, 2));
+          assertEquals(event.tail.delta, testCase.tail.slice(2));
+        }
+      } else {
+        const expectedTailType =
+          messageType === NnrpMessageType.ObjectRelease || messageType === NnrpMessageType.CacheMiss
+            ? "diagnostic"
+            : "body";
+        assertEquals(event.tail.type, expectedTailType);
+      }
+    }
+  }
+});
+
+Deno.test("@nnrp/core decodes role frames and terminal evidence without flattening events", () => {
+  const submit = createTokenSubmitRequest({
+    identity: submitIdentity(71n, 72),
+    policy: submitPolicy(),
+    chunks: [{ payload: new Uint8Array([1, 2, 3]) }],
+  });
+  const submitEvent = decodeNnrpRuntimeEvent(
+    runtimeHeader(NnrpMessageType.FrameSubmit, submit.frameId),
+    encodeSubmitPayload(submit),
+  );
+  assertEquals(submitEvent.metadata.type, "frame_submit");
+  assertEquals(submitEvent.tail.type, "body");
+  if (submitEvent.metadata.type === "frame_submit") {
+    assertEquals(submitEvent.metadata.value.operationId, 71n);
+  }
+  if (submitEvent.tail.type === "body") {
+    assertEquals(submitEvent.tail.body, submit.body);
+  }
+
+  for (const messageType of [NnrpMessageType.FrameCancel, NnrpMessageType.ResultDrop]) {
+    const event = decodeNnrpRuntimeEvent(runtimeHeader(messageType, 73), new Uint8Array());
+    assertEquals(event.metadata.type, "none");
+    assertEquals(event.tail.type, "none");
+  }
+
+  const resultMetadata = {
+    statusCode: 200,
+    resultFlags: 0,
+    sectionCount: 1,
+    tileCount: 0,
+    activeProfileId: 2,
+    inferenceMs: 3,
+    queueMs: 4,
+    serverTotalMs: 5,
+    tileBaseId: 0,
+    tileIndexBytes: 0,
+    resultClass: NnrpResultClass.Complete,
+    appliedBudgetPolicy: 0,
+    reusedFrameId: 0,
+    coveredTileCount: 0,
+    droppedTileCount: 0,
+    payloadKindBitmap: NnrpPayloadKind.TokenChunk,
+    payloadFrameCount: 1,
+  };
+  const resultEvent = decodeNnrpRuntimeEvent(
+    runtimeHeader(NnrpMessageType.ResultPush, 74),
+    encodeResultPushPayload(resultMetadata, new Uint8Array([8, 9])),
+  );
+  assertEquals(resultEvent.metadata, { type: "result_push", value: resultMetadata });
+  assertEquals(resultEvent.tail, { type: "body", body: new Uint8Array([8, 9]) });
+  assertEquals(createNnrpResultFromRuntimeEvent(71n, resultEvent), {
+    operationId: 71n,
+    terminalState: "success",
+    event: { type: "runtime", event: resultEvent },
+  });
+
+  const droppedEvent = decodeNnrpRuntimeEvent(
+    runtimeHeader(NnrpMessageType.ResultDrop, 75),
+    new Uint8Array(),
+  );
+  assertEquals(createNnrpResultFromRuntimeEvent(72n, droppedEvent).terminalState, "dropped");
+  for (
+    const [state, terminalState] of [
+      ["completed", "success"],
+      ["cancelled", "cancelled"],
+      ["superseded", "dropped"],
+      ["failed", "error"],
+    ] as const
+  ) {
+    assertEquals(createNnrpResultFromLifecycle({ operationId: 73n, state }).terminalState, terminalState);
+  }
+});
+
+Deno.test("@nnrp/core decodes session, hint, flow, and cache role events", () => {
+  const sessionClosePayload = new Uint8Array(24);
+  const sessionCloseView = new DataView(sessionClosePayload.buffer);
+  sessionCloseView.setUint16(0, NnrpSessionCloseReason.ServerShutdown, true);
+  sessionCloseView.setUint8(2, NnrpInFlightPolicy.Drain);
+  sessionCloseView.setUint32(4, 250, true);
+  sessionCloseView.setBigUint64(8, 91n, true);
+  sessionCloseView.setUint32(16, 92, true);
+  sessionCloseView.setUint32(20, 93, true);
+  const sessionClose = decodeNnrpRuntimeEvent(
+    runtimeHeader(NnrpMessageType.SessionClose, 0),
+    sessionClosePayload,
+  );
+  assertEquals(sessionClose.metadata.type, "session_close");
+  assertEquals(sessionClose.tail.type, "none");
+
+  const hintPayload = new Uint8Array(16);
+  const hintView = new DataView(hintPayload.buffer);
+  hintView.setUint32(0, NnrpResultHintBudgetPolicy.Partial, true);
+  hintView.setUint32(4, NnrpResultHintCongestionState.Elevated, true);
+  hintView.setUint32(8, NnrpResultHintReason.ServerBusy, true);
+  hintView.setUint32(12, 10, true);
+  const hint = decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.ResultHint, 94), hintPayload);
+  assertEquals(hint.metadata.type, "result_hint");
+
+  const flowPayload = new Uint8Array(32);
+  const flowView = new DataView(flowPayload.buffer);
+  flowView.setUint8(0, NnrpFlowScopeKind.Operation);
+  flowView.setUint8(1, NnrpFlowUpdateReason.Congestion);
+  flowView.setUint8(2, NnrpBackpressureLevel.Hard);
+  flowView.setUint16(8, 3, true);
+  flowView.setBigUint64(12, 95n, true);
+  flowView.setUint32(20, 11, true);
+  flowView.setUint32(24, 12, true);
+  flowView.setUint32(28, 0x02, true);
+  const flow = decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.FlowUpdate, 95), flowPayload);
+  assertEquals(flow.metadata.type, "flow_update");
+
+  const cacheMetadata: CacheInvalidateMetadata = {
+    invalidateScope: 3,
+    cacheNamespace: 2,
+    cacheKeyHi: 3n,
+    cacheKeyLo: 4n,
+    reasonCode: 5,
+  };
+  const cache = decodeNnrpRuntimeEvent(
+    runtimeHeader(NnrpMessageType.CacheInvalidate, 96),
+    encodeCacheInvalidateMetadata(cacheMetadata),
+  );
+  assertEquals(cache.metadata, { type: "cache_invalidate", value: cacheMetadata });
+});
+
+Deno.test("@nnrp/core rejects malformed role events and nonterminal result evidence", () => {
+  assertRuntimeEventError(
+    () =>
+      decodeNnrpRuntimeEvent(
+        { ...runtimeHeader(NnrpMessageType.ResultDrop, 1), versionMajor: 2 as 1 },
+        new Uint8Array(),
+      ),
+    "NNRP_RUNTIME_HEADER_VERSION",
+  );
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.ClientHello, 1), new Uint8Array()),
+    "NNRP_RUNTIME_MESSAGE_UNSUPPORTED",
+  );
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.FrameCancel, 1), new Uint8Array([1])),
+    "NNRP_RUNTIME_PAYLOAD_UNEXPECTED",
+  );
+  assertRuntimeEventError(
+    () => createNnrpResultFromLifecycle({ operationId: 1n, state: "running" }),
+    "NNRP_LIFECYCLE_NOT_TERMINAL",
+  );
+  const hintPayload = new Uint8Array(16);
+  const hint = decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.ResultHint, 1), hintPayload);
+  assertRuntimeEventError(
+    () => createNnrpResultFromRuntimeEvent(1n, hint),
+    "NNRP_TERMINAL_EVENT_INVALID",
+  );
+  assertRuntimeEventError(
+    () => createNnrpResultFromRuntimeEvent(0n, hint),
+    "NNRP_OPERATION_ID_ZERO",
+  );
+
+  const resultMetadata = {
+    statusCode: 0,
+    resultFlags: 0,
+    sectionCount: 0,
+    tileCount: 0,
+    activeProfileId: 0,
+    inferenceMs: 0,
+    queueMs: 0,
+    serverTotalMs: 0,
+    tileBaseId: 0,
+    tileIndexBytes: 0,
+    resultClass: NnrpResultClass.Complete,
+    appliedBudgetPolicy: 0,
+    reusedFrameId: 0,
+    coveredTileCount: 0,
+    droppedTileCount: 0,
+    payloadKindBitmap: 0,
+    payloadFrameCount: 0,
+  };
+  assertRuntimeEventError(
+    () => encodeResultPushPayload(resultMetadata, null as unknown as Uint8Array),
+    "NNRP_RESULT_BODY_INVALID",
+  );
+  assertRuntimeEventError(
+    () => encodeResultPushPayload({ ...resultMetadata, resultFlags: 0x08 }),
+    "NNRP_RESULT_FLAGS_INVALID",
+  );
+  assertRuntimeEventError(
+    () => encodeResultPushPayload({ ...resultMetadata, payloadKindBitmap: 0x80 }),
+    "NNRP_RESULT_PAYLOAD_KIND_INVALID",
+  );
+  assertRuntimeEventError(
+    () => encodeResultPushPayload({ ...resultMetadata, tileCount: 1 }),
+    "NNRP_RESULT_TENSOR_FIELDS_INVALID",
+  );
+  const reservedResult = encodeResultPushPayload(resultMetadata);
+  reservedResult[10] = 1;
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.ResultPush, 1), reservedResult),
+    "NNRP_RESULT_METADATA_RESERVED",
+  );
+  assertRuntimeEventError(
+    () =>
+      decodeNnrpRuntimeEvent(
+        runtimeHeader(NnrpMessageType.ResultPush, 1),
+        null as unknown as Uint8Array,
+      ),
+    "NNRP_RUNTIME_PAYLOAD_INVALID",
+  );
+
+  const dropReasonCase = RUNTIME_CONTROL_CODEC_CASES.find((testCase) =>
+    testCase.messageTypes.includes(NnrpMessageType.ResultDropReason)
+  )!;
+  const dropReasonEvent = decodeNnrpRuntimeEvent(
+    runtimeHeader(NnrpMessageType.ResultDropReason, 2),
+    encodeRuntimeControlMetadata(
+      NnrpMessageType.ResultDropReason,
+      dropReasonCase.metadata,
+      dropReasonCase.tail,
+    ),
+  );
+  assertEquals(createNnrpResultFromRuntimeEvent(2n, dropReasonEvent).terminalState, "dropped");
+
+  const invalidFlow = new Uint8Array(32);
+  const invalidFlowView = new DataView(invalidFlow.buffer);
+  invalidFlowView.setUint8(0, NnrpFlowScopeKind.Operation);
+  invalidFlowView.setUint8(1, NnrpFlowUpdateReason.Grant);
+  invalidFlowView.setUint8(2, NnrpBackpressureLevel.None);
+  invalidFlowView.setBigUint64(12, 1n, true);
+  invalidFlowView.setUint32(28, 0x10, true);
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.FlowUpdate, 3), invalidFlow),
+    "NNRP_FLOW_FLAGS_INVALID",
+  );
+  invalidFlowView.setUint32(28, 0, true);
+  invalidFlowView.setUint32(20, 1, true);
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.FlowUpdate, 3), invalidFlow),
+    "NNRP_FLOW_RETRY_FLAG_MISSING",
+  );
+  invalidFlowView.setUint32(20, 0, true);
+  invalidFlowView.setBigUint64(12, 0n, true);
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.FlowUpdate, 3), invalidFlow),
+    "NNRP_FLOW_SCOPE_INVALID",
+  );
+
+  const reservedSessionClose = new Uint8Array(24);
+  reservedSessionClose[3] = 1;
+  assertRuntimeEventError(
+    () => decodeNnrpRuntimeEvent(runtimeHeader(NnrpMessageType.SessionClose, 0), reservedSessionClose),
+    "NNRP_SESSION_CLOSE_RESERVED",
+  );
 });
 
 Deno.test("@nnrp/core encodes ordered runtime object tail segments without an intermediate tail", () => {
@@ -1218,6 +1585,25 @@ function assertRuntimeControlError(action: () => unknown, code: string): void {
 function assertRuntimeObjectError(action: () => unknown, code: string): void {
   const error = assertThrows(action, NnrpProtocolError);
   assertEquals(error.diagnostic.code, code);
+}
+
+function assertRuntimeEventError(action: () => unknown, code: string): void {
+  const error = assertThrows(action, NnrpProtocolError);
+  assertEquals(error.diagnostic.code, code);
+}
+
+function runtimeHeader(messageType: NnrpMessageType, frameId: number) {
+  return {
+    versionMajor: 1 as const,
+    wireFormat: 0 as const,
+    messageType,
+    flags: 0,
+    sessionId: 1,
+    frameId,
+    viewId: 2,
+    routeId: 3,
+    traceId: 4n,
+  };
 }
 
 function assertNumericEnum(
@@ -2279,17 +2665,17 @@ Deno.test("@nnrp/core normalizes session patch requests", () => {
 });
 
 Deno.test("@nnrp/core maps result drops and recovery failures to typed errors", () => {
-  const drop = {
-    type: "drop" as const,
+  const drop = decodeNnrpRuntimeEvent({
+    versionMajor: 1,
+    wireFormat: 0,
+    messageType: NnrpMessageType.ResultDrop,
+    flags: 0,
+    sessionId: 9,
     frameId: 77,
-    sessionId: "session-a",
-    diagnostic: {
-      code: "NNRP_RESULT_DROPPED",
-      message: "result dropped",
-      source: "runtime" as const,
-      retryable: true,
-    },
-  };
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+  }, new Uint8Array());
   const error = assertThrows(
     () => throwIfResultDrop(drop),
     NnrpResultDropError,
@@ -2302,7 +2688,7 @@ Deno.test("@nnrp/core maps result drops and recovery failures to typed errors", 
   });
 
   assertEquals(error.frameId, 77);
-  assertEquals(error.sessionId, "session-a");
+  assertEquals(error.sessionId, 9);
   assertEquals(error.diagnostic.code, "NNRP_RESULT_DROPPED");
   assertEquals(recoveryError.name, "NnrpRecoveryError");
 });

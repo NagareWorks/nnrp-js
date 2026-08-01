@@ -3,6 +3,7 @@ import {
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpClientProviderRoutes,
+  NnrpMessageType,
   type NnrpServerProviderRoutes,
   type NnrpTransportClientSecurity,
   type NnrpTransportConnection,
@@ -464,7 +465,9 @@ async function runServerCase(
     }
     await Promise.all(sessions.map(async (session) => {
       const event = await session.receive({ timeoutMillis: 250 });
-      if (event.type !== "close") throw new Error(`Expected peer close, received ${event.type}.`);
+      if (event.header.messageType !== NnrpMessageType.SessionClose) {
+        throw new Error(`Expected peer close, received message ${event.header.messageType}.`);
+      }
       await session.close();
     }));
     return passedHostRouteResult(

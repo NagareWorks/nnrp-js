@@ -3,6 +3,7 @@ import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpMessageType,
   type NnrpRuntimeEvent,
   type NnrpTransportClientSecurity,
   type NnrpTransportServerSecurity,
@@ -25,6 +26,7 @@ import { createServer as createTcpServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { QUIC_TEST_CERTIFICATE_DER, QUIC_TEST_PRIVATE_KEY_PKCS8_DER } from "./fixtures/quic-test-identity.ts";
 import { createWireConformanceTargetManifest } from "./wire-target-manifest.ts";
+import { assertRuntimeMetadata, assertRuntimeTail, createSuccessResult } from "./runtime-event-fixtures.ts";
 
 const SUITE_VERSION = "0.1.0";
 const TIMEOUT_MILLIS = 5_000;
@@ -202,9 +204,19 @@ async function startServer(
 }
 
 async function handleCancel(session: NnrpServerSession): Promise<void> {
-  const submit = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "submit");
-  const cancel = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "cancel");
-  if (cancel.metadata.operationId !== submit.submit.operationId) {
+  const submit = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.FrameSubmit,
+    "FRAME_SUBMIT",
+  );
+  assertRuntimeMetadata(submit, "frame_submit");
+  const cancel = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.Cancel,
+    "CANCEL",
+  );
+  assertRuntimeMetadata(cancel, "control_request");
+  if (cancel.metadata.value.operationId !== submit.metadata.value.operationId) {
     throw new Error("cancel wire case targeted another operation");
   }
   await session.sendTraceContext({
@@ -216,45 +228,89 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
     bodyBytes: TRACE_BODY.byteLength,
   }, TRACE_BODY);
   await session.sendResultDropReason({
-    operationId: submit.submit.operationId,
+    operationId: submit.metadata.value.operationId,
     resultSequence: 1n,
     dropReasonCode: 1,
     sourceRole: RuntimeRole.Server,
     flags: 0,
     diagnosticBytes: 0,
   });
-  expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "close");
+  expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.SessionClose,
+    "SESSION_CLOSE",
+  );
   await session.close();
 }
 
 async function handlePriority(session: NnrpServerSession): Promise<void> {
-  const submit = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "submit");
-  const priority = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "priority-update");
-  const expiry = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "expire-at");
+  const submit = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.FrameSubmit,
+    "FRAME_SUBMIT",
+  );
+  assertRuntimeMetadata(submit, "frame_submit");
+  const priority = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.PriorityUpdate,
+    "PRIORITY_UPDATE",
+  );
+  assertRuntimeMetadata(priority, "scheduling");
+  const expiry = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.ExpireAt,
+    "EXPIRE_AT",
+  );
+  assertRuntimeMetadata(expiry, "scheduling");
   if (
-    priority.metadata.operationId !== submit.submit.operationId ||
-    expiry.metadata.operationId !== submit.submit.operationId || expiry.metadata.deadlineUnixMs !== 1n
+    priority.metadata.value.operationId !== submit.metadata.value.operationId ||
+    expiry.metadata.value.operationId !== submit.metadata.value.operationId ||
+    expiry.metadata.value.deadlineUnixMs !== 1n
   ) {
     throw new Error("priority/deadline wire case metadata did not match its submitted operation");
   }
   await session.sendResultDropReason({
-    operationId: submit.submit.operationId,
+    operationId: submit.metadata.value.operationId,
     resultSequence: 1n,
     dropReasonCode: 1,
     sourceRole: RuntimeRole.Server,
     flags: 0,
     diagnosticBytes: 0,
   });
-  expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "close");
+  expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.SessionClose,
+    "SESSION_CLOSE",
+  );
   await session.close();
 }
 
 async function handleCache(session: NnrpServerSession): Promise<void> {
-  const submit = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "submit");
-  expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "capability-negotiation");
-  expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "route-hint");
-  const cache = expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "cache-reference");
-  if (cache.metadata.cacheKeyHi !== CACHE_KEY_HI || cache.metadata.cacheKeyLo !== CACHE_KEY_LO) {
+  const submit = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.FrameSubmit,
+    "FRAME_SUBMIT",
+  );
+  assertRuntimeMetadata(submit, "frame_submit");
+  const capability = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.CapabilityNegotiation,
+    "CAPABILITY_NEGOTIATION",
+  );
+  assertRuntimeMetadata(capability, "capability");
+  const route = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.RouteHint,
+    "ROUTE_HINT",
+  );
+  assertRuntimeMetadata(route, "route_hint");
+  const cache = expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.CacheReference,
+    "CACHE_REFERENCE",
+  );
+  assertRuntimeMetadata(cache, "cache_reference");
+  if (cache.metadata.value.cacheKeyHi !== CACHE_KEY_HI || cache.metadata.value.cacheKeyLo !== CACHE_KEY_LO) {
     throw new Error("cache wire case used unexpected cache identity");
   }
   await session.reportCacheMiss({
@@ -265,8 +321,14 @@ async function handleCache(session: NnrpServerSession): Promise<void> {
     profileId: 0x0002,
     diagnosticBytes: 0,
   });
-  await session.sendResult({ frameId: submit.submit.frameId, payload: RESPONSE_BODY });
-  expectEvent(await session.receive({ timeoutMillis: TIMEOUT_MILLIS }), "close");
+  await session.sendResult(
+    createSuccessResult(submit.metadata.value.operationId, submit.header.frameId, RESPONSE_BODY),
+  );
+  expectMessage(
+    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    NnrpMessageType.SessionClose,
+    "SESSION_CLOSE",
+  );
   await session.close();
 }
 
@@ -281,13 +343,33 @@ async function handleProgressClient(options: {
   const session = client.openSession({ inputProfile: "token" });
   try {
     await session.submitNoWait(tokenSubmit(301n, 301, REQUEST_BODY));
-    const progress = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "progress");
-    const credit = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "credit-update");
-    const partial = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "partial-result");
-    const result = expectEvent(await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }), "result");
+    const progress = expectMessage(
+      await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }),
+      NnrpMessageType.Progress,
+      "PROGRESS",
+    );
+    assertRuntimeMetadata(progress, "progress");
+    const credit = expectMessage(
+      await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }),
+      NnrpMessageType.CreditUpdate,
+      "CREDIT_UPDATE",
+    );
+    assertRuntimeMetadata(credit, "pressure");
+    const partial = expectMessage(
+      await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }),
+      NnrpMessageType.PartialResult,
+      "PARTIAL_RESULT",
+    );
+    assertRuntimeMetadata(partial, "partial_result");
+    const result = expectMessage(
+      await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS }),
+      NnrpMessageType.ResultPush,
+      "RESULT_PUSH",
+    );
+    assertRuntimeTail(result, "body");
     if (
-      progress.metadata.operationId !== 301n || credit.metadata.creditWindow !== 1n ||
-      partial.metadata.operationId !== 301n || !equalBytes(result.result.payload, RESPONSE_BODY)
+      progress.metadata.value.operationId !== 301n || credit.metadata.value.creditWindow !== 1n ||
+      partial.metadata.value.operationId !== 301n || !equalBytes(result.tail.body, RESPONSE_BODY)
     ) {
       throw new Error("progress/backpressure wire case returned unexpected target-client observations");
     }
@@ -329,14 +411,15 @@ async function connectWithRetry(options: Parameters<typeof handleProgressClient>
   throw new Error("wire target could not connect to suite listener", { cause: lastError });
 }
 
-function expectEvent<T extends NnrpRuntimeEvent["type"]>(
+function expectMessage(
   event: NnrpRuntimeEvent,
-  type: T,
-): Extract<NnrpRuntimeEvent, { readonly type: T }> {
-  if (event.type !== type) {
-    throw new Error(`wire target expected ${type}, got ${event.type}`);
+  messageType: NnrpMessageType,
+  label: string,
+): NnrpRuntimeEvent {
+  if (event.header.messageType !== messageType) {
+    throw new Error(`wire target expected ${label}, got message ${event.header.messageType}`);
   }
-  return event as Extract<NnrpRuntimeEvent, { readonly type: T }>;
+  return event;
 }
 
 async function writeManifest(

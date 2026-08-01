@@ -1,6 +1,7 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 
 const ciWorkflow = await Deno.readTextFile(".github/workflows/ci.yml");
+const denoConfig = JSON.parse(await Deno.readTextFile("deno.json"));
 const installedPackageSmoke = await Deno.readTextFile("scripts/check-installed-package-smoke.ts");
 const nodeImportSmoke = await Deno.readTextFile("scripts/check-node-import-smoke.mjs");
 const preview4Adapter = await Deno.readTextFile("scripts/preview4-adapter.ts");
@@ -60,4 +61,15 @@ Deno.test("CI gates Preview4 with suite-owned adapter and wire conformance", () 
   assertStringIncludes(preview4Adapter, "const CASE_EXECUTORS");
   assertStringIncludes(preview4Contract, '"l1.control.recoverable-error"');
   assertEquals(JSON.parse(preview4Capabilities).supports.length, 19);
+});
+
+Deno.test("CI compares the public API against the frozen nnrp-doc contract", () => {
+  assertStringIncludes(ciWorkflow, "Checkout frozen SDK contract");
+  assertStringIncludes(ciWorkflow, "repository: NagareWorks/nnrp-doc");
+  assertStringIncludes(ciWorkflow, "ref: master");
+  assertStringIncludes(ciWorkflow, "path: .docs");
+  assertStringIncludes(ciWorkflow, "NNRP_DOC_ROOT: ${{ github.workspace }}/.docs");
+  assertStringIncludes(ciWorkflow, "deno task api-consistency");
+  assertEquals(denoConfig.fmt.exclude.includes(".docs"), true);
+  assertEquals(denoConfig.lint.exclude.includes(".docs"), true);
 });

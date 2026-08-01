@@ -8,6 +8,7 @@ import {
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpMessageType,
+  type NnrpRuntimeEvent,
   NnrpTimeoutError,
   NnrpTransportError,
   ObjectReleaseReason,
@@ -18,6 +19,7 @@ import {
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { type NnrpBrowserClientSession, openBrowserRuntime } from "../src/index.ts";
+import { createSuccessResult } from "../../../scripts/runtime-event-fixtures.ts";
 
 function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) {
   return createTokenSubmitRequest({
@@ -90,10 +92,12 @@ Deno.test({
       void submit.catch(() => undefined);
       const serverSession = await accepting;
       const event = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(event.type, "submit");
-      if (event.type !== "submit") throw new Error("expected submit event");
-      assertEquals(event.submit.frameId, 7);
-      assertEquals(event.submit.body.slice(-3), new Uint8Array([1, 2, 3]));
+      assertEquals(eventLabel(event), "submit");
+      if (event.metadata.type !== "frame_submit" || event.tail.type !== "body") {
+        throw new Error("expected submit event");
+      }
+      assertEquals(event.header.frameId, 7);
+      assertEquals(event.tail.body.slice(-3), new Uint8Array([1, 2, 3]));
       await serverSession.sendProgress({
         operationId: 11n,
         progressSequence: 1n,
@@ -110,18 +114,20 @@ Deno.test({
         bodyBytes: 1,
         flags: 0,
       }, new Uint8Array([7]));
-      await serverSession.sendResult({ frameId: 7, payload: new Uint8Array([9, 8]) });
-      assertEquals(await submit, {
-        frameId: 7,
-        payload: new Uint8Array([9, 8]),
-        sessionId: "browser-role-e2e",
+      await serverSession.sendResult(createSuccessResult(11n, 7, new Uint8Array([9, 8])));
+      const submitted = await submit;
+      assertEquals(submitted.operationId, 11n);
+      assertEquals(submitted.terminalState, "success");
+      assertEquals(submitted.event.type === "runtime" ? submitted.event.event.tail : undefined, {
+        type: "body",
+        body: new Uint8Array([9, 8]),
       });
-      assertEquals((await session.nextEvent()).type, "progress");
-      assertEquals((await session.nextEvent()).type, "partial-result");
+      assertEquals(eventLabel(await session.nextEvent()), "progress");
+      assertEquals(eventLabel(await session.nextEvent()), "partial-result");
 
       await session.submitNoWait(tokenSubmit(99n, 8, new Uint8Array([4, 5])));
       const cancellable = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(cancellable.type, "submit");
+      assertEquals(eventLabel(cancellable), "submit");
       await session.declareObject({
         objectId: 99n,
         objectKind: RuntimeObjectKind.Tensor,
@@ -135,7 +141,7 @@ Deno.test({
         lifetimeHintMs: 1_000,
         metadataBytes: 0,
       });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-declare");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "object-declare");
       await session.referenceObject({
         objectId: 99n,
         operationId: 99n,
@@ -145,7 +151,7 @@ Deno.test({
         flags: 0,
         metadataBytes: 0,
       });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-ref");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "object-ref");
       const beforeCancellation = sentPackets.length;
       await session.sendControl(NnrpMessageType.Cancel, {
         operationId: 99n,
@@ -162,14 +168,14 @@ Deno.test({
       assertEquals(new DataView(manualCancelPacket.buffer).getUint32(24, true), 8);
       assertEquals(new DataView(manualCancelPacket.buffer).getBigUint64(40, true), 99n);
       const control = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(control.type, "cancel");
+      assertEquals(eventLabel(control), "cancel");
       const released = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(released.type, "object-release");
-      if (released.type === "object-release") {
-        assertEquals(released.metadata.objectId, 99n);
-        assertEquals(released.metadata.operationId, 99n);
-        assertEquals(released.metadata.releaseReason, ObjectReleaseReason.Cancelled);
-        assertEquals(released.metadata.sourceRole, RuntimeRole.Client);
+      assertEquals(eventLabel(released), "object-release");
+      if (released.metadata.type === "object_release") {
+        assertEquals(released.metadata.value.objectId, 99n);
+        assertEquals(released.metadata.value.operationId, 99n);
+        assertEquals(released.metadata.value.releaseReason, ObjectReleaseReason.Cancelled);
+        assertEquals(released.metadata.value.sourceRole, RuntimeRole.Client);
       }
       assertEquals(
         cancellationPackets.some((packet) => packet[6] === NnrpMessageType.CacheInvalidate),
@@ -191,7 +197,7 @@ Deno.test({
       );
 
       await session.submitNoWait(tokenSubmit(100n, 9, new Uint8Array([6])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
       await session.updatePriority({
         operationId: 100n,
         controlSequence: 2n,
@@ -200,7 +206,7 @@ Deno.test({
         deadlineUnixMs: 0n,
         flags: 0,
       });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "priority-update");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "priority-update");
 
       const scheduling = {
         operationId: 100n,
@@ -211,9 +217,9 @@ Deno.test({
         flags: 0,
       } as const;
       await session.updateDeadline(scheduling);
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "deadline");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "deadline");
       await session.expireAt({ ...scheduling, controlSequence: 4n });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "expire-at");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "expire-at");
       await session.updateBudget({
         operationId: 100n,
         computeBudgetUnits: 3n,
@@ -222,7 +228,7 @@ Deno.test({
         tokenBudget: 6,
         flags: 0,
       });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "budget-update");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "budget-update");
 
       const capability = {
         profileId: 2,
@@ -235,9 +241,9 @@ Deno.test({
         flags: 0,
       } as const;
       await session.negotiateCapabilities(capability, new Uint8Array([3]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "capability-negotiation");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "capability-negotiation");
       await session.degradeProfile(capability, new Uint8Array([4]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "degrade-profile");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "degrade-profile");
 
       const route = {
         operationId: 100n,
@@ -249,9 +255,9 @@ Deno.test({
         flags: 0,
       } as const;
       await session.sendRouteHint(route, new Uint8Array([5]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "route-hint");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "route-hint");
       await session.sendExecutionHint(route, new Uint8Array([6]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "execution-hint");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "execution-hint");
       await session.sendTraceContext({
         traceId: 1n,
         spanId: 2n,
@@ -260,7 +266,7 @@ Deno.test({
         flags: 0,
         bodyBytes: 1,
       }, new Uint8Array([7]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "trace-context");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "trace-context");
       await session.sendControl(NnrpMessageType.RetryAfter, {
         scopeId: 100n,
         controlSequence: 6n,
@@ -271,10 +277,10 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 1,
       }, new Uint8Array([8]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "retry-after");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "retry-after");
 
       await session.submitNoWait(tokenSubmit(101n, 10, new Uint8Array([7])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
       await session.supersede({
         oldOperationId: 101n,
         newOperationId: 102n,
@@ -283,7 +289,7 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 1,
       }, new Uint8Array([2]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "supersede");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "supersede");
 
       await session.abort({
         operationId: 100n,
@@ -293,9 +299,9 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 1,
       }, new Uint8Array([1]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "abort");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "abort");
       await session.submitNoWait(tokenSubmit(103n, 11, new Uint8Array([8])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
       await session.declareObject({
         objectId: 101n,
         objectKind: RuntimeObjectKind.Tensor,
@@ -309,7 +315,7 @@ Deno.test({
         lifetimeHintMs: 1_000,
         metadataBytes: 1,
       }, new Uint8Array([1]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-declare");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "object-declare");
 
       await session.referenceObject({
         objectId: 101n,
@@ -320,7 +326,7 @@ Deno.test({
         flags: 0,
         metadataBytes: 1,
       }, new Uint8Array([9]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-ref");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "object-ref");
       await session.releaseObject({
         objectId: 101n,
         operationId: 103n,
@@ -329,7 +335,7 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 1,
       }, new Uint8Array([10]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "object-release");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "object-release");
       const delta = {
         objectId: 101n,
         deltaSequence: 2n,
@@ -341,10 +347,10 @@ Deno.test({
       } as const;
       await session.patchObject(delta, new Uint8Array([11, 12]), new Uint8Array([21]));
       const patch = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(patch.type, "object-patch");
-      if (patch.type === "object-patch") {
-        assertEquals(patch.metadataBody, new Uint8Array([21]));
-        assertEquals(patch.delta, new Uint8Array([11, 12]));
+      assertEquals(eventLabel(patch), "object-patch");
+      if (patch.tail.type === "metadata_body_and_delta") {
+        assertEquals(patch.tail.metadataBody, new Uint8Array([21]));
+        assertEquals(patch.tail.delta, new Uint8Array([11, 12]));
       }
       await session.sendObjectDelta(
         { ...delta, deltaSequence: 3n },
@@ -352,10 +358,10 @@ Deno.test({
         new Uint8Array([22]),
       );
       const objectDelta = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(objectDelta.type, "object-delta");
-      if (objectDelta.type === "object-delta") {
-        assertEquals(objectDelta.metadataBody, new Uint8Array([22]));
-        assertEquals(objectDelta.delta, new Uint8Array([13, 14]));
+      assertEquals(eventLabel(objectDelta), "object-delta");
+      if (objectDelta.tail.type === "metadata_body_and_delta") {
+        assertEquals(objectDelta.tail.metadataBody, new Uint8Array([22]));
+        assertEquals(objectDelta.tail.delta, new Uint8Array([13, 14]));
       }
       await assertRejects(
         () =>
@@ -390,7 +396,7 @@ Deno.test({
         metadataBytes: 1,
         flags: 0,
       }, new Uint8Array([2]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cache-reference");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "cache-reference");
 
       await session.reportCacheMiss({
         cacheNamespace: 5,
@@ -400,7 +406,7 @@ Deno.test({
         profileId: 2,
         diagnosticBytes: 1,
       }, new Uint8Array([15]));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cache-miss");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "cache-miss");
 
       await session.invalidateCache({
         invalidateScope: 3,
@@ -409,12 +415,12 @@ Deno.test({
         cacheKeyLo: 7n,
         reasonCode: 2,
       });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cache-invalidate");
-      await serverSession.sendResult({ frameId: 11, payload: new Uint8Array([20]) });
-      assertEquals((await session.nextEvent({ timeoutMillis: 5_000 })).type, "result");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "cache-invalidate");
+      await serverSession.sendResult(createSuccessResult(103n, 11, new Uint8Array([20])));
+      assertEquals(eventLabel(await session.nextEvent({ timeoutMillis: 5_000 })), "result");
 
       await session.submitNoWait(tokenSubmit(109n, 12, new Uint8Array([26])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
       const pendingWhileCancelling = session.nextEvent({ timeoutMillis: 5_000 }).catch((error) => error);
       const sentBeforeCancel = sentPackets.length;
       await session.cancel({
@@ -436,7 +442,7 @@ Deno.test({
       assertEquals(pendingCancelView.getUint32(20, true), 1);
       assertEquals(pendingCancelView.getUint32(24, true), 12);
       assertEquals(pendingCancelView.getBigUint64(40, true), 109n);
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cancel");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "cancel");
       await serverSession.sendTraceContext({
         traceId: 109n,
         spanId: 1n,
@@ -445,7 +451,7 @@ Deno.test({
         flags: 0,
         bodyBytes: 0,
       });
-      assertEquals((await pendingWhileCancelling).type, "trace-context");
+      assertEquals(eventLabel(await pendingWhileCancelling), "trace-context");
 
       const abortController = new AbortController();
       const abortedSubmit = session.submit(tokenSubmit(104n, 13, new Uint8Array([20])), {
@@ -453,34 +459,38 @@ Deno.test({
       });
       const abortObserved = abortedSubmit.catch((error) => error);
       const abortSubmitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(abortSubmitEvent.type, "submit");
-      if (abortSubmitEvent.type !== "submit") throw new Error("expected submit event");
-      assertEquals(abortSubmitEvent.submit.operationId, 104n);
+      assertEquals(eventLabel(abortSubmitEvent), "submit");
+      if (abortSubmitEvent.metadata.type !== "frame_submit") throw new Error("expected submit event");
+      assertEquals(abortSubmitEvent.metadata.value.operationId, 104n);
       abortController.abort("caller-stop");
       const abortError = await abortObserved;
       assert(abortError instanceof NnrpTimeoutError);
       assertEquals(abortError.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
       assert(sentMessageTypes.includes(NnrpMessageType.Cancel));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cancel");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "cancel");
 
       const terminalSignal = new TrackingAbortSignal();
       const completedSubmit = session.submit(tokenSubmit(105n, 14, new Uint8Array([21])), {
         signal: terminalSignal,
       });
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
-      await serverSession.sendResult({ frameId: 14, payload: new Uint8Array([22]) });
-      assertEquals((await completedSubmit).payload, new Uint8Array([22]));
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
+      await serverSession.sendResult(createSuccessResult(105n, 14, new Uint8Array([22])));
+      const completed = await completedSubmit;
+      assertEquals(completed.event.type === "runtime" ? completed.event.event.tail : undefined, {
+        type: "body",
+        body: new Uint8Array([22]),
+      });
       assertEquals(terminalSignal.addCount, 1);
       assertEquals(terminalSignal.removeCount, 1);
 
       const timedSubmit = session.submit(tokenSubmit(106n, 15, new Uint8Array([23])), { timeoutMillis: 200 });
       const timedObserved = timedSubmit.catch((error) => error);
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "deadline");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "deadline");
       const timeoutError = await timedObserved;
       assert(timeoutError instanceof NnrpTimeoutError);
       assertEquals(timeoutError.diagnostic.code, "NNRP_SUBMIT_TIMEOUT");
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "cancel");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "cancel");
 
       await serverSession.reportCacheMiss({
         cacheNamespace: 5,
@@ -490,7 +500,7 @@ Deno.test({
         profileId: 2,
         diagnosticBytes: 1,
       }, new Uint8Array([3]));
-      assertEquals((await session.nextEvent({ timeoutMillis: 5_000 })).type, "cache-miss");
+      assertEquals(eventLabel(await session.nextEvent({ timeoutMillis: 5_000 })), "cache-miss");
 
       const pressure = {
         scopeId: 102n,
@@ -547,21 +557,21 @@ Deno.test({
 
       await session.patch({ initialCredits: 1, submitCapacityPolicy: "await" });
       await session.submitNoWait(tokenSubmit(107n, 16, new Uint8Array([24])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
       const creditError = await assertRejects(
         () => session.submitNoWait(tokenSubmit(108n, 17, new Uint8Array([25]))),
         NnrpTransportError,
       );
       assertEquals(creditError.diagnostic.code, "NNRP_BACKPRESSURE_CREDIT_EXHAUSTED");
       await serverSession.sendCreditUpdate({ ...pressure, scopeId: 107n, creditWindow: 1n });
-      assertEquals((await session.nextEvent({ timeoutMillis: 5_000 })).type, "credit-update");
+      assertEquals(eventLabel(await session.nextEvent({ timeoutMillis: 5_000 })), "credit-update");
       await session.submitNoWait(tokenSubmit(108n, 17, new Uint8Array([25])));
-      assertEquals((await serverSession.receive({ timeoutMillis: 5_000 })).type, "submit");
+      assertEquals(eventLabel(await serverSession.receive({ timeoutMillis: 5_000 })), "submit");
 
       const pendingEventRejected = assertRejects(() => session.nextEvent({ timeoutMillis: 5_000 }));
       const clientClosing = session.close();
       const closeEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-      assertEquals(closeEvent.type, "close");
+      assertEquals(eventLabel(closeEvent), "close");
       await serverSession.close();
       await clientClosing;
       await pendingEventRejected;
@@ -590,9 +600,76 @@ async function closeForTest(close: () => void | Promise<void>): Promise<void> {
 async function receiveEventTypes(session: NnrpBrowserClientSession, count: number): Promise<string[]> {
   const types: string[] = [];
   for (let index = 0; index < count; index += 1) {
-    types.push((await session.nextEvent({ timeoutMillis: 5_000 })).type);
+    types.push(eventLabel(await session.nextEvent({ timeoutMillis: 5_000 })));
   }
   return types;
+}
+
+function eventLabel(event: NnrpRuntimeEvent): string {
+  switch (event.header.messageType) {
+    case NnrpMessageType.SessionClose:
+      return "close";
+    case NnrpMessageType.FrameSubmit:
+      return "submit";
+    case NnrpMessageType.ResultPush:
+      return "result";
+    case NnrpMessageType.Cancel:
+      return "cancel";
+    case NnrpMessageType.Abort:
+      return "abort";
+    case NnrpMessageType.PriorityUpdate:
+      return "priority-update";
+    case NnrpMessageType.Deadline:
+      return "deadline";
+    case NnrpMessageType.ExpireAt:
+      return "expire-at";
+    case NnrpMessageType.Supersede:
+      return "supersede";
+    case NnrpMessageType.BudgetUpdate:
+      return "budget-update";
+    case NnrpMessageType.Progress:
+      return "progress";
+    case NnrpMessageType.PartialResult:
+      return "partial-result";
+    case NnrpMessageType.Backpressure:
+      return "backpressure";
+    case NnrpMessageType.CreditUpdate:
+      return "credit-update";
+    case NnrpMessageType.CapabilityNegotiation:
+      return "capability-negotiation";
+    case NnrpMessageType.DegradeProfile:
+      return "degrade-profile";
+    case NnrpMessageType.RouteHint:
+      return "route-hint";
+    case NnrpMessageType.ExecutionHint:
+      return "execution-hint";
+    case NnrpMessageType.TraceContext:
+      return "trace-context";
+    case NnrpMessageType.ResultDropReason:
+      return "result-drop-reason";
+    case NnrpMessageType.ErrorRecoverable:
+      return "recoverable-error";
+    case NnrpMessageType.RetryAfter:
+      return "retry-after";
+    case NnrpMessageType.ObjectDeclare:
+      return "object-declare";
+    case NnrpMessageType.ObjectRef:
+      return "object-ref";
+    case NnrpMessageType.ObjectRelease:
+      return "object-release";
+    case NnrpMessageType.ObjectPatch:
+      return "object-patch";
+    case NnrpMessageType.ObjectDelta:
+      return "object-delta";
+    case NnrpMessageType.CacheReference:
+      return "cache-reference";
+    case NnrpMessageType.CacheMiss:
+      return "cache-miss";
+    case NnrpMessageType.CacheInvalidate:
+      return "cache-invalidate";
+    default:
+      return `message-${event.header.messageType}`;
+  }
 }
 
 class TrackingAbortSignal {

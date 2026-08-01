@@ -99,6 +99,7 @@ interface NativeServerAcceptResult {
 
 interface InternalRoleEvent {
   readonly kind: number;
+  readonly headerPresent: boolean;
   readonly messageType: number;
   readonly versionMajor: number;
   readonly wireFormat: number;
@@ -910,6 +911,7 @@ function copyRoleEvent(symbols: NodeSymbols, event: NativeEvent): InternalRoleEv
   try {
     return {
       kind: event.kind,
+      headerPresent: event.header.present !== 0,
       messageType: event.header.message_type,
       versionMajor: event.header.version_major,
       wireFormat: event.header.wire_format,

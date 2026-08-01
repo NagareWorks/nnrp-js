@@ -22,7 +22,7 @@ try {
     chunks: [{ payload: new TextEncoder().encode("hello") }],
   }));
 
-  console.log("NNRP browser result", result.frameId);
+  console.log("NNRP browser result", result.operationId, result.terminalState);
 } catch (error) {
   if (error instanceof NnrpWasmBindingUnavailableError) {
     console.log("WASM runtime is not instantiated yet:", error.diagnostic.code);

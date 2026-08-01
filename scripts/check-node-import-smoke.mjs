@@ -164,7 +164,16 @@ async function verifyNativeTransportLoopbacks() {
       { createWebSocketTransportProvider },
       { openNativeClient },
       { openBackendRuntime },
-      { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY },
+      {
+        createNnrpResultFromRuntimeEvent,
+        createTokenSubmitRequest,
+        decodeNnrpRuntimeEvent,
+        encodeResultPushPayload,
+        NNRP_DEFAULT_SUBMIT_HEADER,
+        NNRP_DEFAULT_SUBMIT_POLICY,
+        NnrpMessageType,
+        NnrpResultClass,
+      },
     ] =
       await Promise.all([
         import(${JSON.stringify(moduleUrl("@nnrp/transport-tcp"))}),
@@ -243,40 +252,70 @@ async function verifyNativeTransportLoopbacks() {
         chunks: [{ payload: new Uint8Array([exchange]) }],
       }));
       const submitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-      if (submitEvent.type !== "submit" || submitEvent.submit.frameId !== exchange) {
+      if (
+        submitEvent.header.messageType !== NnrpMessageType.FrameSubmit ||
+        submitEvent.header.frameId !== exchange ||
+        submitEvent.metadata.type !== "frame_submit" ||
+        submitEvent.tail.type !== "body"
+      ) {
         throw new Error("Node role smoke did not observe submit " + exchange);
       }
       await serverSession.sendPartialResult({
-        operationId: submitEvent.submit.operationId,
+        operationId: submitEvent.metadata.value.operationId,
         resultSequence: 1n,
         objectId: 0n,
         deltaSequence: 1n,
         bodyBytes: 1,
         flags: 0,
       }, new Uint8Array([exchange + 10]));
-      await serverSession.sendResult({
-        frameId: submitEvent.submit.frameId,
-        payload: new Uint8Array([exchange + 20]),
-      });
+      const resultEvent = decodeNnrpRuntimeEvent({
+        ...submitEvent.header,
+        messageType: NnrpMessageType.ResultPush,
+      }, encodeResultPushPayload({
+        statusCode: 0,
+        resultFlags: 0,
+        sectionCount: 0,
+        tileCount: 0,
+        activeProfileId: 0,
+        inferenceMs: 0,
+        queueMs: 0,
+        serverTotalMs: 0,
+        tileBaseId: 0,
+        tileIndexBytes: 0,
+        resultClass: NnrpResultClass.Complete,
+        appliedBudgetPolicy: 0,
+        reusedFrameId: 0,
+        coveredTileCount: 0,
+        droppedTileCount: 0,
+        payloadKindBitmap: 0,
+        payloadFrameCount: 0,
+      }, new Uint8Array([exchange + 20])));
+      await serverSession.sendResult(
+        createNnrpResultFromRuntimeEvent(submitEvent.metadata.value.operationId, resultEvent),
+      );
       await new Promise((resolve) => setTimeout(resolve, 20));
       const partialEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
       if (
-        partialEvent.type !== "partial-result" || partialEvent.body.length !== 1 ||
-        partialEvent.body[0] !== exchange + 10
+        partialEvent.header.messageType !== NnrpMessageType.PartialResult ||
+        partialEvent.metadata.type !== "partial_result" || partialEvent.tail.type !== "body" ||
+        partialEvent.tail.body.length !== 1 || partialEvent.tail.body[0] !== exchange + 10
       ) {
         throw new Error("Node role smoke did not observe partial result " + exchange);
       }
-      const resultEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
+      const result = await clientSession.nextResult({ timeoutMillis: 5_000 });
       if (
-        resultEvent.type !== "result" || resultEvent.result.payload.length !== 1 ||
-        resultEvent.result.payload[0] !== exchange + 20
+        result.operationId !== BigInt(exchange) || result.terminalState !== "success" ||
+        result.event.type !== "runtime" || result.event.event.tail.type !== "body" ||
+        result.event.event.tail.body.length !== 1 || result.event.event.tail.body[0] !== exchange + 20
       ) {
         throw new Error("Node role smoke did not observe result " + exchange);
       }
     }
     const clientClosing = clientSession.close();
     const closeEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-    if (closeEvent.type !== "close") throw new Error("Node role smoke did not observe the client close");
+    if (closeEvent.header.messageType !== NnrpMessageType.SessionClose) {
+      throw new Error("Node role smoke did not observe the client close");
+    }
     await serverSession.close();
     await clientClosing;
     await client.close();

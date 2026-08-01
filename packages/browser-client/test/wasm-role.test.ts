@@ -1,6 +1,8 @@
 import {
+  encodeResultPushPayload,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NnrpMessageType,
+  NnrpResultClass,
   type NnrpTransportConnection,
   type NnrpTransportReceiveOptions,
 } from "@nnrp/core";
@@ -102,11 +104,20 @@ Deno.test("browser WASM role owns carrier callbacks, patch encoding, events, and
     metadata: { phase: "warm" },
   });
 
-  assertEquals(await role.awaitEvent("browser-session"), {
-    type: "result",
-    result: { frameId: 22, payload: new Uint8Array([9, 8]), sessionId: "browser-session" },
-    sessionId: "browser-session",
+  const result = await role.awaitEvent("browser-session");
+  assertEquals(result.header, {
+    versionMajor: 1,
+    wireFormat: 0,
+    messageType: NnrpMessageType.ResultPush,
+    flags: 0,
+    sessionId: 1,
+    frameId: 22,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
   });
+  assertEquals(result.metadata.type, "result_push");
+  assertEquals(result.tail, { type: "body", body: new Uint8Array([9, 8]) });
   await role.close();
   await role.close();
   assertEquals(log, ["binding-close", "connection-close", "binding-free"]);
@@ -135,7 +146,7 @@ Deno.test("browser WASM role sends while an event receive is pending", async () 
   assertEquals(sent, [new Uint8Array([NnrpMessageType.Cancel, 9, 4])]);
 
   resolveEvent(resultPacket());
-  assertEquals((await event).type, "result");
+  assertEquals((await event).header.messageType, NnrpMessageType.ResultPush);
   await role.close();
 });
 
@@ -273,11 +284,36 @@ function patchAck(): Uint8Array {
 }
 
 function resultPacket(): BrowserRoleEventPacket {
+  const payload = encodeResultPushPayload({
+    statusCode: 0,
+    resultFlags: 0,
+    sectionCount: 0,
+    tileCount: 0,
+    activeProfileId: 0,
+    inferenceMs: 0,
+    queueMs: 0,
+    serverTotalMs: 0,
+    tileBaseId: 0,
+    tileIndexBytes: 0,
+    resultClass: NnrpResultClass.Complete,
+    appliedBudgetPolicy: 0,
+    reusedFrameId: 0,
+    coveredTileCount: 0,
+    droppedTileCount: 0,
+    payloadKindBitmap: 0,
+    payloadFrameCount: 0,
+  });
   return {
+    versionMajor: 1,
+    wireFormat: 0,
     messageType: NnrpMessageType.ResultPush,
+    flags: 0,
     sessionId: 1,
     frameId: 22,
-    metadata: new Uint8Array(),
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+    metadata: payload,
     body: new Uint8Array([9, 8]),
   };
 }

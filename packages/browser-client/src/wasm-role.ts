@@ -1,27 +1,13 @@
 import {
-  type BudgetMetadata,
-  type CacheMissMetadata,
-  type CacheReferenceMetadata,
-  type ControlRequestMetadata,
-  decodeCacheInvalidateMetadata,
-  decodeRuntimeControlMetadata,
-  decodeRuntimeObjectMetadata,
+  decodeNnrpRuntimeEvent,
   type NnrpDiagnostic,
   type NnrpInputProfile,
   NnrpMessageType,
-  type NnrpResult,
   type NnrpRuntimeEvent,
-  type NnrpRuntimeFrameEvent,
+  type NnrpRuntimeFrameHeader,
   type NnrpSessionPatchRequest,
   type NnrpSubmitHeaderContext,
   type NnrpTransportConnection,
-  type ObjectDeltaMetadata,
-  type ObjectDescriptorMetadata,
-  type ObjectReferenceMetadata,
-  type ObjectReleaseMetadata,
-  type PressureMetadata,
-  type RuntimeControlMetadata,
-  type SchedulingMetadata,
 } from "@nnrp/core";
 import { NnrpWasmBindingUnavailableError } from "./errors.js";
 
@@ -43,9 +29,15 @@ export interface BrowserRoleConfig {
 }
 
 export interface BrowserRoleEventPacket {
+  readonly versionMajor: number;
+  readonly wireFormat: number;
   readonly messageType: number;
+  readonly flags: number;
   readonly sessionId: number;
   readonly frameId: number;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
   readonly metadata: Uint8Array;
   readonly body: Uint8Array;
   free?(): void;
@@ -400,140 +392,19 @@ function decodeSessionPatchAck(bytes: Uint8Array, request: NnrpSessionPatchReque
   };
 }
 
-function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket, sessionId: string): NnrpRuntimeEvent {
-  const messageType = packet.messageType as NnrpMessageType;
-  if (messageType === NnrpMessageType.ResultPush) {
-    const result: NnrpResult = { frameId: packet.frameId, payload: packet.body, sessionId };
-    return { type: "result", result, sessionId };
-  }
-  if (messageType === NnrpMessageType.ResultDrop) {
-    return {
-      type: "drop",
-      frameId: packet.frameId,
-      sessionId,
-      diagnostic: {
-        code: "NNRP_RESULT_DROPPED",
-        message: "The browser runtime dropped the result.",
-        source: "wasm",
-        retryable: false,
-      },
-    };
-  }
-  if (messageType === NnrpMessageType.SessionClose) return { type: "close", sessionId };
-  return decodeRuntimeFrameEvent(messageType, concatBytes(packet.metadata, packet.body), sessionId);
-}
-
-function decodeRuntimeFrameEvent(
-  messageType: NnrpMessageType,
-  payload: Uint8Array,
-  sessionId: string,
-): NnrpRuntimeFrameEvent {
-  const scope = { sessionId };
-  switch (messageType) {
-    case NnrpMessageType.Cancel:
-    case NnrpMessageType.Abort: {
-      const { metadata, tail } = decodeRuntimeControlMetadata(messageType, payload);
-      return {
-        type: messageType === NnrpMessageType.Cancel ? "cancel" : "abort",
-        messageType,
-        metadata: metadata as ControlRequestMetadata,
-        diagnostic: tail,
-        ...scope,
-      } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.PriorityUpdate:
-    case NnrpMessageType.Deadline:
-    case NnrpMessageType.ExpireAt: {
-      const { metadata } = decodeRuntimeControlMetadata(messageType, payload);
-      const type = messageType === NnrpMessageType.PriorityUpdate
-        ? "priority-update"
-        : messageType === NnrpMessageType.Deadline
-        ? "deadline"
-        : "expire-at";
-      return { type, messageType, metadata: metadata as SchedulingMetadata, ...scope } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.Supersede:
-    case NnrpMessageType.CapabilityNegotiation:
-    case NnrpMessageType.DegradeProfile:
-    case NnrpMessageType.RouteHint:
-    case NnrpMessageType.ExecutionHint:
-    case NnrpMessageType.TraceContext:
-    case NnrpMessageType.Progress:
-    case NnrpMessageType.PartialResult:
-    case NnrpMessageType.ResultDropReason:
-    case NnrpMessageType.ErrorRecoverable:
-    case NnrpMessageType.RetryAfter: {
-      const { metadata, tail } = decodeRuntimeControlMetadata(messageType, payload);
-      return runtimeControlEventWithTail(messageType, metadata, tail, scope);
-    }
-    case NnrpMessageType.BudgetUpdate:
-    case NnrpMessageType.Backpressure:
-    case NnrpMessageType.CreditUpdate: {
-      const { metadata } = decodeRuntimeControlMetadata(messageType, payload);
-      if (messageType === NnrpMessageType.BudgetUpdate) {
-        return { type: "budget-update", messageType, metadata: metadata as BudgetMetadata, ...scope };
-      }
-      return {
-        type: messageType === NnrpMessageType.Backpressure ? "backpressure" : "credit-update",
-        messageType,
-        metadata: metadata as PressureMetadata,
-        ...scope,
-      } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.ObjectDeclare:
-    case NnrpMessageType.ObjectRef:
-    case NnrpMessageType.ObjectRelease:
-    case NnrpMessageType.ObjectPatch:
-    case NnrpMessageType.ObjectDelta:
-    case NnrpMessageType.CacheReference:
-    case NnrpMessageType.CacheMiss: {
-      const { metadata, tail } = decodeRuntimeObjectMetadata(messageType, payload);
-      return runtimeObjectEvent(messageType, metadata, tail, scope);
-    }
-    case NnrpMessageType.CacheInvalidate:
-      return { type: "cache-invalidate", messageType, metadata: decodeCacheInvalidateMetadata(payload), ...scope };
-    default:
-      throw new Error(`Browser WASM role returned unsupported runtime message type 0x${packetTypeHex(messageType)}.`);
-  }
-}
-
-function runtimeControlEventWithTail(
-  messageType: NnrpMessageType,
-  metadata: RuntimeControlMetadata,
-  tail: Uint8Array,
-  scope: { readonly sessionId: string },
-): NnrpRuntimeFrameEvent {
-  const mapping = RUNTIME_CONTROL_EVENT_MAPPINGS[messageType];
-  if (mapping === undefined) throw new Error(`runtime control message ${messageType} has no event mapping`);
-  return { type: mapping.type, messageType, metadata, [mapping.tail]: tail, ...scope } as NnrpRuntimeFrameEvent;
-}
-
-function runtimeObjectEvent(
-  messageType: NnrpMessageType,
-  metadata:
-    | ObjectDescriptorMetadata
-    | ObjectReferenceMetadata
-    | ObjectReleaseMetadata
-    | ObjectDeltaMetadata
-    | CacheReferenceMetadata
-    | CacheMissMetadata,
-  tail: Uint8Array,
-  scope: { readonly sessionId: string },
-): NnrpRuntimeFrameEvent {
-  if (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta) {
-    const delta = metadata as ObjectDeltaMetadata;
-    return {
-      type: messageType === NnrpMessageType.ObjectPatch ? "object-patch" : "object-delta",
-      messageType,
-      metadata: delta,
-      metadataBody: tail.slice(0, delta.metadataBytes),
-      delta: tail.slice(delta.metadataBytes),
-      ...scope,
-    } as NnrpRuntimeFrameEvent;
-  }
-  const mapping = RUNTIME_OBJECT_EVENT_MAPPINGS[messageType];
-  if (mapping === undefined) throw new Error(`runtime object message ${messageType} has no event mapping`);
-  return { type: mapping.type, messageType, metadata, [mapping.tail]: tail, ...scope } as NnrpRuntimeFrameEvent;
+function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket, _sessionId: string): NnrpRuntimeEvent {
+  const header: NnrpRuntimeFrameHeader = {
+    versionMajor: packet.versionMajor as 1,
+    wireFormat: packet.wireFormat as 0,
+    messageType: packet.messageType as NnrpMessageType,
+    flags: packet.flags,
+    sessionId: packet.sessionId,
+    frameId: packet.frameId,
+    viewId: packet.viewId,
+    routeId: packet.routeId,
+    traceId: packet.traceId,
+  };
+  return decodeNnrpRuntimeEvent(header, concatBytes(packet.metadata, packet.body));
 }
 
 function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
@@ -542,29 +413,3 @@ function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
   output.set(second, first.byteLength);
   return output;
 }
-
-function packetTypeHex(messageType: NnrpMessageType): string {
-  return Number(messageType).toString(16).padStart(2, "0");
-}
-
-const RUNTIME_CONTROL_EVENT_MAPPINGS: Partial<Record<NnrpMessageType, { type: string; tail: string }>> = {
-  [NnrpMessageType.Supersede]: { type: "supersede", tail: "diagnostic" },
-  [NnrpMessageType.CapabilityNegotiation]: { type: "capability-negotiation", tail: "body" },
-  [NnrpMessageType.DegradeProfile]: { type: "degrade-profile", tail: "body" },
-  [NnrpMessageType.RouteHint]: { type: "route-hint", tail: "body" },
-  [NnrpMessageType.ExecutionHint]: { type: "execution-hint", tail: "body" },
-  [NnrpMessageType.TraceContext]: { type: "trace-context", tail: "body" },
-  [NnrpMessageType.Progress]: { type: "progress", tail: "body" },
-  [NnrpMessageType.PartialResult]: { type: "partial-result", tail: "body" },
-  [NnrpMessageType.ResultDropReason]: { type: "result-drop-reason", tail: "diagnostic" },
-  [NnrpMessageType.ErrorRecoverable]: { type: "recoverable-error", tail: "diagnostic" },
-  [NnrpMessageType.RetryAfter]: { type: "retry-after", tail: "diagnostic" },
-};
-
-const RUNTIME_OBJECT_EVENT_MAPPINGS: Partial<Record<NnrpMessageType, { type: string; tail: string }>> = {
-  [NnrpMessageType.ObjectDeclare]: { type: "object-declare", tail: "body" },
-  [NnrpMessageType.ObjectRef]: { type: "object-ref", tail: "body" },
-  [NnrpMessageType.ObjectRelease]: { type: "object-release", tail: "diagnostic" },
-  [NnrpMessageType.CacheReference]: { type: "cache-reference", tail: "body" },
-  [NnrpMessageType.CacheMiss]: { type: "cache-miss", tail: "diagnostic" },
-};
