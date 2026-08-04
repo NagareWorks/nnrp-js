@@ -3,6 +3,7 @@ import {
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpClientProviderRoutes,
+  NnrpMessageType,
   type NnrpServerProviderRoutes,
   type NnrpTransportClientSecurity,
   type NnrpTransportConnection,
@@ -39,6 +40,7 @@ import {
   type HostRouteCaseResult,
   type HostRouteFixture,
   type HostRouteScenario,
+  hostRouteTimeoutMillis,
   injectedFailures,
   passedHostRouteResult,
   validateHostRouteScenario,
@@ -58,6 +60,7 @@ interface TargetOptions {
 
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const CLIENT_ACCEPT_OBSERVATION_MILLISECONDS = 250;
+const SERVER_CLOSE_FALLBACK_MILLISECONDS = 2_000;
 const BROWSER_RESULT_TIMEOUT_MILLISECONDS = 15_000;
 const BROWSER_OUTPUT_DRAIN_TIMEOUT_MILLISECONDS = 1_000;
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -342,7 +345,7 @@ async function runClientCase(
       transportPolicy: policy,
     });
     try {
-      const session = client.openSession({ sessionId: `host-route-${scenario.id}`, inputProfile: "token" });
+      const session = await client.openSession();
       await session.submitNoWait(createTokenSubmitRequest({
         identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
         policy: NNRP_DEFAULT_SUBMIT_POLICY,
@@ -463,8 +466,12 @@ async function runServerCase(
       sessions.push(session);
     }
     await Promise.all(sessions.map(async (session) => {
-      const event = await session.receive({ timeoutMillis: 250 });
-      if (event.type !== "close") throw new Error(`Expected peer close, received ${event.type}.`);
+      const event = await session.receive({
+        timeoutMillis: hostRouteTimeoutMillis(scenario, SERVER_CLOSE_FALLBACK_MILLISECONDS),
+      });
+      if (event.header.messageType !== NnrpMessageType.SessionClose) {
+        throw new Error(`Expected peer close, received message ${event.header.messageType}.`);
+      }
       await session.close();
     }));
     return passedHostRouteResult(

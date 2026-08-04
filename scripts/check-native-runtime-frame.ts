@@ -2,12 +2,14 @@ import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpMessageType,
   RuntimeRole,
 } from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createServer as createTcpServer } from "node:net";
+import { createSuccessResult } from "./runtime-event-fixtures.ts";
 
 if (import.meta.main) {
   await verifyNativeRuntimeFrame();
@@ -32,7 +34,7 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
   });
   const accepting = server.accept();
   let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
-  let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;
+  let clientSession: Awaited<ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]>> | undefined;
   let serverSession: Awaited<ReturnType<typeof server.accept>> | undefined;
 
   try {
@@ -43,20 +45,22 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
       transports: [provider],
       transportPolicy: "force-tcp",
     });
-    clientSession = client.openSession({ sessionId: "native-runtime-frame-smoke", inputProfile: "token" });
+    clientSession = await client.openSession();
     const bootstrapResult = clientSession.submit(tokenSubmit(1n, 1, new Uint8Array([0x62, 0x6f, 0x6f, 0x74])));
     serverSession = await accepting;
     const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-    if (bootstrapEvent.type !== "submit") {
-      throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.type}`);
+    if (bootstrapEvent.metadata.type !== "frame_submit") {
+      throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.metadata.type}`);
     }
-    await serverSession.sendResult({ frameId: bootstrapEvent.submit.frameId, payload: new Uint8Array() });
+    await serverSession.sendResult(
+      createSuccessResult(bootstrapEvent.metadata.value.operationId, bootstrapEvent.header.frameId, new Uint8Array()),
+    );
     await bootstrapResult;
 
     await clientSession.submitNoWait(tokenSubmit(2n, 2, new Uint8Array([0x77, 0x6f, 0x72, 0x6b])));
     const pendingSubmit = await serverSession.receive({ timeoutMillis: 5_000 });
-    if (pendingSubmit.type !== "submit") {
-      throw new Error(`expected pending submit event, got ${pendingSubmit.type}`);
+    if (pendingSubmit.metadata.type !== "frame_submit") {
+      throw new Error(`expected pending submit event, got ${pendingSubmit.metadata.type}`);
     }
 
     const diagnostic = new Uint8Array([0x6f, 0x6b]);
@@ -73,9 +77,9 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
 
     const event = await serverSession.receive({ timeoutMillis: 5_000 });
     if (
-      event.type !== "cancel" || event.sessionId === undefined || event.sessionId.length === 0 ||
-      event.metadata.operationId !== 2n ||
-      event.diagnostic?.[0] !== 0x6f || event.diagnostic?.[1] !== 0x6b
+      event.header.messageType !== NnrpMessageType.Cancel || event.header.sessionId === 0 ||
+      event.metadata.type !== "control_request" || event.metadata.value.operationId !== 2n ||
+      event.tail.type !== "diagnostic" || event.tail.diagnostic[0] !== 0x6f || event.tail.diagnostic[1] !== 0x6b
     ) {
       throw new Error(`unexpected native runtime frame event: ${JSON.stringify(event, bigintJsonReplacer)}`);
     }

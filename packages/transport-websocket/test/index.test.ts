@@ -1,6 +1,18 @@
 import { type NnrpNativeTransportBinding, NnrpTransportError } from "@nnrp/core";
-import { assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import { createWebSocketTransportProvider } from "../src/index.ts";
+import { selectNativeAbiLayout } from "../src/native-node.ts";
+
+Deno.test("@nnrp/transport-websocket validates every supported native ABI layout", () => {
+  assertNativeAbiLayouts(selectNativeAbiLayout);
+});
+
+function assertNativeAbiLayouts(select: typeof selectNativeAbiLayout): void {
+  assertEquals(select(8, 8).event.size, 200);
+  assertEquals(select(4, 8).request.openSize, 56);
+  assertEquals(select(4, 4).event.size, 160);
+  assertThrows(() => select(8, 4), Error, "does not support pointer=8, u64-align=4");
+}
 
 Deno.test("@nnrp/transport-websocket exposes browser WebSocket provider metadata", () => {
   const provider = createWebSocketTransportProvider({ WebSocket: fakeWebSocketConstructor });
@@ -91,11 +103,31 @@ Deno.test("@nnrp/transport-websocket receives all browser binary message forms",
   await assertRejects(() => connection.receive({ maxPackets: 0 }), RangeError);
 });
 
+Deno.test("@nnrp/transport-websocket keeps concurrent browser receives packet-backed", async () => {
+  const provider = createWebSocketTransportProvider({ WebSocket: fakeWebSocketConstructor });
+  const connection = await provider.connect({ endpoint: "ws://127.0.0.1/concurrent" });
+  const socket = FakeWebSocket.last!;
+  const first = connection.receive({ maxPackets: 1 });
+  const second = connection.receive({ maxPackets: 1 });
+
+  socket.message(new Uint8Array([1]).buffer);
+  assertEquals(await first, [new Uint8Array([1])]);
+  socket.message(new Uint8Array([2]).buffer);
+  assertEquals(await second, [new Uint8Array([2])]);
+});
+
 Deno.test("@nnrp/transport-websocket surfaces browser protocol and lifecycle failures", async () => {
   const provider = createWebSocketTransportProvider({ WebSocket: fakeWebSocketConstructor });
   const textConnection = await provider.connect({ endpoint: "ws://127.0.0.1/text" });
+  const firstTextReceive = textConnection.receive({ timeoutMillis: 100 });
+  const secondTextReceive = textConnection.receive({ timeoutMillis: 100 });
   FakeWebSocket.last!.message("not-binary");
-  await assertRejects(() => textConnection.receive(), NnrpTransportError);
+  const [firstTextError, secondTextError] = await Promise.all([
+    assertRejects(() => firstTextReceive, NnrpTransportError),
+    assertRejects(() => secondTextReceive, NnrpTransportError),
+  ]);
+  assertEquals(firstTextError.diagnostic.code, "NNRP_WEBSOCKET_BINARY_REQUIRED");
+  assertEquals(secondTextError.diagnostic.code, "NNRP_WEBSOCKET_BINARY_REQUIRED");
 
   const errorConnection = await provider.connect({ endpoint: "ws://127.0.0.1/error" });
   FakeWebSocket.last!.fail();

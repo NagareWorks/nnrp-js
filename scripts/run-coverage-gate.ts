@@ -3,15 +3,41 @@ import { parseLcovCoverage } from "./lcov-coverage.ts";
 const coverageDir = "artifacts/coverage";
 const lcovPath = `${coverageDir}/lcov.info`;
 const lineThreshold = parseLineThreshold(Deno.args);
+const browserIntegrationTests = [
+  "packages/browser-client/test/browser-role.integration.test.ts",
+  "packages/browser-client/test/browser-wasm-duplex.integration.test.ts",
+] as const;
+const unitTestPaths = [
+  "packages/browser-client/test/index.test.ts",
+  "packages/browser-client/test/rust-codec-parity.test.ts",
+  "packages/browser-client/test/wasm-role.test.ts",
+  "packages/core/test/*.test.ts",
+  "packages/native-client/test/*.test.ts",
+  "packages/native-server/test/*.test.ts",
+  "packages/transport-*/test/*.test.ts",
+  "scripts/*.test.ts",
+] as const;
+const testPermissions = [
+  "--unstable-sloppy-imports",
+  "--allow-env",
+  "--allow-ffi",
+  "--allow-net=127.0.0.1",
+  "--allow-read",
+  "--allow-write",
+] as const;
 const excludedSources = new Set([
   "packages/browser-client/src/index.ts",
   "packages/browser-client/src/wasm-role.ts",
   "packages/browser-client/wasm/nnrp_wasm.js",
   "packages/native-client/src/index.ts",
   "packages/native-server/src/index.ts",
+  "packages/transport-ipc/src/native-node.ts",
   "packages/transport-ipc/src/native.ts",
+  "packages/transport-quic/src/native-node.ts",
   "packages/transport-quic/src/native.ts",
+  "packages/transport-tcp/src/native-node.ts",
   "packages/transport-tcp/src/native.ts",
+  "packages/transport-websocket/src/native-node.ts",
   "packages/transport-websocket/src/native.ts",
   "scripts/run-host-route-target.ts",
 ]);
@@ -22,18 +48,22 @@ await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
   }
 });
 
-await run(Deno.execPath(), [
-  "test",
-  "--unstable-sloppy-imports",
-  "--allow-env",
-  "--allow-ffi",
-  "--allow-net=127.0.0.1",
-  "--allow-read",
-  "--allow-write",
-  `--coverage=${coverageDir}`,
-  "packages/*/test/*.test.ts",
-  "scripts/*.test.ts",
-]);
+const coverageRuns = [
+  { name: "unit", tests: unitTestPaths },
+  ...browserIntegrationTests.map((test, index) => ({
+    name: `browser-integration-${index + 1}`,
+    tests: [test] as readonly string[],
+  })),
+] as const;
+
+for (const coverageRun of coverageRuns) {
+  await run(Deno.execPath(), [
+    "test",
+    ...testPermissions,
+    `--coverage=${coverageDir}/raw/${coverageRun.name}`,
+    ...coverageRun.tests,
+  ]);
+}
 
 await run(Deno.execPath(), [
   "run",
@@ -45,12 +75,18 @@ await run(Deno.execPath(), [
   "scripts/check-native-transport-loopback.ts",
 ]);
 
-await run(Deno.execPath(), [
-  "coverage",
-  "--lcov",
-  `--output=${lcovPath}`,
-  coverageDir,
-]);
+const lcovReports: string[] = [];
+for (const coverageRun of coverageRuns) {
+  const reportPath = `${coverageDir}/${coverageRun.name}.lcov`;
+  await run(Deno.execPath(), [
+    "coverage",
+    "--lcov",
+    `--output=${reportPath}`,
+    `${coverageDir}/raw/${coverageRun.name}`,
+  ]);
+  lcovReports.push(await Deno.readTextFile(reportPath));
+}
+await Deno.writeTextFile(lcovPath, lcovReports.join("\n"));
 
 const coverage = parseLcovCoverage(await Deno.readTextFile(lcovPath), excludedSources);
 const linePercent = percentage(coverage.lines.hit, coverage.lines.found);

@@ -1,6 +1,11 @@
 import { type NnrpNativeTransportBinding } from "@nnrp/core";
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { createTcpTransportProvider } from "../src/index.ts";
+import { selectNativeAbiLayout } from "../src/native-node.ts";
+
+Deno.test("@nnrp/transport-tcp validates every supported native ABI layout", () => {
+  assertNativeAbiLayouts(selectNativeAbiLayout);
+});
 
 Deno.test("@nnrp/transport-tcp reports an unavailable package binding", () => {
   const provider = createTcpTransportProvider({
@@ -77,4 +82,11 @@ function fakeTcpBinding(operations: string[]): NnrpNativeTransportBinding {
       });
     },
   };
+}
+
+function assertNativeAbiLayouts(select: typeof selectNativeAbiLayout): void {
+  assertEquals(select(8, 8).event.size, 200);
+  assertEquals(select(4, 8).request.openSize, 56);
+  assertEquals(select(4, 4).event.size, 160);
+  assertThrows(() => select(8, 4), Error, "does not support pointer=8, u64-align=4");
 }

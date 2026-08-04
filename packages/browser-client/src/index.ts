@@ -6,19 +6,26 @@ import {
   type CapabilityMetadata,
   type ControlRequestMetadata,
   createBrowserWasmManifest,
+  createNnrpResultFromRuntimeEvent,
   createTransportCandidates,
   createTransportSelectionSummary,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeSessionOpenMetadata,
   encodeSubmitPayload,
   NNRP_PROTOCOL_VERSION,
+  NNRP_STANDARD_PROFILE_TOKEN,
+  NNRP_TOKEN_DELTA_SCHEMA_ID,
+  NNRP_TOKEN_DELTA_SCHEMA_VERSION,
   type NnrpAbortSignalLike,
+  NnrpCacheObjectKind,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpClientProviderRoutes,
   type NnrpEventPollOptions,
+  NnrpFlowScopeKind,
   type NnrpInputProfile,
   NnrpMessageType,
   type NnrpNormalizedSubmitRequest,
@@ -26,10 +33,11 @@ import {
   NnrpRecoveryError,
   type NnrpResult,
   type NnrpRuntimeEvent,
-  type NnrpSessionFlowControlOptions,
   type NnrpSessionMigrationRequest,
   type NnrpSessionPatchRequest,
   type NnrpSessionPatchResult,
+  NnrpSessionPriorityClass,
+  NnrpSessionRecoveryTicket,
   type NnrpSubmitOptions,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
@@ -59,25 +67,39 @@ import {
   type SchedulingMetadata,
   selectTransport,
   type SupersedeMetadata,
-  throwIfResultDrop,
   type TraceContextMetadata,
   validateEventPollOptions,
-  validateSessionMetadata,
 } from "@nnrp/core";
 import {
+  assertNegotiatedBrowserSessionId,
   type BrowserPatchAck,
+  type BrowserWasmConnection,
   type BrowserWasmModule,
   type BrowserWasmRole,
   loadBrowserWasmModule,
-  openBrowserWasmRole,
-  standardProfileId,
-  standardProfileSchema,
+  openBrowserWasmConnection,
 } from "./wasm-role.js";
 import { NnrpWasmBindingUnavailableError } from "./errors.js";
 
 export { NnrpWasmBindingUnavailableError };
 
 const EMPTY_PAYLOAD = new Uint8Array();
+const BROWSER_SESSION_DEFAULTS: NormalizedBrowserSessionOptions = Object.freeze({
+  requestedSessionId: 0,
+  profileId: NNRP_STANDARD_PROFILE_TOKEN,
+  schemaId: NNRP_TOKEN_DELTA_SCHEMA_ID,
+  schemaVersion: NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+  priorityClass: NnrpSessionPriorityClass.Balanced,
+  defaultDeadlineMillis: 500,
+  maxInFlightOperations: 4,
+  leaseTtlHintMillis: 30_000,
+  allowResume: false,
+  resumeTokenBytes: 0,
+  cacheHints: Object.freeze([]),
+});
+const CACHE_OBJECT_KINDS = new Set<number>(
+  Object.values(NnrpCacheObjectKind).filter((value): value is number => typeof value === "number"),
+);
 
 type RuntimeObjectSendMetadata =
   | ObjectDescriptorMetadata
@@ -274,12 +296,32 @@ export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
   connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
 }
 
-export interface NnrpBrowserSessionOptions extends NnrpSessionFlowControlOptions {
-  readonly sessionId?: string;
-  readonly inputProfile?: NnrpInputProfile;
-  readonly targetCadence?: number;
-  readonly qualityTier?: number;
-  readonly metadata?: Readonly<Record<string, string>>;
+export interface NnrpBrowserSessionOptions {
+  readonly requestedSessionId?: number;
+  readonly profileId?: number;
+  readonly schemaId?: number;
+  readonly schemaVersion?: number;
+  readonly priorityClass?: NnrpSessionPriorityClass;
+  readonly defaultDeadlineMillis?: number;
+  readonly maxInFlightOperations?: number;
+  readonly leaseTtlHintMillis?: number;
+  readonly allowResume?: boolean;
+  readonly resumeTokenBytes?: number;
+  readonly cacheHints?: readonly NnrpCacheObjectKind[];
+}
+
+interface NormalizedBrowserSessionOptions {
+  readonly requestedSessionId: number;
+  readonly profileId: number;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly priorityClass: NnrpSessionPriorityClass;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly allowResume: boolean;
+  readonly resumeTokenBytes: number;
+  readonly cacheHints: readonly NnrpCacheObjectKind[];
 }
 
 export interface NnrpWasmBindingOptions {
@@ -328,11 +370,7 @@ export interface NnrpResolvedWasmArtifact {
 }
 
 const browserRuntimeModules = new WeakMap<NnrpBrowserRuntime, BrowserWasmModule>();
-const browserRuntimeRoles = new WeakMap<NnrpBrowserRuntime, Set<BrowserWasmRole>>();
-const browserClientRoleOpeners = new WeakMap<
-  NnrpBrowserClient,
-  (options: NnrpBrowserSessionOptions, wireSessionId: number) => Promise<BrowserWasmRole>
->();
+const browserRuntimeConnections = new WeakMap<NnrpBrowserRuntime, Set<BrowserWasmConnection>>();
 const browserClientSessionReleasers = new WeakMap<
   NnrpBrowserClient,
   (session: NnrpBrowserClientSession) => void
@@ -348,7 +386,7 @@ export async function openBrowserRuntime(options: NnrpBrowserRuntimeOptions = {}
   );
   const runtime = new NnrpBrowserRuntime(binding, options.transportPolicy ?? "auto");
   browserRuntimeModules.set(runtime, wasm);
-  browserRuntimeRoles.set(runtime, new Set());
+  browserRuntimeConnections.set(runtime, new Set());
   return runtime;
 }
 
@@ -427,10 +465,10 @@ export class NnrpBrowserRuntime {
   public async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    const roles = browserRuntimeRoles.get(this);
-    if (roles !== undefined) {
-      const results = await Promise.allSettled([...roles].map(async (role) => await role.close()));
-      roles.clear();
+    const connections = browserRuntimeConnections.get(this);
+    if (connections !== undefined) {
+      const results = await Promise.allSettled([...connections].map(async (connection) => await connection.close()));
+      connections.clear();
       throwFirstRejected(results);
     }
   }
@@ -498,34 +536,12 @@ export interface NnrpBrowserClientState {
 
 export class NnrpBrowserClient {
   readonly #state: NnrpBrowserClientState;
-  readonly #sessions = new Map<string, NnrpBrowserClientSession>();
-  #nextSessionId = 1;
-  #nextWireSessionId = 1;
+  readonly #sessions = new Map<number, NnrpBrowserClientSession>();
+  #connectionPromise: Promise<BrowserWasmConnection> | undefined;
   #closed = false;
 
   public constructor(state: NnrpBrowserClientState) {
     this.#state = state;
-    browserClientRoleOpeners.set(this, async (options, wireSessionId) => {
-      this.#ensureOpen();
-      const connection = await this.#state.provider.connect({
-        endpoint: this.#state.providerEndpoint,
-        maxPacketBytes: this.#state.provider.metadata.limits.maxFrameBytes,
-      });
-      const schema = standardProfileSchema(options.inputProfile);
-      const role = await openBrowserWasmRole(requireBrowserWasmModule(this.#state.runtime), connection, {
-        requestedSessionId: wireSessionId,
-        profileId: standardProfileId(options.inputProfile),
-        schemaId: schema.id,
-        schemaVersion: schema.version,
-        priorityClass: 1,
-        defaultDeadlineMs: 30_000,
-        maxInFlightOperations: normalizedMaxInFlightOperations(options.initialCredits),
-        leaseTtlHintMs: 0,
-        maxPacketBytes: browserMaxPacketBytes(this.#state.provider),
-      });
-      browserRuntimeRoles.get(this.#state.runtime)?.add(role);
-      return role;
-    });
     browserClientSessionReleasers.set(this, (session) => {
       if (this.#sessions.get(session.sessionId) === session) this.#sessions.delete(session.sessionId);
     });
@@ -543,29 +559,56 @@ export class NnrpBrowserClient {
     return this.#state.runtime;
   }
 
-  public openSession(options: NnrpBrowserSessionOptions = {}): NnrpBrowserClientSession {
+  public async openSession(options: NnrpBrowserSessionOptions = {}): Promise<NnrpBrowserClientSession> {
     this.#ensureOpen();
-    validateSessionMetadata(options);
     const normalized = this.#createSessionOptions(options);
-    const sessionId = normalized.sessionId!;
-    if (this.#sessions.has(sessionId)) {
-      throw new NnrpProtocolError({
-        code: "NNRP_SESSION_ID_DUPLICATE",
-        message: `Browser client session id '${sessionId}' is already open.`,
-        source: "runtime",
-        retryable: false,
-      });
+    const role = await (await this.#connection()).openSession(browserRoleConfig(normalized));
+    return await this.#registerSession(normalized, role);
+  }
+
+  public async resumeSession(
+    ticket: NnrpSessionRecoveryTicket,
+    options: NnrpBrowserSessionOptions = {},
+  ): Promise<NnrpBrowserClientSession> {
+    this.#ensureOpen();
+    if (!(ticket instanceof NnrpSessionRecoveryTicket)) {
+      throw new TypeError("ticket must be an NnrpSessionRecoveryTicket");
     }
+    const normalized = this.#createSessionOptions({
+      ...options,
+      requestedSessionId: ticket.sessionId,
+      allowResume: true,
+    });
+    const role = await (await this.#connection()).resumeSession(ticket, browserRoleConfig(normalized));
+    return await this.#registerSession(normalized, role);
+  }
+
+  async #registerSession(
+    options: NormalizedBrowserSessionOptions,
+    role: BrowserWasmRole,
+  ): Promise<NnrpBrowserClientSession> {
+    if (this.closed) {
+      await role.close();
+      throw closedError("browser client");
+    }
+    const sessionId = assertNegotiatedBrowserSessionId(role.sessionId);
+    if (this.#sessions.has(sessionId)) {
+      await role.close();
+      throw duplicateBrowserSessionError(sessionId);
+    }
+    const activeProfile = standardInputProfile(options.profileId);
     const session = new NnrpBrowserClientSession({
       client: this,
-      options: normalized,
-      wireSessionId: this.#nextWireSessionId++,
+      options,
+      wireSessionId: sessionId,
     });
+    browserSessionRoles.set(session, role);
+    if (activeProfile !== undefined) browserSessionActiveProfiles.set(session, activeProfile);
     this.#sessions.set(sessionId, session);
     return session;
   }
 
-  public nextSessionEvent(sessionId: string, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
     this.#ensureOpen();
     validateEventPollOptions(options);
     const session = this.#sessions.get(sessionId);
@@ -579,6 +622,14 @@ export class NnrpBrowserClient {
       [...this.#sessions.values()].map(async (session) => await session.close()),
     );
     this.#sessions.clear();
+    if (this.#connectionPromise !== undefined) {
+      const connection = await this.#connectionPromise.catch(() => undefined);
+      if (connection !== undefined) {
+        const connectionResult = await Promise.allSettled([connection.close()]);
+        browserRuntimeConnections.get(this.#state.runtime)?.delete(connection);
+        results.push(...connectionResult);
+      }
+    }
     throwFirstRejected(results);
   }
 
@@ -592,18 +643,43 @@ export class NnrpBrowserClient {
     }
   }
 
-  #createSessionOptions(options: NnrpBrowserSessionOptions): NnrpBrowserSessionOptions {
-    const merged = mergeSessionOptions(this.#state.sessionDefaults, options);
-    return {
-      ...merged,
-      sessionId: merged.sessionId ?? `browser-session-${this.#nextSessionId++}`,
-    };
+  #createSessionOptions(options: NnrpBrowserSessionOptions): NormalizedBrowserSessionOptions {
+    return normalizeBrowserSessionOptions(this.#state.sessionDefaults, options);
+  }
+
+  #connection(): Promise<BrowserWasmConnection> {
+    this.#ensureOpen();
+    if (this.#connectionPromise === undefined) {
+      const opening = (async () => {
+        const carrier = await this.#state.provider.connect({
+          endpoint: this.#state.providerEndpoint,
+          maxPacketBytes: this.#state.provider.metadata.limits.maxFrameBytes,
+        });
+        const connection = await openBrowserWasmConnection(
+          requireBrowserWasmModule(this.#state.runtime),
+          carrier,
+          { maxPacketBytes: browserMaxPacketBytes(this.#state.provider) },
+        );
+        if (this.closed) {
+          await connection.close();
+          throw closedError("browser client");
+        }
+        browserRuntimeConnections.get(this.#state.runtime)?.add(connection);
+        return connection;
+      })();
+      const tracked = opening.catch((error) => {
+        if (this.#connectionPromise === tracked) this.#connectionPromise = undefined;
+        throw error;
+      });
+      this.#connectionPromise = tracked;
+    }
+    return this.#connectionPromise;
   }
 }
 
 export interface NnrpBrowserClientSessionState {
   readonly client: NnrpBrowserClient;
-  options: NnrpBrowserSessionOptions;
+  readonly options: NnrpBrowserSessionOptions;
   readonly wireSessionId: number;
 }
 
@@ -617,11 +693,16 @@ interface BrowserResultWaiter {
   readonly reject: (error: unknown) => void;
 }
 
+const browserRuntimeEventOperationIds = new WeakMap<NnrpRuntimeEvent, bigint>();
+const browserSessionRoles = new WeakMap<NnrpBrowserClientSession, BrowserWasmRole>();
+const browserSessionActiveProfiles = new WeakMap<NnrpBrowserClientSession, NnrpInputProfile>();
+
 export class NnrpBrowserClientSession {
   readonly #state: NnrpBrowserClientSessionState;
   readonly #runtimeObjects = new RuntimeObjectLifecycle();
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
+  readonly #operationByFrame = new Map<number, bigint>();
   readonly #cancelledOperations = new Set<bigint>();
   readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
@@ -629,24 +710,24 @@ export class NnrpBrowserClientSession {
   readonly #eventWaiters: BrowserEventWaiter[] = [];
   readonly #resultWaiters = new Map<number, BrowserResultWaiter>();
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
-  #rolePromise: Promise<BrowserWasmRole> | undefined;
   #eventPump: Promise<void> | undefined;
   #availableCredits: number;
+  #submitCapacityPolicy: "reject" | "await" = "reject";
   #nextControlSequence = 1n;
   #nextRuntimeFrameId = 1;
   #closed = false;
 
   public constructor(state: NnrpBrowserClientSessionState) {
     this.#state = state;
-    this.#availableCredits = state.options.initialCredits ?? Number.POSITIVE_INFINITY;
+    this.#availableCredits = Number.POSITIVE_INFINITY;
   }
 
   public get options(): NnrpBrowserSessionOptions {
     return this.#state.options;
   }
 
-  public get sessionId(): string {
-    return this.#state.options.sessionId ?? "";
+  public get sessionId(): number {
+    return this.#state.wireSessionId;
   }
 
   public async submit(request: NnrpSubmitRequest, options: NnrpSubmitOptions = {}): Promise<NnrpResult> {
@@ -659,14 +740,14 @@ export class NnrpBrowserClientSession {
         await capacityWait;
       }
       normalized = normalizeSubmitRequest(request);
-      this.#beginFrame(normalized.frameId);
+      this.#beginFrame(normalized.frameId, normalized.operationId);
     } catch (error) {
       return Promise.reject(error);
     }
 
     try {
       this.#prepareSubmitDispatch(options, deadlineMillis);
-      const role = await this.#role();
+      const role = this.#role();
       const result = this.#waitForResult(normalized.frameId);
       try {
         await role.submitNoWait(normalized.frameId, normalized.header, encodeSubmitPayload(normalized));
@@ -696,14 +777,14 @@ export class NnrpBrowserClientSession {
       this.#ensureOpen();
       this.#reserveImmediateCapacity();
       normalized = normalizeSubmitRequest(request);
-      this.#beginFrame(normalized.frameId);
+      this.#beginFrame(normalized.frameId, normalized.operationId);
     } catch (error) {
       return Promise.reject(error);
     }
 
     try {
       this.#prepareSubmitDispatch(options, deadlineMillis);
-      const operationId = await (await this.#role()).submitNoWait(
+      const operationId = await this.#role().submitNoWait(
         normalized.frameId,
         normalized.header,
         encodeSubmitPayload(normalized),
@@ -831,36 +912,38 @@ export class NnrpBrowserClientSession {
   }
 
   public completeEvent(event: NnrpRuntimeEvent): void {
-    if (event.type === "cancel" || event.type === "abort") {
-      this.#cancelledOperations.add(event.metadata.operationId);
+    if (
+      (event.header.messageType === NnrpMessageType.Cancel || event.header.messageType === NnrpMessageType.Abort) &&
+      event.metadata.type === "control_request"
+    ) {
+      this.#cancelledOperations.add(event.metadata.value.operationId);
       return;
     }
 
-    if (event.type === "result") {
-      this.#finishTerminalFrame(event.result.frameId);
+    if (isRuntimeTerminalEvent(event)) {
+      const operationId = browserRuntimeEventOperationIds.get(event) ??
+        terminalOperationId(event, this.#operationByFrame.get(event.header.frameId));
+      if (operationId !== undefined) browserRuntimeEventOperationIds.set(event, operationId);
+      this.#finishTerminalFrame(event.header.frameId);
       return;
     }
 
-    if (event.type === "drop") {
-      this.#finishTerminalFrame(event.frameId);
-      return;
-    }
-
-    if (event.type === "flow-update") {
-      this.#availableCredits = event.update.credits;
+    if (event.metadata.type === "flow_update") {
+      this.#availableCredits = flowCredit(event.metadata.value);
       this.#drainCapacityWaiters();
       return;
     }
 
-    if (event.type === "credit-update") {
-      this.#availableCredits = normalizeCreditWindow(event.metadata.creditWindow);
+    if (event.header.messageType === NnrpMessageType.CreditUpdate && event.metadata.type === "pressure") {
+      this.#availableCredits = normalizeCreditWindow(event.metadata.value.creditWindow);
       this.#drainCapacityWaiters();
       return;
     }
 
-    if (event.type === "close") {
+    if (event.header.messageType === NnrpMessageType.SessionClose) {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
+      this.#operationByFrame.clear();
       this.#cancelledOperations.clear();
       this.#drainCapacityWaiters();
     }
@@ -881,9 +964,17 @@ export class NnrpBrowserClientSession {
   public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
     while (true) {
       const event = await this.nextEvent(options);
-      throwIfResultDrop(event);
-      if (event.type === "result") {
-        return event.result;
+      if (isRuntimeTerminalEvent(event)) {
+        const operationId = browserRuntimeEventOperationIds.get(event) ?? terminalOperationId(event);
+        if (operationId === undefined) {
+          throw new NnrpProtocolError({
+            code: "NNRP_TERMINAL_OPERATION_UNKNOWN",
+            message: `Terminal frame ${event.header.frameId} has no associated operation id.`,
+            source: "wasm",
+            retryable: false,
+          });
+        }
+        return createNnrpResultFromRuntimeEvent(operationId, event);
       }
     }
   }
@@ -911,11 +1002,16 @@ export class NnrpBrowserClientSession {
     const hasWirePatch = patch.inputProfile !== undefined || patch.targetCadence !== undefined ||
       patch.qualityTier !== undefined;
     const ack: BrowserPatchAck = hasWirePatch
-      ? await (await this.#role()).patchSession(patch, this.#state.options.inputProfile)
+      ? await this.#role().patchSession(patch, browserSessionActiveProfiles.get(this))
       : { accepted: true, appliedPatch: patch, metadata: { ackStatus: "local-only" } };
 
     if (ack.accepted) {
-      this.#state.options = mergeSessionOptions(this.#state.options, ack.appliedPatch);
+      if (ack.appliedPatch.inputProfile !== undefined) {
+        browserSessionActiveProfiles.set(this, ack.appliedPatch.inputProfile);
+      }
+      if (ack.appliedPatch.submitCapacityPolicy !== undefined) {
+        this.#submitCapacityPolicy = ack.appliedPatch.submitCapacityPolicy;
+      }
     }
     if (ack.appliedPatch.initialCredits !== undefined) {
       this.#availableCredits = ack.appliedPatch.initialCredits;
@@ -936,11 +1032,17 @@ export class NnrpBrowserClientSession {
     }
   }
 
+  public recoveryTicket(): NnrpSessionRecoveryTicket | undefined {
+    this.#ensureOpen();
+    return this.#role().recoveryTicket();
+  }
+
   public async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
+    this.#operationByFrame.clear();
     this.#cancelledOperations.clear();
     this.#runtimeObjects.clear();
     for (const cleanup of this.#submitCancellationCleanups.values()) {
@@ -952,14 +1054,9 @@ export class NnrpBrowserClientSession {
     for (const waiter of this.#eventWaiters.splice(0)) waiter.reject(closed);
     for (const waiter of this.#resultWaiters.values()) waiter.reject(closed);
     this.#resultWaiters.clear();
-    let role: BrowserWasmRole | undefined;
     try {
-      if (this.#rolePromise !== undefined) {
-        role = await this.#rolePromise;
-        await role.close();
-      }
+      await this.#role().close();
     } finally {
-      if (role !== undefined) browserRuntimeRoles.get(this.#state.client.runtime)?.delete(role);
       releaseBrowserSession(this.#state.client, this);
     }
   }
@@ -997,7 +1094,18 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  #beginFrame(frameId: number): void {
+  #role(): BrowserWasmRole {
+    const role = browserSessionRoles.get(this);
+    if (role === undefined) {
+      throw wasmRuntimeReadinessError(
+        "NNRP_BROWSER_SESSION_ROLE_UNAVAILABLE",
+        "Browser session role is not connected.",
+      );
+    }
+    return role;
+  }
+
+  #beginFrame(frameId: number, operationId: bigint): void {
     if (this.#inFlightFrames.has(frameId)) {
       throw new NnrpProtocolError({
         code: "NNRP_FRAME_IN_FLIGHT",
@@ -1009,6 +1117,7 @@ export class NnrpBrowserClientSession {
 
     this.#inFlightFrames.add(frameId);
     this.#terminalFrames.delete(frameId);
+    this.#operationByFrame.set(frameId, operationId);
   }
 
   #prepareSubmitDispatch(options: NnrpSubmitOptions, deadlineMillis: number | undefined): void {
@@ -1128,7 +1237,7 @@ export class NnrpBrowserClientSession {
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
   ): Promise<void> | undefined {
-    if (this.#state.options.submitCapacityPolicy !== "await") {
+    if (this.#submitCapacityPolicy !== "await") {
       return undefined;
     }
 
@@ -1191,7 +1300,7 @@ export class NnrpBrowserClientSession {
   }
 
   #reserveImmediateCapacity(): void {
-    if (this.#state.options.submitCapacityPolicy !== "await") {
+    if (this.#submitCapacityPolicy !== "await") {
       return;
     }
 
@@ -1212,6 +1321,7 @@ export class NnrpBrowserClientSession {
     this.#submitCancellationCleanups.get(frameId)?.();
     this.#submitCancellationCleanups.delete(frameId);
     this.#inFlightFrames.delete(frameId);
+    this.#operationByFrame.delete(frameId);
   }
 
   #finishTerminalFrame(frameId: number): void {
@@ -1244,13 +1354,16 @@ export class NnrpBrowserClientSession {
   }
 
   #shouldSuppressCancelledPayload(event: NnrpRuntimeEvent): boolean {
-    if (event.type === "partial-result") {
-      return this.#cancelledOperations.has(event.metadata.operationId);
+    if (event.metadata.type === "partial_result") {
+      return this.#cancelledOperations.has(event.metadata.value.operationId);
     }
 
-    if (event.type === "result" && this.#cancelledOperations.has(BigInt(event.result.frameId))) {
-      this.#terminalFrames.add(event.result.frameId);
-      this.#finishFrame(event.result.frameId);
+    const operationId = event.header.messageType === NnrpMessageType.ResultPush
+      ? browserRuntimeEventOperationIds.get(event) ?? this.#operationByFrame.get(event.header.frameId)
+      : undefined;
+    if (operationId !== undefined && this.#cancelledOperations.has(operationId)) {
+      this.#terminalFrames.add(event.header.frameId);
+      this.#finishFrame(event.header.frameId);
       return true;
     }
 
@@ -1276,10 +1389,13 @@ export class NnrpBrowserClientSession {
   }
 
   async #releaseForTerminalControl(event: NnrpRuntimeEvent): Promise<void> {
-    if (event.type === "cancel" || event.type === "abort") {
-      await this.#releaseOperationObjects(event.metadata.operationId, ObjectReleaseReason.Cancelled);
-    } else if (event.type === "supersede") {
-      await this.#releaseOperationObjects(event.metadata.oldOperationId, ObjectReleaseReason.Replaced);
+    if (
+      (event.header.messageType === NnrpMessageType.Cancel || event.header.messageType === NnrpMessageType.Abort) &&
+      event.metadata.type === "control_request"
+    ) {
+      await this.#releaseOperationObjects(event.metadata.value.operationId, ObjectReleaseReason.Cancelled);
+    } else if (event.header.messageType === NnrpMessageType.Supersede && event.metadata.type === "supersede") {
+      await this.#releaseOperationObjects(event.metadata.value.oldOperationId, ObjectReleaseReason.Replaced);
     }
   }
 
@@ -1315,19 +1431,10 @@ export class NnrpBrowserClientSession {
       this.#ensureOpen();
       const frameId = this.#nextRuntimeFrameId;
       this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
-      return this.#role().then(async (role) => await role.sendRuntimeFrame(messageType, frameId, payload));
+      return this.#role().sendRuntimeFrame(messageType, frameId, payload);
     } catch (error) {
       return Promise.reject(error);
     }
-  }
-
-  #role(): Promise<BrowserWasmRole> {
-    this.#ensureOpen();
-    return this.#rolePromise ??= openBrowserClientRole(
-      this.#state.client,
-      this.#state.options,
-      this.#state.wireSessionId,
-    );
   }
 
   #waitForResult(frameId: number): Promise<NnrpResult> {
@@ -1348,30 +1455,30 @@ export class NnrpBrowserClientSession {
 
   async #pumpEvents(): Promise<void> {
     try {
-      const role = await this.#role();
+      const role = this.#role();
       while (!this.#closed && (this.#eventWaiters.length > 0 || this.#resultWaiters.size > 0)) {
-        const event = await role.awaitEvent(this.sessionId);
-        if (event.type === "result") {
-          const waiter = this.#resultWaiters.get(event.result.frameId);
-          if (waiter !== undefined) {
-            this.#resultWaiters.delete(event.result.frameId);
-            waiter.resolve(event.result);
-            continue;
-          }
-        }
-        if (event.type === "drop") {
-          const waiter = this.#resultWaiters.get(event.frameId);
-          if (waiter !== undefined) {
-            this.#resultWaiters.delete(event.frameId);
-            try {
-              throwIfResultDrop(event);
-            } catch (error) {
-              waiter.reject(error);
-            }
-            continue;
-          }
-        }
+        const event = await role.awaitEvent();
         if (this.#shouldSuppressCancelledPayload(event)) continue;
+        if (isRuntimeTerminalEvent(event)) {
+          const frameId = event.header.frameId;
+          const operationId = terminalOperationId(event, this.#operationByFrame.get(frameId));
+          const waiter = this.#resultWaiters.get(frameId);
+          if (waiter !== undefined) {
+            if (operationId === undefined) {
+              throw new NnrpProtocolError({
+                code: "NNRP_TERMINAL_OPERATION_UNKNOWN",
+                message: `Terminal frame ${frameId} has no associated operation id.`,
+                source: "wasm",
+                retryable: false,
+              });
+            }
+            browserRuntimeEventOperationIds.set(event, operationId);
+            this.#resultWaiters.delete(frameId);
+            this.completeEvent(event);
+            waiter.resolve(createNnrpResultFromRuntimeEvent(operationId, event));
+            continue;
+          }
+        }
         this.completeEvent(event);
         const waiter = this.#eventWaiters.shift();
         if (waiter === undefined) this.#eventQueue.push(event);
@@ -1486,7 +1593,7 @@ function requiredWasmExports(requiredExports: readonly string[] | undefined): re
     ...new Set([
       "nnrp_wasm_protocol_major",
       "nnrp_wasm_wire_format",
-      "openBrowserClientRole",
+      "openBrowserClientConnection",
       "selectTransportWithProbeJson",
       "summarizeProviderProbeJson",
       ...(requiredExports ?? []),
@@ -1667,20 +1774,43 @@ function validateEndpoint(endpoint: string | URL): void {
   }
 }
 
-function mergeSessionOptions(
+function normalizeBrowserSessionOptions(
   defaults: NnrpBrowserSessionOptions | undefined,
   options: NnrpBrowserSessionOptions,
-): NnrpBrowserSessionOptions {
+): NormalizedBrowserSessionOptions {
   const merged = {
+    ...BROWSER_SESSION_DEFAULTS,
     ...defaults,
     ...options,
-    metadata: {
-      ...(defaults?.metadata ?? {}),
-      ...(options.metadata ?? {}),
-    },
   };
-  validateSessionMetadata(merged);
-  return merged;
+  const cacheHints = Object.freeze([
+    ...(options.cacheHints ?? defaults?.cacheHints ?? BROWSER_SESSION_DEFAULTS.cacheHints),
+  ]);
+  for (const cacheHint of cacheHints) {
+    if (!CACHE_OBJECT_KINDS.has(cacheHint)) {
+      throw new RangeError(`cacheHints contains unknown cache object kind ${cacheHint}`);
+    }
+  }
+  if (new Set(cacheHints).size !== cacheHints.length) {
+    throw new RangeError("cacheHints must not contain duplicate cache object kinds");
+  }
+  assertBrowserUnsigned("resumeTokenBytes", merged.resumeTokenBytes, 0xffff_ffff);
+  encodeSessionOpenMetadata({
+    requestedSessionId: merged.requestedSessionId,
+    profileId: merged.profileId,
+    priorityClass: merged.priorityClass,
+    sessionFlags: merged.allowResume ? 1 : 0,
+    schemaId: merged.schemaId,
+    schemaVersion: merged.schemaVersion,
+    defaultDeadlineMillis: merged.defaultDeadlineMillis,
+    maxInFlightOperations: merged.maxInFlightOperations,
+    leaseTtlHintMillis: merged.leaseTtlHintMillis,
+    resumeTokenBytes: merged.resumeTokenBytes,
+    authBytes: 0,
+    sessionExtensionBytes: 0,
+    clientSessionTag: 0n,
+  });
+  return Object.freeze({ ...merged, cacheHints });
 }
 
 function closedError(target: string): NnrpCapabilityError {
@@ -1705,27 +1835,62 @@ function requireBrowserWasmModule(runtime: NnrpBrowserRuntime): BrowserWasmModul
   return wasm;
 }
 
-function openBrowserClientRole(
-  client: NnrpBrowserClient,
-  options: NnrpBrowserSessionOptions,
-  wireSessionId: number,
-): Promise<BrowserWasmRole> {
-  const open = browserClientRoleOpeners.get(client);
-  if (open === undefined) throw closedError("browser client");
-  return open(options, wireSessionId);
+function browserRoleConfig(options: NormalizedBrowserSessionOptions) {
+  return {
+    requestedSessionId: options.requestedSessionId,
+    profileId: options.profileId,
+    schemaId: options.schemaId,
+    schemaVersion: options.schemaVersion,
+    priorityClass: options.priorityClass,
+    defaultDeadlineMs: options.defaultDeadlineMillis,
+    maxInFlightOperations: options.maxInFlightOperations,
+    leaseTtlHintMs: options.leaseTtlHintMillis,
+    allowResume: options.allowResume,
+    resumeTokenBytes: options.resumeTokenBytes,
+    cacheHints: options.cacheHints,
+  } as const;
 }
 
 function releaseBrowserSession(client: NnrpBrowserClient, session: NnrpBrowserClientSession): void {
   browserClientSessionReleasers.get(client)?.(session);
 }
 
-function normalizedMaxInFlightOperations(initialCredits: number | undefined): number {
-  if (initialCredits === undefined || !Number.isFinite(initialCredits)) return 4;
-  return Math.max(1, Math.min(0xffff, Math.trunc(initialCredits)));
+function standardInputProfile(profileId: number): NnrpInputProfile | undefined {
+  if (profileId === 1) return "tensor";
+  if (profileId === NNRP_STANDARD_PROFILE_TOKEN) return "token";
+  return undefined;
+}
+
+function assertBrowserUnsigned(name: string, value: number, maximum: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > maximum) {
+    throw new RangeError(`${name} is outside its unsigned wire range`);
+  }
 }
 
 function normalizeCreditWindow(creditWindow: bigint): number {
   return creditWindow > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(creditWindow);
+}
+
+function isRuntimeTerminalEvent(event: NnrpRuntimeEvent): boolean {
+  return event.header.messageType === NnrpMessageType.ResultPush ||
+    event.header.messageType === NnrpMessageType.ResultDrop ||
+    event.header.messageType === NnrpMessageType.ResultDropReason;
+}
+
+function terminalOperationId(event: NnrpRuntimeEvent, frameOperationId?: bigint): bigint | undefined {
+  if (event.metadata.type === "result_drop_reason") return event.metadata.value.operationId;
+  return browserRuntimeEventOperationIds.get(event) ?? frameOperationId;
+}
+
+function flowCredit(update: import("@nnrp/core").NnrpFlowUpdateMetadata): number {
+  switch (update.scopeKind) {
+    case NnrpFlowScopeKind.Connection:
+      return update.connectionCredit;
+    case NnrpFlowScopeKind.Session:
+      return update.sessionCredit;
+    case NnrpFlowScopeKind.Operation:
+      return update.operationCredit;
+  }
 }
 
 function browserMaxPacketBytes(provider: NnrpBrowserTransportProvider): number {
@@ -1742,7 +1907,16 @@ function browserMaxPacketBytes(provider: NnrpBrowserTransportProvider): number {
   return Number(value);
 }
 
-function sessionNotOpenError(sessionId: string): NnrpCapabilityError {
+function duplicateBrowserSessionError(sessionId: number): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_SESSION_ID_DUPLICATE",
+    message: `Browser client session id '${sessionId}' is already open.`,
+    source: "runtime",
+    retryable: false,
+  });
+}
+
+function sessionNotOpenError(sessionId: number): NnrpCapabilityError {
   return new NnrpCapabilityError({
     code: "NNRP_BROWSER_SESSION_NOT_OPEN",
     message: `Browser session '${sessionId}' is not open on this client.`,

@@ -29,7 +29,7 @@ const client = await openNativeClient({
   transportPolicy: "auto",
 });
 
-const session = client.openSession({ inputProfile: "tool_delta" });
+const session = await client.openSession();
 await session.submitNoWait(createTypedPayloadSubmitRequest({
   identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
   policy: NNRP_DEFAULT_SUBMIT_POLICY,
@@ -46,6 +46,8 @@ await client.close();
 
 Install TCP, QUIC, IPC, or WebSocket provider packages independently. With several providers installed, the client
 probes eligible candidates before selection. The package also exposes Preview4 cancellation, deadline, priority,
-progress, partial-result, runtime-object, cache-reference, and event APIs without exposing native handles.
+progress, partial-result, runtime-object, cache-reference, and event APIs without exposing native handles. Session open
+and resume await the Rust-owned handshake. When resume was negotiated, persist the opaque value returned by
+`session.recoveryTicket()` and pass it to `client.resumeSession(ticket)`.
 
 SDK reference: https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/api/native-client

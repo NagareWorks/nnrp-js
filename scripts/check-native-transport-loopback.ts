@@ -14,6 +14,7 @@ import {
   MemoryLocationHint,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpMessageType,
   type NnrpRuntimeEvent,
   NnrpTransportClientSecurity,
   NnrpTransportConnection,
@@ -31,6 +32,7 @@ import {
   type NativeTransportSmokeOptions,
   parseNativeTransportSmokeOptions,
 } from "./native-transport-smoke-options.ts";
+import { createSuccessResult } from "./runtime-event-fixtures.ts";
 
 type NativeProvider = NnrpTransportProvider & NnrpClientTransportProvider & NnrpServerTransportProvider;
 
@@ -252,7 +254,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
   });
   const accepting = server.accept();
   let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
-  let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;
+  let clientSession: Awaited<ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]>> | undefined;
   let serverSession: Awaited<ReturnType<typeof server.accept>> | undefined;
 
   try {
@@ -272,20 +274,27 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} client connect`,
     );
-    clientSession = client.openSession({ inputProfile: "token" });
+    clientSession = await client.openSession();
     await clientSession.submitNoWait(tokenSubmit(1n, 1, new TextEncoder().encode("ping")));
     serverSession = await withTimeout(accepting, timeoutMillis, `${options.provider.kind} server accept`);
+    if (clientSession.sessionId === 0 || clientSession.sessionId !== serverSession.sessionId) {
+      throw new Error(
+        `${options.provider.kind}: negotiated session identity mismatch ` +
+          `(client=${clientSession.sessionId}, server=${serverSession.sessionId})`,
+      );
+    }
     const submit = await withTimeout(
       serverSession.receive({ timeoutMillis }),
       timeoutMillis,
       `${options.provider.kind} server receive`,
     );
-    if (submit.type !== "submit") {
-      throw new Error(`${options.provider.kind}: expected submit, got ${submit.type}`);
+    if (submit.metadata.type !== "frame_submit") {
+      throw new Error(`${options.provider.kind}: expected submit, got ${submit.metadata.type}`);
     }
+    const operationId = submit.metadata.value.operationId;
 
     await clientSession.updatePriority({
-      operationId: submit.submit.operationId,
+      operationId,
       controlSequence: 1n,
       priorityClass: 2,
       priorityDelta: 1,
@@ -297,8 +306,8 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} server priority update`,
     );
-    assertEventType(priority, "priority-update", options.provider.kind);
-    if (priority.type !== "priority-update" || priority.metadata.operationId !== submit.submit.operationId) {
+    assertEventType(priority, NnrpMessageType.PriorityUpdate, options.provider.kind);
+    if (priority.metadata.type !== "scheduling" || priority.metadata.value.operationId !== operationId) {
       throw new Error(`${options.provider.kind}: priority metadata did not round-trip`);
     }
 
@@ -307,7 +316,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       objectKind: RuntimeObjectKind.Tensor,
       producerRole: RuntimeRole.Client,
       consumerRole: RuntimeRole.Server,
-      sessionId: 1,
+      sessionId: clientSession.sessionId,
       byteSize: 4n,
       computeCostUnits: 1,
       memoryLocationHint: MemoryLocationHint.HostMemory,
@@ -320,8 +329,11 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} server object declaration`,
     );
-    assertEventType(object, "object-declare", options.provider.kind);
-    if (object.type !== "object-declare" || object.metadata.objectId !== 11n || object.body?.[0] !== 0xa1) {
+    assertEventType(object, NnrpMessageType.ObjectDeclare, options.provider.kind);
+    if (
+      object.metadata.type !== "object_descriptor" || object.metadata.value.objectId !== 11n ||
+      object.tail.type !== "body" || object.tail.body[0] !== 0xa1
+    ) {
       throw new Error(`${options.provider.kind}: object declaration did not round-trip`);
     }
 
@@ -342,13 +354,16 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} server cache reference`,
     );
-    assertEventType(cache, "cache-reference", options.provider.kind);
-    if (cache.type !== "cache-reference" || cache.metadata.leaseId !== 5n || cache.body?.[0] !== 0xc1) {
+    assertEventType(cache, NnrpMessageType.CacheReference, options.provider.kind);
+    if (
+      cache.metadata.type !== "cache_reference" || cache.metadata.value.leaseId !== 5n ||
+      cache.tail.type !== "body" || cache.tail.body[0] !== 0xc1
+    ) {
       throw new Error(`${options.provider.kind}: cache reference did not round-trip`);
     }
 
     await serverSession.sendPartialResult({
-      operationId: submit.submit.operationId,
+      operationId,
       resultSequence: 1n,
       objectId: 11n,
       deltaSequence: 1n,
@@ -360,24 +375,27 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} client partial result`,
     );
-    assertEventType(partial, "partial-result", options.provider.kind);
+    assertEventType(partial, NnrpMessageType.PartialResult, options.provider.kind);
     if (
-      partial.type !== "partial-result" || partial.metadata.objectId !== 11n || partial.body?.length !== 2 ||
-      partial.body[0] !== 0xd1 || partial.body[1] !== 0xd2
+      partial.metadata.type !== "partial_result" || partial.metadata.value.objectId !== 11n ||
+      partial.tail.type !== "body" || partial.tail.body.length !== 2 ||
+      partial.tail.body[0] !== 0xd1 || partial.tail.body[1] !== 0xd2
     ) {
       throw new Error(`${options.provider.kind}: partial result did not round-trip`);
     }
 
-    await serverSession.sendResult({
-      frameId: submit.submit.frameId,
-      payload: new TextEncoder().encode("pong"),
-    });
+    await serverSession.sendResult(
+      createSuccessResult(operationId, submit.header.frameId, new TextEncoder().encode("pong")),
+    );
     const result = await withTimeout(
       clientSession.nextResult({ timeoutMillis }),
       timeoutMillis,
       `${options.provider.kind} client result`,
     );
-    if (new TextDecoder().decode(result.payload) !== "pong") {
+    const resultBody = result.event.type === "runtime" && result.event.event.tail.type === "body"
+      ? result.event.event.tail.body
+      : new Uint8Array();
+    if (new TextDecoder().decode(resultBody) !== "pong") {
       throw new Error(`${options.provider.kind}: unexpected result payload`);
     }
 
@@ -387,8 +405,8 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} server close event`,
     );
-    if (closeEvent.type !== "close") {
-      throw new Error(`${options.provider.kind}: expected close, got ${closeEvent.type}`);
+    if (closeEvent.header.messageType !== NnrpMessageType.SessionClose) {
+      throw new Error(`${options.provider.kind}: expected close, got ${closeEvent.header.messageType}`);
     }
     await serverSession.close();
     serverSession = undefined;
@@ -415,11 +433,11 @@ function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) 
 
 function assertEventType(
   event: NnrpRuntimeEvent,
-  expected: NnrpRuntimeEvent["type"],
+  expected: NnrpMessageType,
   providerKind: string,
 ): void {
-  if (event.type !== expected) {
-    throw new Error(`${providerKind}: expected ${expected}, got ${event.type}`);
+  if (event.header.messageType !== expected) {
+    throw new Error(`${providerKind}: expected ${expected}, got ${event.header.messageType}`);
   }
 }
 

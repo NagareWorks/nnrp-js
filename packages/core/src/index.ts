@@ -1,6 +1,142 @@
 export const NNRP_PROTOCOL_NAME = "NNRP";
 export const NNRP_PROTOCOL_VERSION = "1.0.0";
 export const NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES = 24;
+export const NNRP_SESSION_OPEN_METADATA_BYTES = 48;
+export const NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES = 28;
+export const NNRP_SCHEMA_DESCRIPTOR_HEADER_BYTES = 32;
+export const NNRP_STANDARD_PROFILE_TOKEN = 2;
+export const NNRP_TOKEN_DELTA_SCHEMA_ID = 0x0000_1001;
+export const NNRP_TOKEN_DELTA_SCHEMA_VERSION = 3;
+export const NNRP_TOKEN_DELTA_SCHEMA_HASH = 0x6e6e_7270_746f_6b33n;
+
+export enum NnrpStandardProfile {
+  Unspecified = 0,
+  Tensor = 1,
+  Token = 2,
+}
+
+export enum NnrpStreamSemantics {
+  Unspecified = 0,
+  Snapshot = 1,
+  Append = 2,
+}
+
+export enum NnrpSchemaDescriptorFlags {
+  None = 0,
+  BreakingChange = 0x01,
+  CompatibleUpdate = 0x02,
+  DependencyBound = 0x04,
+  BodySchemaPresent = 0x08,
+}
+
+export enum NnrpSchemaRegistryAction {
+  Installed = 1,
+  AlreadyInstalled = 2,
+  Updated = 3,
+  Invalidated = 4,
+}
+
+export enum NnrpSchemaRegistryFailure {
+  Unknown = 1,
+  VersionUnknown = 2,
+  HashConflict = 3,
+  Incompatible = 4,
+  UpdateRejected = 5,
+}
+
+export interface NnrpSchemaDescriptorHeader {
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly profileId: NnrpStandardProfile | number;
+  readonly schemaFlags: NnrpSchemaDescriptorFlags | number;
+  readonly minVersionMajor: number;
+  readonly maxVersionMajor: number;
+  readonly bodyBytes: number;
+  readonly dependencyCount: number;
+  readonly defaultStreamSemantics: NnrpStreamSemantics | number;
+  readonly schemaHash: bigint;
+}
+
+export class NnrpSchemaRegistry {
+  readonly #descriptors = new Map<string, NnrpSchemaDescriptorHeader>();
+
+  public constructor(descriptors: readonly NnrpSchemaDescriptorHeader[] = []) {
+    for (const descriptor of descriptors) this.install(descriptor);
+  }
+
+  public install(descriptor: NnrpSchemaDescriptorHeader): NnrpSchemaRegistryAction {
+    const normalized = normalizeSchemaDescriptorHeader(descriptor);
+    validateStandardProfile(normalized.profileId);
+    const key = schemaDescriptorKey(normalized.schemaId, normalized.schemaVersion);
+    const existing = this.#descriptors.get(key);
+    if (existing !== undefined) {
+      if (existing.schemaHash === normalized.schemaHash && existing.profileId === normalized.profileId) {
+        return NnrpSchemaRegistryAction.AlreadyInstalled;
+      }
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.HashConflict, "schema hash conflict for installed version");
+    }
+    const updatesExistingSchema = [...this.#descriptors.values()].some((candidate) =>
+      candidate.schemaId === normalized.schemaId && candidate.schemaVersion < normalized.schemaVersion
+    );
+    this.#descriptors.set(key, normalized);
+    return updatesExistingSchema ? NnrpSchemaRegistryAction.Updated : NnrpSchemaRegistryAction.Installed;
+  }
+
+  public lookup(schemaId: number, schemaVersion: number): NnrpSchemaDescriptorHeader {
+    assertUnsigned("schemaId", schemaId, 0xffff_ffff);
+    assertUnsigned("schemaVersion", schemaVersion, 0xffff_ffff);
+    const descriptor = this.#descriptors.get(schemaDescriptorKey(schemaId, schemaVersion));
+    if (descriptor !== undefined) return descriptor;
+    const failure = [...this.#descriptors.values()].some((candidate) => candidate.schemaId === schemaId)
+      ? NnrpSchemaRegistryFailure.VersionUnknown
+      : NnrpSchemaRegistryFailure.Unknown;
+    throw schemaRegistryError(failure, "schema descriptor is not installed");
+  }
+
+  public invalidate(schemaId: number, schemaVersion: number): NnrpSchemaRegistryAction {
+    assertUnsigned("schemaId", schemaId, 0xffff_ffff);
+    assertUnsigned("schemaVersion", schemaVersion, 0xffff_ffff);
+    if (!this.#descriptors.delete(schemaDescriptorKey(schemaId, schemaVersion))) {
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.VersionUnknown, "schema version is not installed");
+    }
+    return NnrpSchemaRegistryAction.Invalidated;
+  }
+
+  public validateBinding(descriptor: NnrpTypedPayloadDescriptor): void {
+    validateTypedPayloadDescriptor(descriptor);
+    validateStandardProfile(descriptor.profileId);
+    if (descriptor.profileId === NnrpStandardProfile.Unspecified) {
+      if (descriptor.schemaId === 0 && descriptor.schemaVersion === 0) return;
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.Incompatible, "unspecified profile cannot bind a schema");
+    }
+    if (descriptor.schemaId === 0) {
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.Unknown, "typed payload schema id is zero");
+    }
+    const schema = this.lookup(descriptor.schemaId, descriptor.schemaVersion);
+    if (schema.profileId !== descriptor.profileId) {
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.Incompatible, "typed payload profile does not match schema");
+    }
+  }
+
+  public snapshot(): readonly NnrpSchemaDescriptorHeader[] {
+    return Object.freeze([...this.#descriptors.values()]);
+  }
+}
+
+export function tokenDeltaSchemaDescriptor(): NnrpSchemaDescriptorHeader {
+  return normalizeSchemaDescriptorHeader({
+    schemaId: NNRP_TOKEN_DELTA_SCHEMA_ID,
+    schemaVersion: NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+    profileId: NnrpStandardProfile.Token,
+    schemaFlags: NnrpSchemaDescriptorFlags.None,
+    minVersionMajor: 1,
+    maxVersionMajor: 1,
+    bodyBytes: 0,
+    dependencyCount: 0,
+    defaultStreamSemantics: NnrpStreamSemantics.Append,
+    schemaHash: NNRP_TOKEN_DELTA_SCHEMA_HASH,
+  });
+}
 
 export enum NnrpPayloadKind {
   Tensor = 0x01,
@@ -100,6 +236,230 @@ function validateTypedPayloadDescriptor(
 function assertUnsigned(name: string, value: number, maximum: number): void {
   if (!Number.isInteger(value) || value < 0 || value > maximum) {
     throw new RangeError(`${name} is outside its unsigned wire range`);
+  }
+}
+
+function assertUnsignedBigInt(name: string, value: bigint, maximum: bigint): void {
+  if (value < 0n || value > maximum) {
+    throw new RangeError(`${name} is outside its unsigned wire range`);
+  }
+}
+
+function normalizeSchemaDescriptorHeader(descriptor: NnrpSchemaDescriptorHeader): NnrpSchemaDescriptorHeader {
+  assertUnsigned("schemaId", descriptor.schemaId, 0xffff_ffff);
+  assertUnsigned("schemaVersion", descriptor.schemaVersion, 0xffff_ffff);
+  assertUnsigned("profileId", descriptor.profileId, 0xffff);
+  assertUnsigned("schemaFlags", descriptor.schemaFlags, 0xffff);
+  if ((descriptor.schemaFlags & ~0x0f) !== 0) throw new RangeError("schemaFlags contains reserved bits");
+  assertUnsigned("minVersionMajor", descriptor.minVersionMajor, 0xff);
+  assertUnsigned("maxVersionMajor", descriptor.maxVersionMajor, 0xff);
+  if (descriptor.minVersionMajor > descriptor.maxVersionMajor) {
+    throw new RangeError("minVersionMajor must not exceed maxVersionMajor");
+  }
+  assertUnsigned("bodyBytes", descriptor.bodyBytes, 0xffff_ffff);
+  assertUnsigned("dependencyCount", descriptor.dependencyCount, 0xffff);
+  assertUnsigned("defaultStreamSemantics", descriptor.defaultStreamSemantics, 0xffff);
+  if (!Object.values(NnrpStreamSemantics).includes(descriptor.defaultStreamSemantics)) {
+    throw new RangeError("defaultStreamSemantics is not registered");
+  }
+  assertUnsignedBigInt("schemaHash", descriptor.schemaHash, 0xffff_ffff_ffff_ffffn);
+  return Object.freeze({ ...descriptor });
+}
+
+function validateStandardProfile(profileId: number): void {
+  if (
+    profileId !== NnrpStandardProfile.Unspecified &&
+    profileId !== NnrpStandardProfile.Tensor &&
+    profileId !== NnrpStandardProfile.Token
+  ) {
+    throw schemaRegistryError(NnrpSchemaRegistryFailure.UpdateRejected, "profile id is not registered");
+  }
+}
+
+function schemaDescriptorKey(schemaId: number, schemaVersion: number): string {
+  return `${schemaId}:${schemaVersion}`;
+}
+
+function schemaRegistryError(failure: NnrpSchemaRegistryFailure, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: `NNRP_SCHEMA_REGISTRY_${
+      NnrpSchemaRegistryFailure[failure].replaceAll(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()
+    }`,
+    message,
+    source: "protocol",
+    retryable: false,
+    cause: failure,
+  });
+}
+
+export enum NnrpSessionPriorityClass {
+  Interactive = 0,
+  Balanced = 1,
+  Background = 2,
+}
+
+export interface NnrpSessionOpenMetadata {
+  readonly requestedSessionId: number;
+  readonly profileId: number;
+  readonly priorityClass: NnrpSessionPriorityClass;
+  readonly sessionFlags: number;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly resumeTokenBytes: number;
+  readonly authBytes: number;
+  readonly sessionExtensionBytes: number;
+  readonly clientSessionTag: bigint;
+}
+
+export function encodeSessionOpenMetadata(metadata: NnrpSessionOpenMetadata): Uint8Array {
+  validateSessionOpenMetadata(metadata);
+  const encoded = new Uint8Array(NNRP_SESSION_OPEN_METADATA_BYTES);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.requestedSessionId, true);
+  view.setUint16(4, metadata.profileId, true);
+  view.setUint8(6, metadata.priorityClass);
+  view.setUint8(7, metadata.sessionFlags);
+  view.setUint32(8, metadata.schemaId, true);
+  view.setUint32(12, metadata.schemaVersion, true);
+  view.setUint32(16, metadata.defaultDeadlineMillis, true);
+  view.setUint16(20, metadata.maxInFlightOperations, true);
+  view.setUint32(24, metadata.leaseTtlHintMillis, true);
+  view.setUint32(28, metadata.resumeTokenBytes, true);
+  view.setUint32(32, metadata.authBytes, true);
+  view.setUint32(36, metadata.sessionExtensionBytes, true);
+  view.setBigUint64(40, metadata.clientSessionTag, true);
+  return encoded;
+}
+
+export function decodeSessionOpenMetadata(encoded: Uint8Array): NnrpSessionOpenMetadata {
+  if (encoded.byteLength !== NNRP_SESSION_OPEN_METADATA_BYTES) {
+    throw new RangeError(`SESSION_OPEN metadata must be ${NNRP_SESSION_OPEN_METADATA_BYTES} bytes`);
+  }
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  if (view.getUint16(22, true) !== 0) {
+    throw new RangeError("SESSION_OPEN reserved0 must be zero");
+  }
+  const metadata: NnrpSessionOpenMetadata = {
+    requestedSessionId: view.getUint32(0, true),
+    profileId: view.getUint16(4, true),
+    priorityClass: view.getUint8(6) as NnrpSessionPriorityClass,
+    sessionFlags: view.getUint8(7),
+    schemaId: view.getUint32(8, true),
+    schemaVersion: view.getUint32(12, true),
+    defaultDeadlineMillis: view.getUint32(16, true),
+    maxInFlightOperations: view.getUint16(20, true),
+    leaseTtlHintMillis: view.getUint32(24, true),
+    resumeTokenBytes: view.getUint32(28, true),
+    authBytes: view.getUint32(32, true),
+    sessionExtensionBytes: view.getUint32(36, true),
+    clientSessionTag: view.getBigUint64(40, true),
+  };
+  validateSessionOpenMetadata(metadata);
+  return metadata;
+}
+
+function validateSessionOpenMetadata(metadata: NnrpSessionOpenMetadata): void {
+  assertUnsigned("requestedSessionId", metadata.requestedSessionId, 0xffff_ffff);
+  assertUnsigned("profileId", metadata.profileId, 0xffff);
+  if (
+    metadata.priorityClass !== NnrpSessionPriorityClass.Interactive &&
+    metadata.priorityClass !== NnrpSessionPriorityClass.Balanced &&
+    metadata.priorityClass !== NnrpSessionPriorityClass.Background
+  ) {
+    throw new RangeError("priorityClass is not a current SESSION_OPEN priority class");
+  }
+  assertUnsigned("sessionFlags", metadata.sessionFlags, 0xff);
+  if ((metadata.sessionFlags & ~0x0f) !== 0) {
+    throw new RangeError("sessionFlags contains reserved bits");
+  }
+  assertUnsigned("schemaId", metadata.schemaId, 0xffff_ffff);
+  assertUnsigned("schemaVersion", metadata.schemaVersion, 0xffff_ffff);
+  assertUnsigned("defaultDeadlineMillis", metadata.defaultDeadlineMillis, 0xffff_ffff);
+  assertUnsigned("maxInFlightOperations", metadata.maxInFlightOperations, 0xffff);
+  assertUnsigned("leaseTtlHintMillis", metadata.leaseTtlHintMillis, 0xffff_ffff);
+  assertUnsigned("resumeTokenBytes", metadata.resumeTokenBytes, 0xffff_ffff);
+  assertUnsigned("authBytes", metadata.authBytes, 0xffff_ffff);
+  assertUnsigned("sessionExtensionBytes", metadata.sessionExtensionBytes, 0xffff_ffff);
+  assertUnsignedBigInt("clientSessionTag", metadata.clientSessionTag, 0xffff_ffff_ffff_ffffn);
+}
+
+const SESSION_RECOVERY_TICKET_MAGIC = new Uint8Array([0x4e, 0x52, 0x54, 0x4b]);
+const SESSION_RECOVERY_TICKET_VERSION = 1;
+const SESSION_RECOVERY_TICKET_OPERATION_PRESENT = 0x0001;
+
+export class NnrpSessionRecoveryTicket {
+  readonly #resumeToken: Uint8Array;
+
+  private constructor(
+    public readonly sessionId: number,
+    resumeToken: Uint8Array,
+    public readonly resumeFromOperationId: bigint | undefined,
+    public readonly resumeWindowMillis: number,
+  ) {
+    this.#resumeToken = resumeToken.slice();
+    Object.freeze(this);
+  }
+
+  public get resumeToken(): Uint8Array {
+    return this.#resumeToken.slice();
+  }
+
+  public toBytes(): Uint8Array {
+    const encoded = new Uint8Array(NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES + this.#resumeToken.byteLength);
+    encoded.set(SESSION_RECOVERY_TICKET_MAGIC, 0);
+    const view = new DataView(encoded.buffer);
+    view.setUint16(4, SESSION_RECOVERY_TICKET_VERSION, true);
+    const operationPresent = this.resumeFromOperationId !== undefined;
+    view.setUint16(6, operationPresent ? SESSION_RECOVERY_TICKET_OPERATION_PRESENT : 0, true);
+    view.setUint32(8, this.sessionId, true);
+    view.setUint32(12, this.#resumeToken.byteLength, true);
+    view.setUint32(16, this.resumeWindowMillis, true);
+    view.setBigUint64(20, this.resumeFromOperationId ?? 0n, true);
+    encoded.set(this.#resumeToken, NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES);
+    return encoded;
+  }
+
+  public static fromBytes(encoded: Uint8Array): NnrpSessionRecoveryTicket {
+    if (!(encoded instanceof Uint8Array)) throw new TypeError("encoded recovery ticket must be a Uint8Array");
+    if (encoded.byteLength < NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES) {
+      throw new RangeError("recovery ticket is truncated");
+    }
+    if (!SESSION_RECOVERY_TICKET_MAGIC.every((value, index) => encoded[index] === value)) {
+      throw new RangeError("recovery ticket magic is invalid");
+    }
+    const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+    if (view.getUint16(4, true) !== SESSION_RECOVERY_TICKET_VERSION) {
+      throw new RangeError("recovery ticket version is unsupported");
+    }
+    const flags = view.getUint16(6, true);
+    if ((flags & ~SESSION_RECOVERY_TICKET_OPERATION_PRESENT) !== 0) {
+      throw new RangeError("recovery ticket contains reserved flags");
+    }
+    const sessionId = view.getUint32(8, true);
+    const resumeTokenBytes = view.getUint32(12, true);
+    const resumeWindowMillis = view.getUint32(16, true);
+    const operationId = view.getBigUint64(20, true);
+    if (sessionId === 0) throw new RangeError("recovery ticket sessionId must be non-zero");
+    if (resumeTokenBytes === 0) throw new RangeError("recovery ticket resumeToken must be non-empty");
+    if (encoded.byteLength !== NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES + resumeTokenBytes) {
+      throw new RangeError("recovery ticket length does not match its token length");
+    }
+    const operationPresent = (flags & SESSION_RECOVERY_TICKET_OPERATION_PRESENT) !== 0;
+    if (!operationPresent && operationId !== 0n) {
+      throw new RangeError("recovery ticket carries an operation id without its presence flag");
+    }
+    if (operationPresent && operationId === 0n) {
+      throw new RangeError("recovery ticket resumeFromOperationId must be non-zero when present");
+    }
+    return new NnrpSessionRecoveryTicket(
+      sessionId,
+      encoded.subarray(NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES),
+      operationPresent ? operationId : undefined,
+      resumeWindowMillis,
+    );
   }
 }
 
@@ -410,91 +770,6 @@ export class CacheLease {
   }
 }
 
-interface NnrpRuntimeFrameEventBase<
-  TType extends string,
-  TMessageType extends NnrpMessageType,
-  TMetadata,
-> {
-  readonly type: TType;
-  readonly messageType: TMessageType;
-  readonly metadata: TMetadata;
-  readonly sessionId?: string;
-}
-
-type NnrpRuntimeFrameEventWithTail<
-  TType extends string,
-  TMessageType extends NnrpMessageType,
-  TMetadata,
-  TTail extends string,
-> =
-  & NnrpRuntimeFrameEventBase<TType, TMessageType, TMetadata>
-  & Readonly<Partial<Record<TTail, Uint8Array>>>;
-
-export type NnrpRuntimeFrameEvent =
-  | NnrpRuntimeFrameEventWithTail<"cancel", NnrpMessageType.Cancel, ControlRequestMetadata, "diagnostic">
-  | NnrpRuntimeFrameEventWithTail<"abort", NnrpMessageType.Abort, ControlRequestMetadata, "diagnostic">
-  | NnrpRuntimeFrameEventBase<"priority-update", NnrpMessageType.PriorityUpdate, SchedulingMetadata>
-  | NnrpRuntimeFrameEventBase<"deadline", NnrpMessageType.Deadline, SchedulingMetadata>
-  | NnrpRuntimeFrameEventBase<"expire-at", NnrpMessageType.ExpireAt, SchedulingMetadata>
-  | NnrpRuntimeFrameEventWithTail<"supersede", NnrpMessageType.Supersede, SupersedeMetadata, "diagnostic">
-  | NnrpRuntimeFrameEventBase<"budget-update", NnrpMessageType.BudgetUpdate, BudgetMetadata>
-  | NnrpRuntimeFrameEventWithTail<"progress", NnrpMessageType.Progress, ProgressMetadata, "body">
-  | NnrpRuntimeFrameEventWithTail<"partial-result", NnrpMessageType.PartialResult, PartialResultMetadata, "body">
-  | NnrpRuntimeFrameEventBase<"backpressure", NnrpMessageType.Backpressure, PressureMetadata>
-  | NnrpRuntimeFrameEventBase<"credit-update", NnrpMessageType.CreditUpdate, PressureMetadata>
-  | NnrpRuntimeFrameEventWithTail<
-    "capability-negotiation",
-    NnrpMessageType.CapabilityNegotiation,
-    CapabilityMetadata,
-    "body"
-  >
-  | NnrpRuntimeFrameEventWithTail<"degrade-profile", NnrpMessageType.DegradeProfile, CapabilityMetadata, "body">
-  | NnrpRuntimeFrameEventWithTail<"route-hint", NnrpMessageType.RouteHint, RouteHintMetadata, "body">
-  | NnrpRuntimeFrameEventWithTail<"execution-hint", NnrpMessageType.ExecutionHint, RouteHintMetadata, "body">
-  | NnrpRuntimeFrameEventWithTail<"trace-context", NnrpMessageType.TraceContext, TraceContextMetadata, "body">
-  | NnrpRuntimeFrameEventWithTail<
-    "result-drop-reason",
-    NnrpMessageType.ResultDropReason,
-    ResultDropReasonMetadata,
-    "diagnostic"
-  >
-  | NnrpRuntimeFrameEventWithTail<
-    "recoverable-error",
-    NnrpMessageType.ErrorRecoverable,
-    RecoverableErrorMetadata,
-    "diagnostic"
-  >
-  | NnrpRuntimeFrameEventWithTail<"retry-after", NnrpMessageType.RetryAfter, RetryAfterMetadata, "diagnostic">
-  | NnrpRuntimeFrameEventWithTail<
-    "object-declare",
-    NnrpMessageType.ObjectDeclare,
-    ObjectDescriptorMetadata,
-    "body"
-  >
-  | NnrpRuntimeFrameEventWithTail<"object-ref", NnrpMessageType.ObjectRef, ObjectReferenceMetadata, "body">
-  | NnrpRuntimeFrameEventWithTail<
-    "object-release",
-    NnrpMessageType.ObjectRelease,
-    ObjectReleaseMetadata,
-    "diagnostic"
-  >
-  | (NnrpRuntimeFrameEventBase<"object-patch", NnrpMessageType.ObjectPatch, ObjectDeltaMetadata> & {
-    readonly metadataBody?: Uint8Array;
-    readonly delta?: Uint8Array;
-  })
-  | (NnrpRuntimeFrameEventBase<"object-delta", NnrpMessageType.ObjectDelta, ObjectDeltaMetadata> & {
-    readonly metadataBody?: Uint8Array;
-    readonly delta?: Uint8Array;
-  })
-  | NnrpRuntimeFrameEventWithTail<
-    "cache-reference",
-    NnrpMessageType.CacheReference,
-    CacheReferenceMetadata,
-    "body"
-  >
-  | NnrpRuntimeFrameEventWithTail<"cache-miss", NnrpMessageType.CacheMiss, CacheMissMetadata, "diagnostic">
-  | NnrpRuntimeFrameEventBase<"cache-invalidate", NnrpMessageType.CacheInvalidate, CacheInvalidateMetadata>;
-
 export interface ControlRequestMetadata {
   readonly operationId: bigint;
   readonly controlSequence: bigint;
@@ -660,7 +935,15 @@ export type NnrpTransportPolicy =
 
 export type NnrpOperationId = bigint;
 
-export type NnrpOperationState = "pending" | "dispatched" | "completed" | "dropped" | "cancelled";
+export type NnrpOperationState =
+  | "accepted"
+  | "running"
+  | "partial"
+  | "waiting-tool"
+  | "superseded"
+  | "cancelled"
+  | "failed"
+  | "completed";
 
 export type NnrpCapability =
   | "client.session"
@@ -1200,12 +1483,195 @@ export interface NnrpSubmitMetadata {
 
 export type NnrpNormalizedSubmitRequest = NnrpSubmitRequest;
 
-export interface NnrpResult {
+export enum NnrpResultClass {
+  Complete = 0,
+  Partial = 1,
+  StaleReuse = 2,
+  Degraded = 3,
+}
+
+export interface NnrpResultPushMetadata {
+  readonly statusCode: number;
+  readonly resultFlags: number;
+  readonly sectionCount: number;
+  readonly tileCount: number;
+  readonly activeProfileId: number;
+  readonly inferenceMs: number;
+  readonly queueMs: number;
+  readonly serverTotalMs: number;
+  readonly tileBaseId: number;
+  readonly tileIndexBytes: number;
+  readonly resultClass: NnrpResultClass;
+  readonly appliedBudgetPolicy: number;
+  readonly reusedFrameId: number;
+  readonly coveredTileCount: number;
+  readonly droppedTileCount: number;
+  readonly payloadKindBitmap: number;
+  readonly payloadFrameCount: number;
+}
+
+export enum NnrpFlowScopeKind {
+  Connection = 0,
+  Session = 1,
+  Operation = 2,
+}
+
+export enum NnrpFlowUpdateReason {
+  Grant = 0,
+  Reduce = 1,
+  Pause = 2,
+  Resume = 3,
+  Congestion = 4,
+}
+
+export enum NnrpBackpressureLevel {
+  None = 0,
+  Soft = 1,
+  Hard = 2,
+  Paused = 3,
+}
+
+export interface NnrpFlowUpdateMetadata {
+  readonly scopeKind: NnrpFlowScopeKind;
+  readonly updateReason: NnrpFlowUpdateReason;
+  readonly backpressureLevel: NnrpBackpressureLevel;
+  readonly connectionCredit: number;
+  readonly sessionCredit: number;
+  readonly operationCredit: number;
+  readonly operationId: bigint;
+  readonly retryAfterMs: number;
+  readonly creditEpoch: number;
+  readonly flowFlags: number;
+}
+
+export enum NnrpResultHintBudgetPolicy {
+  None = 0,
+  Full = 1,
+  Partial = 2,
+  StaleReuse = 3,
+  Drop = 4,
+}
+
+export enum NnrpResultHintCongestionState {
+  None = 0,
+  Steady = 1,
+  Elevated = 2,
+  Saturated = 3,
+}
+
+export enum NnrpResultHintReason {
+  None = 0,
+  QueueFull = 1,
+  ServerBusy = 2,
+  BudgetExceeded = 3,
+  Superseded = 4,
+}
+
+export interface NnrpResultHintMetadata {
+  readonly appliedBudgetPolicy: NnrpResultHintBudgetPolicy;
+  readonly congestionState: NnrpResultHintCongestionState;
+  readonly reason: NnrpResultHintReason;
+  readonly retryAfterMs: number;
+}
+
+export enum NnrpSessionCloseReason {
+  Normal = 0,
+  ClientShutdown = 1,
+  ServerShutdown = 2,
+  IdleTimeout = 3,
+  ProtocolError = 4,
+  AuthRevoked = 5,
+}
+
+export enum NnrpInFlightPolicy {
+  Drain = 0,
+  Abort = 1,
+}
+
+export interface NnrpSessionCloseMetadata {
+  readonly closeReason: NnrpSessionCloseReason;
+  readonly inFlightPolicy: NnrpInFlightPolicy;
+  readonly drainTimeoutMs: number;
+  readonly lastOperationId: bigint;
+  readonly sessionErrorCode: number;
+  readonly sessionCloseTag: number;
+}
+
+export interface NnrpRuntimeFrameHeader {
+  readonly versionMajor: 1;
+  readonly wireFormat: 0;
+  readonly messageType: NnrpMessageType;
+  readonly flags: NnrpHeaderFlags | number;
+  readonly sessionId: number;
   readonly frameId: number;
-  readonly payload?: Uint8Array;
-  readonly diagnostic?: NnrpDiagnostic;
-  readonly sessionId?: string;
-  readonly metadata?: Readonly<Record<string, string>>;
+  readonly viewId: number;
+  readonly routeId: number;
+  readonly traceId: bigint;
+}
+
+export interface NnrpFrameSubmitMetadata extends NnrpSubmitMetadata {
+  readonly operationId: bigint;
+}
+
+export type NnrpRuntimeEventMetadata =
+  | { readonly type: "none" }
+  | { readonly type: "frame_submit"; readonly value: NnrpFrameSubmitMetadata }
+  | { readonly type: "result_push"; readonly value: NnrpResultPushMetadata }
+  | { readonly type: "result_hint"; readonly value: NnrpResultHintMetadata }
+  | { readonly type: "control_request"; readonly value: ControlRequestMetadata }
+  | { readonly type: "scheduling"; readonly value: SchedulingMetadata }
+  | { readonly type: "supersede"; readonly value: SupersedeMetadata }
+  | { readonly type: "budget"; readonly value: BudgetMetadata }
+  | { readonly type: "progress"; readonly value: ProgressMetadata }
+  | { readonly type: "partial_result"; readonly value: PartialResultMetadata }
+  | { readonly type: "pressure"; readonly value: PressureMetadata }
+  | { readonly type: "capability"; readonly value: CapabilityMetadata }
+  | { readonly type: "route_hint"; readonly value: RouteHintMetadata }
+  | { readonly type: "trace_context"; readonly value: TraceContextMetadata }
+  | { readonly type: "result_drop_reason"; readonly value: ResultDropReasonMetadata }
+  | { readonly type: "recoverable_error"; readonly value: RecoverableErrorMetadata }
+  | { readonly type: "retry_after"; readonly value: RetryAfterMetadata }
+  | { readonly type: "flow_update"; readonly value: NnrpFlowUpdateMetadata }
+  | { readonly type: "object_descriptor"; readonly value: ObjectDescriptorMetadata }
+  | { readonly type: "object_reference"; readonly value: ObjectReferenceMetadata }
+  | { readonly type: "object_release"; readonly value: ObjectReleaseMetadata }
+  | { readonly type: "object_delta"; readonly value: ObjectDeltaMetadata }
+  | { readonly type: "cache_reference"; readonly value: CacheReferenceMetadata }
+  | { readonly type: "cache_miss"; readonly value: CacheMissMetadata }
+  | { readonly type: "cache_invalidate"; readonly value: CacheInvalidateMetadata }
+  | { readonly type: "session_close"; readonly value: NnrpSessionCloseMetadata };
+
+export type NnrpRuntimeEventTail =
+  | { readonly type: "none" }
+  | { readonly type: "body"; readonly body: Uint8Array }
+  | { readonly type: "diagnostic"; readonly diagnostic: Uint8Array }
+  | {
+    readonly type: "metadata_body_and_delta";
+    readonly metadataBody: Uint8Array;
+    readonly delta: Uint8Array;
+  };
+
+export interface NnrpRuntimeEvent {
+  readonly header: NnrpRuntimeFrameHeader;
+  readonly metadata: NnrpRuntimeEventMetadata;
+  readonly tail: NnrpRuntimeEventTail;
+}
+
+export interface NnrpOperationLifecycleEvent {
+  readonly operationId: bigint;
+  readonly state: NnrpOperationState;
+}
+
+export type NnrpTerminalEvent =
+  | { readonly type: "runtime"; readonly event: NnrpRuntimeEvent }
+  | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };
+
+export type NnrpResultTerminalState = "success" | "cancelled" | "dropped" | "error";
+
+export interface NnrpResult {
+  readonly operationId: bigint;
+  readonly terminalState: NnrpResultTerminalState;
+  readonly event: NnrpTerminalEvent;
 }
 
 export interface NnrpRecoveryToken {
@@ -1242,49 +1708,6 @@ export type NnrpSessionMigrationEvent =
     readonly diagnostic: NnrpDiagnostic;
   };
 
-export type NnrpRuntimeEvent =
-  | {
-    readonly type: "submit";
-    readonly submit: NnrpNormalizedSubmitRequest;
-    readonly sessionId?: string;
-    readonly diagnostic?: NnrpDiagnostic;
-  }
-  | { readonly type: "result"; readonly result: NnrpResult; readonly sessionId?: string }
-  | {
-    readonly type: "flow-update";
-    readonly update: NnrpFlowUpdateMetadata;
-    readonly sessionId?: string;
-    readonly diagnostic?: NnrpDiagnostic;
-  }
-  | {
-    readonly type: "result-hint";
-    readonly hint: NnrpResultHintMetadata;
-    readonly sessionId?: string;
-    readonly diagnostic?: NnrpDiagnostic;
-  }
-  | {
-    readonly type: "drop";
-    readonly frameId: number;
-    readonly sessionId?: string;
-    readonly diagnostic: NnrpDiagnostic;
-  }
-  | NnrpSessionMigrationEvent
-  | NnrpRuntimeFrameEvent
-  | { readonly type: "close"; readonly sessionId?: string; readonly diagnostic?: NnrpDiagnostic }
-  | { readonly type: "diagnostic"; readonly sessionId?: string; readonly diagnostic: NnrpDiagnostic };
-
-export interface NnrpFlowUpdateMetadata {
-  readonly credits: number;
-  readonly recommendedPacingMicros?: number;
-  readonly transport?: NnrpTransportKind;
-}
-
-export interface NnrpResultHintMetadata {
-  readonly frameId: number;
-  readonly expectedBytes?: number;
-  readonly transport?: NnrpTransportKind;
-}
-
 export interface NnrpAbortSignalLike {
   readonly aborted: boolean;
   readonly reason?: unknown;
@@ -1319,7 +1742,7 @@ export interface NnrpSessionPatchRequest extends NnrpSessionMetadataOptions, Nnr
 
 export interface NnrpSessionPatchResult {
   readonly accepted: boolean;
-  readonly sessionId?: string;
+  readonly sessionId?: number;
   readonly diagnostic?: NnrpDiagnostic;
   readonly metadata?: Readonly<Record<string, string>>;
 }
@@ -1598,16 +2021,21 @@ export function decodeCacheInvalidateMetadata(payload: Uint8Array): CacheInvalid
 }
 
 export class NnrpResultDropError extends NnrpProtocolError {
+  public readonly event: NnrpRuntimeEvent;
   public readonly frameId: number;
-  public readonly sessionId?: string;
+  public readonly sessionId: number;
 
-  public constructor(event: Extract<NnrpRuntimeEvent, { readonly type: "drop" }>) {
-    super(event.diagnostic);
+  public constructor(event: NnrpRuntimeEvent) {
+    super({
+      code: "NNRP_RESULT_DROPPED",
+      message: "The runtime established a dropped terminal result.",
+      source: "protocol",
+      retryable: false,
+    });
     this.name = "NnrpResultDropError";
-    this.frameId = event.frameId;
-    if (event.sessionId !== undefined) {
-      this.sessionId = event.sessionId;
-    }
+    this.event = event;
+    this.frameId = event.header.frameId;
+    this.sessionId = event.header.sessionId;
   }
 }
 
@@ -2115,6 +2543,198 @@ export function decodeSubmitPayload(payload: Uint8Array): {
   };
 }
 
+export function encodeResultPushPayload(
+  metadata: NnrpResultPushMetadata,
+  body: Uint8Array = new Uint8Array(),
+): Uint8Array {
+  validateResultPushMetadata(metadata);
+  if (!(body instanceof Uint8Array)) {
+    throw runtimeEventError("NNRP_RESULT_BODY_INVALID", "RESULT_PUSH body must be a Uint8Array.");
+  }
+  const encoded = new Uint8Array(64 + body.byteLength);
+  const view = new DataView(encoded.buffer);
+  view.setUint16(0, metadata.statusCode, true);
+  view.setUint16(2, metadata.resultFlags, true);
+  view.setUint16(4, metadata.sectionCount, true);
+  view.setUint16(6, metadata.tileCount, true);
+  view.setUint16(8, metadata.activeProfileId, true);
+  view.setUint16(12, metadata.inferenceMs, true);
+  view.setUint16(14, metadata.queueMs, true);
+  view.setUint16(16, metadata.serverTotalMs, true);
+  view.setUint32(20, metadata.tileBaseId, true);
+  view.setUint32(24, metadata.tileIndexBytes, true);
+  view.setUint8(44, metadata.resultClass);
+  view.setUint8(45, metadata.appliedBudgetPolicy);
+  view.setUint32(48, metadata.reusedFrameId, true);
+  view.setUint16(52, metadata.coveredTileCount, true);
+  view.setUint16(54, metadata.droppedTileCount, true);
+  view.setUint32(56, metadata.payloadKindBitmap, true);
+  view.setUint16(60, metadata.payloadFrameCount, true);
+  encoded.set(body, 64);
+  return encoded;
+}
+
+export function decodeResultPushPayload(payload: Uint8Array): {
+  readonly metadata: NnrpResultPushMetadata;
+  readonly body: Uint8Array;
+} {
+  requireRuntimePayload(payload, 64, "RESULT_PUSH");
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  if (
+    view.getUint16(10, true) !== 0 || view.getUint16(18, true) !== 0 ||
+    view.getBigUint64(28, true) !== 0n || view.getBigUint64(36, true) !== 0n ||
+    view.getUint16(46, true) !== 0 || view.getUint16(62, true) !== 0
+  ) {
+    throw runtimeEventError("NNRP_RESULT_METADATA_RESERVED", "RESULT_PUSH reserved fields must be zero.");
+  }
+  const metadata: NnrpResultPushMetadata = {
+    statusCode: view.getUint16(0, true),
+    resultFlags: view.getUint16(2, true),
+    sectionCount: view.getUint16(4, true),
+    tileCount: view.getUint16(6, true),
+    activeProfileId: view.getUint16(8, true),
+    inferenceMs: view.getUint16(12, true),
+    queueMs: view.getUint16(14, true),
+    serverTotalMs: view.getUint16(16, true),
+    tileBaseId: view.getUint32(20, true),
+    tileIndexBytes: view.getUint32(24, true),
+    resultClass: view.getUint8(44) as NnrpResultClass,
+    appliedBudgetPolicy: view.getUint8(45),
+    reusedFrameId: view.getUint32(48, true),
+    coveredTileCount: view.getUint16(52, true),
+    droppedTileCount: view.getUint16(54, true),
+    payloadKindBitmap: view.getUint32(56, true),
+    payloadFrameCount: view.getUint16(60, true),
+  };
+  validateResultPushMetadata(metadata);
+  return { metadata, body: payload.slice(64) };
+}
+
+export function decodeNnrpRuntimeEvent(
+  header: NnrpRuntimeFrameHeader,
+  payload: Uint8Array,
+): NnrpRuntimeEvent {
+  const ownedHeader = normalizeRuntimeFrameHeader(header);
+  if (!(payload instanceof Uint8Array)) {
+    throw runtimeEventError("NNRP_RUNTIME_PAYLOAD_INVALID", "Runtime event payload must be a Uint8Array.");
+  }
+
+  switch (ownedHeader.messageType) {
+    case NnrpMessageType.SessionClose: {
+      const value = decodeSessionCloseMetadata(payload);
+      return runtimeEvent(ownedHeader, { type: "session_close", value }, { type: "none" });
+    }
+    case NnrpMessageType.FrameSubmit: {
+      const decoded = decodeSubmitPayload(payload);
+      const value: NnrpFrameSubmitMetadata = { operationId: decoded.operationId, ...decoded.metadata };
+      return runtimeEvent(ownedHeader, { type: "frame_submit", value }, { type: "body", body: decoded.body });
+    }
+    case NnrpMessageType.FrameCancel:
+    case NnrpMessageType.ResultDrop:
+      requireEmptyRuntimePayload(payload, NnrpMessageType[ownedHeader.messageType]);
+      return runtimeEvent(ownedHeader, { type: "none" }, { type: "none" });
+    case NnrpMessageType.ResultPush: {
+      const decoded = decodeResultPushPayload(payload);
+      return runtimeEvent(
+        ownedHeader,
+        { type: "result_push", value: decoded.metadata },
+        { type: "body", body: decoded.body },
+      );
+    }
+    case NnrpMessageType.ResultHint: {
+      const value = decodeResultHintMetadata(payload);
+      return runtimeEvent(ownedHeader, { type: "result_hint", value }, { type: "none" });
+    }
+    case NnrpMessageType.FlowUpdate: {
+      const value = decodeFlowUpdateMetadata(payload, ownedHeader);
+      return runtimeEvent(ownedHeader, { type: "flow_update", value }, { type: "none" });
+    }
+    case NnrpMessageType.CacheInvalidate: {
+      const value = decodeCacheInvalidateMetadata(payload);
+      return runtimeEvent(ownedHeader, { type: "cache_invalidate", value }, { type: "none" });
+    }
+    case NnrpMessageType.Cancel:
+    case NnrpMessageType.Abort:
+    case NnrpMessageType.PriorityUpdate:
+    case NnrpMessageType.Deadline:
+    case NnrpMessageType.ExpireAt:
+    case NnrpMessageType.Supersede:
+    case NnrpMessageType.BudgetUpdate:
+    case NnrpMessageType.Progress:
+    case NnrpMessageType.PartialResult:
+    case NnrpMessageType.Backpressure:
+    case NnrpMessageType.CreditUpdate:
+    case NnrpMessageType.CapabilityNegotiation:
+    case NnrpMessageType.DegradeProfile:
+    case NnrpMessageType.RouteHint:
+    case NnrpMessageType.ExecutionHint:
+    case NnrpMessageType.TraceContext:
+    case NnrpMessageType.ResultDropReason:
+    case NnrpMessageType.ErrorRecoverable:
+    case NnrpMessageType.RetryAfter:
+      return decodeRuntimeControlEvent(ownedHeader, payload);
+    case NnrpMessageType.ObjectDeclare:
+    case NnrpMessageType.ObjectRef:
+    case NnrpMessageType.ObjectRelease:
+    case NnrpMessageType.ObjectPatch:
+    case NnrpMessageType.ObjectDelta:
+    case NnrpMessageType.CacheReference:
+    case NnrpMessageType.CacheMiss:
+      return decodeRuntimeObjectEvent(ownedHeader, payload);
+    default:
+      throw runtimeEventError(
+        "NNRP_RUNTIME_MESSAGE_UNSUPPORTED",
+        `Message type ${ownedHeader.messageType} is not part of the frozen role event surface.`,
+      );
+  }
+}
+
+export function createNnrpResultFromRuntimeEvent(
+  operationId: bigint,
+  event: NnrpRuntimeEvent,
+): NnrpResult {
+  validateNonZeroOperationId(operationId);
+  let terminalState: NnrpResultTerminalState;
+  if (
+    event.header.messageType === NnrpMessageType.ResultPush && event.metadata.type === "result_push" &&
+    event.tail.type === "body"
+  ) {
+    terminalState = "success";
+  } else if (
+    event.header.messageType === NnrpMessageType.ResultDrop && event.metadata.type === "none" &&
+    event.tail.type === "none"
+  ) {
+    terminalState = "dropped";
+  } else if (
+    event.header.messageType === NnrpMessageType.ResultDropReason && event.metadata.type === "result_drop_reason" &&
+    event.tail.type === "diagnostic"
+  ) {
+    terminalState = "dropped";
+  } else {
+    throw runtimeEventError(
+      "NNRP_TERMINAL_EVENT_INVALID",
+      "Runtime terminal evidence does not match RESULT_PUSH, RESULT_DROP, or RESULT_DROP_REASON.",
+    );
+  }
+  return { operationId, terminalState, event: { type: "runtime", event } };
+}
+
+export function createNnrpResultFromLifecycle(event: NnrpOperationLifecycleEvent): NnrpResult {
+  validateNonZeroOperationId(event.operationId);
+  const terminalState = operationTerminalState(event.state);
+  if (terminalState === undefined) {
+    throw runtimeEventError(
+      "NNRP_LIFECYCLE_NOT_TERMINAL",
+      `Operation state '${event.state}' does not establish a terminal result.`,
+    );
+  }
+  return {
+    operationId: event.operationId,
+    terminalState,
+    event: { type: "lifecycle", event: { ...event } },
+  };
+}
+
 export function normalizeSubmitRequest(
   request: NnrpSubmitRequest,
   options: NormalizeSubmitRequestOptions = {},
@@ -2128,6 +2748,332 @@ export function normalizeSubmitRequest(
     metadata: { ...request.metadata },
     body,
   };
+}
+
+function decodeRuntimeControlEvent(
+  header: NnrpRuntimeFrameHeader,
+  payload: Uint8Array,
+): NnrpRuntimeEvent {
+  const decoded = decodeRuntimeControlMetadata(header.messageType, payload);
+  const metadata = runtimeControlEventMetadata(header.messageType, decoded.metadata);
+  const tail = runtimeControlEventTail(header.messageType, decoded.tail);
+  return runtimeEvent(header, metadata, tail);
+}
+
+function decodeRuntimeObjectEvent(
+  header: NnrpRuntimeFrameHeader,
+  payload: Uint8Array,
+): NnrpRuntimeEvent {
+  const decoded = decodeRuntimeObjectMetadata(header.messageType, payload);
+  switch (header.messageType) {
+    case NnrpMessageType.ObjectDeclare:
+      return runtimeEvent(
+        header,
+        { type: "object_descriptor", value: decoded.metadata as ObjectDescriptorMetadata },
+        { type: "body", body: decoded.tail },
+      );
+    case NnrpMessageType.ObjectRef:
+      return runtimeEvent(
+        header,
+        { type: "object_reference", value: decoded.metadata as ObjectReferenceMetadata },
+        { type: "body", body: decoded.tail },
+      );
+    case NnrpMessageType.ObjectRelease:
+      return runtimeEvent(
+        header,
+        { type: "object_release", value: decoded.metadata as ObjectReleaseMetadata },
+        { type: "diagnostic", diagnostic: decoded.tail },
+      );
+    case NnrpMessageType.ObjectPatch:
+    case NnrpMessageType.ObjectDelta: {
+      const value = decoded.metadata as ObjectDeltaMetadata;
+      const metadataEnd = value.metadataBytes;
+      const deltaEnd = metadataEnd + value.deltaBytes;
+      if (deltaEnd !== decoded.tail.byteLength) {
+        throw runtimeEventError(
+          "NNRP_OBJECT_TAIL_LENGTH_INVALID",
+          `Object delta declares ${deltaEnd} tail bytes but received ${decoded.tail.byteLength}.`,
+        );
+      }
+      return runtimeEvent(
+        header,
+        { type: "object_delta", value },
+        {
+          type: "metadata_body_and_delta",
+          metadataBody: decoded.tail.slice(0, metadataEnd),
+          delta: decoded.tail.slice(metadataEnd, deltaEnd),
+        },
+      );
+    }
+    case NnrpMessageType.CacheReference:
+      return runtimeEvent(
+        header,
+        { type: "cache_reference", value: decoded.metadata as CacheReferenceMetadata },
+        { type: "body", body: decoded.tail },
+      );
+    case NnrpMessageType.CacheMiss:
+      return runtimeEvent(
+        header,
+        { type: "cache_miss", value: decoded.metadata as CacheMissMetadata },
+        { type: "diagnostic", diagnostic: decoded.tail },
+      );
+    default:
+      throw runtimeEventError("NNRP_OBJECT_MESSAGE_UNSUPPORTED", "Unsupported runtime object event.");
+  }
+}
+
+function runtimeControlEventMetadata(
+  messageType: NnrpMessageType,
+  value: RuntimeControlMetadata,
+): NnrpRuntimeEventMetadata {
+  switch (messageType) {
+    case NnrpMessageType.Cancel:
+    case NnrpMessageType.Abort:
+      return { type: "control_request", value: value as ControlRequestMetadata };
+    case NnrpMessageType.PriorityUpdate:
+    case NnrpMessageType.Deadline:
+    case NnrpMessageType.ExpireAt:
+      return { type: "scheduling", value: value as SchedulingMetadata };
+    case NnrpMessageType.Supersede:
+      return { type: "supersede", value: value as SupersedeMetadata };
+    case NnrpMessageType.BudgetUpdate:
+      return { type: "budget", value: value as BudgetMetadata };
+    case NnrpMessageType.Progress:
+      return { type: "progress", value: value as ProgressMetadata };
+    case NnrpMessageType.PartialResult:
+      return { type: "partial_result", value: value as PartialResultMetadata };
+    case NnrpMessageType.Backpressure:
+    case NnrpMessageType.CreditUpdate:
+      return { type: "pressure", value: value as PressureMetadata };
+    case NnrpMessageType.CapabilityNegotiation:
+    case NnrpMessageType.DegradeProfile:
+      return { type: "capability", value: value as CapabilityMetadata };
+    case NnrpMessageType.RouteHint:
+    case NnrpMessageType.ExecutionHint:
+      return { type: "route_hint", value: value as RouteHintMetadata };
+    case NnrpMessageType.TraceContext:
+      return { type: "trace_context", value: value as TraceContextMetadata };
+    case NnrpMessageType.ResultDropReason:
+      return { type: "result_drop_reason", value: value as ResultDropReasonMetadata };
+    case NnrpMessageType.ErrorRecoverable:
+      return { type: "recoverable_error", value: value as RecoverableErrorMetadata };
+    case NnrpMessageType.RetryAfter:
+      return { type: "retry_after", value: value as RetryAfterMetadata };
+    default:
+      throw runtimeEventError("NNRP_CONTROL_MESSAGE_UNSUPPORTED", "Unsupported runtime control event.");
+  }
+}
+
+function runtimeControlEventTail(messageType: NnrpMessageType, bytes: Uint8Array): NnrpRuntimeEventTail {
+  switch (messageType) {
+    case NnrpMessageType.Cancel:
+    case NnrpMessageType.Abort:
+    case NnrpMessageType.Supersede:
+    case NnrpMessageType.ResultDropReason:
+    case NnrpMessageType.ErrorRecoverable:
+    case NnrpMessageType.RetryAfter:
+      return { type: "diagnostic", diagnostic: bytes };
+    case NnrpMessageType.Progress:
+    case NnrpMessageType.PartialResult:
+    case NnrpMessageType.CapabilityNegotiation:
+    case NnrpMessageType.DegradeProfile:
+    case NnrpMessageType.RouteHint:
+    case NnrpMessageType.ExecutionHint:
+    case NnrpMessageType.TraceContext:
+      return { type: "body", body: bytes };
+    default:
+      requireEmptyRuntimePayload(bytes, NnrpMessageType[messageType]);
+      return { type: "none" };
+  }
+}
+
+function decodeResultHintMetadata(payload: Uint8Array): NnrpResultHintMetadata {
+  requireExactRuntimePayload(payload, 16, "RESULT_HINT");
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const metadata: NnrpResultHintMetadata = {
+    appliedBudgetPolicy: view.getUint32(0, true) as NnrpResultHintBudgetPolicy,
+    congestionState: view.getUint32(4, true) as NnrpResultHintCongestionState,
+    reason: view.getUint32(8, true) as NnrpResultHintReason,
+    retryAfterMs: view.getUint32(12, true),
+  };
+  assertEnumRange("appliedBudgetPolicy", metadata.appliedBudgetPolicy, NnrpResultHintBudgetPolicy.Drop);
+  assertEnumRange("congestionState", metadata.congestionState, NnrpResultHintCongestionState.Saturated);
+  assertEnumRange("reason", metadata.reason, NnrpResultHintReason.Superseded);
+  return metadata;
+}
+
+function decodeFlowUpdateMetadata(
+  payload: Uint8Array,
+  header: NnrpRuntimeFrameHeader,
+): NnrpFlowUpdateMetadata {
+  requireExactRuntimePayload(payload, 32, "FLOW_UPDATE");
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  if (view.getUint8(3) !== 0 || view.getUint16(10, true) !== 0) {
+    throw runtimeEventError("NNRP_FLOW_RESERVED_NONZERO", "FLOW_UPDATE reserved fields must be zero.");
+  }
+  const metadata: NnrpFlowUpdateMetadata = {
+    scopeKind: view.getUint8(0) as NnrpFlowScopeKind,
+    updateReason: view.getUint8(1) as NnrpFlowUpdateReason,
+    backpressureLevel: view.getUint8(2) as NnrpBackpressureLevel,
+    connectionCredit: view.getUint16(4, true),
+    sessionCredit: view.getUint16(6, true),
+    operationCredit: view.getUint16(8, true),
+    operationId: view.getBigUint64(12, true),
+    retryAfterMs: view.getUint32(20, true),
+    creditEpoch: view.getUint32(24, true),
+    flowFlags: view.getUint32(28, true),
+  };
+  assertEnumRange("scopeKind", metadata.scopeKind, NnrpFlowScopeKind.Operation);
+  assertEnumRange("updateReason", metadata.updateReason, NnrpFlowUpdateReason.Congestion);
+  assertEnumRange("backpressureLevel", metadata.backpressureLevel, NnrpBackpressureLevel.Paused);
+  if ((metadata.flowFlags & ~0x0f) !== 0) {
+    throw runtimeEventError("NNRP_FLOW_FLAGS_INVALID", "FLOW_UPDATE contains reserved flow flag bits.");
+  }
+  if (metadata.retryAfterMs !== 0 && (metadata.flowFlags & 0x02) === 0) {
+    throw runtimeEventError("NNRP_FLOW_RETRY_FLAG_MISSING", "FLOW_UPDATE retryAfterMs requires its validity flag.");
+  }
+  if (
+    (metadata.scopeKind === NnrpFlowScopeKind.Connection &&
+      (header.sessionId !== 0 || metadata.sessionCredit !== 0 || metadata.operationCredit !== 0 ||
+        metadata.operationId !== 0n)) ||
+    (metadata.scopeKind === NnrpFlowScopeKind.Session &&
+      (header.sessionId === 0 || metadata.connectionCredit !== 0 || metadata.operationCredit !== 0 ||
+        metadata.operationId !== 0n)) ||
+    (metadata.scopeKind === NnrpFlowScopeKind.Operation &&
+      (header.sessionId === 0 || metadata.operationId === 0n))
+  ) {
+    throw runtimeEventError("NNRP_FLOW_SCOPE_INVALID", "FLOW_UPDATE scope fields do not match its common header.");
+  }
+  return metadata;
+}
+
+function decodeSessionCloseMetadata(payload: Uint8Array): NnrpSessionCloseMetadata {
+  requireExactRuntimePayload(payload, 24, "SESSION_CLOSE");
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  if (view.getUint8(3) !== 0) {
+    throw runtimeEventError("NNRP_SESSION_CLOSE_RESERVED", "SESSION_CLOSE reserved fields must be zero.");
+  }
+  const metadata: NnrpSessionCloseMetadata = {
+    closeReason: view.getUint16(0, true) as NnrpSessionCloseReason,
+    inFlightPolicy: view.getUint8(2) as NnrpInFlightPolicy,
+    drainTimeoutMs: view.getUint32(4, true),
+    lastOperationId: view.getBigUint64(8, true),
+    sessionErrorCode: view.getUint32(16, true),
+    sessionCloseTag: view.getUint32(20, true),
+  };
+  assertEnumRange("closeReason", metadata.closeReason, NnrpSessionCloseReason.AuthRevoked);
+  assertEnumRange("inFlightPolicy", metadata.inFlightPolicy, NnrpInFlightPolicy.Abort);
+  return metadata;
+}
+
+function validateResultPushMetadata(metadata: NnrpResultPushMetadata): void {
+  for (const [name, value] of Object.entries(metadata)) {
+    if (
+      name === "payloadKindBitmap" || name === "tileBaseId" || name === "tileIndexBytes" ||
+      name === "reusedFrameId"
+    ) {
+      assertUnsigned(name, value, 0xffff_ffff);
+    } else if (name !== "resultClass" && name !== "appliedBudgetPolicy") {
+      assertUnsigned(name, value, 0xffff);
+    }
+  }
+  assertEnumRange("resultClass", metadata.resultClass, NnrpResultClass.Degraded);
+  if ((metadata.resultFlags & ~0x07) !== 0 || (metadata.appliedBudgetPolicy & ~0x0f) !== 0) {
+    throw runtimeEventError("NNRP_RESULT_FLAGS_INVALID", "RESULT_PUSH contains reserved flag bits.");
+  }
+  if ((metadata.payloadKindBitmap & ~0x7f) !== 0) {
+    throw runtimeEventError("NNRP_RESULT_PAYLOAD_KIND_INVALID", "RESULT_PUSH contains unknown payload kinds.");
+  }
+  if (
+    (metadata.payloadKindBitmap & NnrpPayloadKind.Tensor) === 0 &&
+    (metadata.tileCount !== 0 || metadata.tileBaseId !== 0 || metadata.tileIndexBytes !== 0 ||
+      metadata.coveredTileCount !== 0 || metadata.droppedTileCount !== 0)
+  ) {
+    throw runtimeEventError(
+      "NNRP_RESULT_TENSOR_FIELDS_INVALID",
+      "Non-tensor RESULT_PUSH must clear tensor tile fields.",
+    );
+  }
+}
+
+function normalizeRuntimeFrameHeader(header: NnrpRuntimeFrameHeader): NnrpRuntimeFrameHeader {
+  if (header.versionMajor !== 1 || header.wireFormat !== 0) {
+    throw runtimeEventError("NNRP_RUNTIME_HEADER_VERSION", "Runtime event header must be NNRP/1 wire format 0.");
+  }
+  assertUnsigned("messageType", header.messageType, 0xff);
+  if (NnrpMessageType[header.messageType] === undefined) {
+    throw runtimeEventError("NNRP_RUNTIME_MESSAGE_UNKNOWN", `Unknown runtime message type ${header.messageType}.`);
+  }
+  assertUnsigned("flags", header.flags, 0xffff_ffff);
+  assertUnsigned("sessionId", header.sessionId, 0xffff_ffff);
+  assertUnsigned("frameId", header.frameId, 0xffff_ffff);
+  assertUnsigned("viewId", header.viewId, 0xffff);
+  assertUnsigned("routeId", header.routeId, 0xffff);
+  validateU64BigInt("traceId", header.traceId);
+  return { ...header };
+}
+
+function runtimeEvent(
+  header: NnrpRuntimeFrameHeader,
+  metadata: NnrpRuntimeEventMetadata,
+  tail: NnrpRuntimeEventTail,
+): NnrpRuntimeEvent {
+  return { header, metadata, tail };
+}
+
+function operationTerminalState(state: NnrpOperationState): NnrpResultTerminalState | undefined {
+  switch (state) {
+    case "completed":
+      return "success";
+    case "cancelled":
+      return "cancelled";
+    case "superseded":
+      return "dropped";
+    case "failed":
+      return "error";
+    default:
+      return undefined;
+  }
+}
+
+function validateNonZeroOperationId(operationId: bigint): void {
+  validateU64BigInt("operationId", operationId);
+  if (operationId === 0n) {
+    throw runtimeEventError("NNRP_OPERATION_ID_ZERO", "Terminal results require a non-zero operation id.");
+  }
+}
+
+function requireRuntimePayload(payload: Uint8Array, minimum: number, name: string): void {
+  if (!(payload instanceof Uint8Array) || payload.byteLength < minimum) {
+    throw runtimeEventError(
+      "NNRP_RUNTIME_METADATA_TRUNCATED",
+      `${name} requires at least ${minimum} bytes but received ${payload?.byteLength ?? 0}.`,
+    );
+  }
+}
+
+function requireExactRuntimePayload(payload: Uint8Array, length: number, name: string): void {
+  requireRuntimePayload(payload, length, name);
+  if (payload.byteLength !== length) {
+    throw runtimeEventError(
+      "NNRP_RUNTIME_PAYLOAD_LENGTH_INVALID",
+      `${name} requires exactly ${length} bytes but received ${payload.byteLength}.`,
+    );
+  }
+}
+
+function requireEmptyRuntimePayload(payload: Uint8Array, name: string): void {
+  if (payload.byteLength !== 0) {
+    throw runtimeEventError("NNRP_RUNTIME_PAYLOAD_UNEXPECTED", `${name} does not permit payload bytes.`);
+  }
+}
+
+function assertEnumRange(name: string, value: number, maximum: number): void {
+  assertUnsigned(name, value, maximum);
+}
+
+function runtimeEventError(code: string, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({ code, message, source: "protocol", retryable: false });
 }
 
 export function createRecoveryToken(
@@ -2157,7 +3103,10 @@ export function normalizeSessionMigrationRequest(request: NnrpSessionMigrationRe
 }
 
 export function throwIfResultDrop(event: NnrpRuntimeEvent): void {
-  if (event.type === "drop") {
+  if (
+    event.header.messageType === NnrpMessageType.ResultDrop ||
+    event.header.messageType === NnrpMessageType.ResultDropReason
+  ) {
     throw new NnrpResultDropError(event);
   }
 }

@@ -1,17 +1,13 @@
 import {
-  type BudgetMetadata,
   type CacheInvalidateMetadata,
   type CacheMissMetadata,
   type CacheReferenceMetadata,
-  type ControlRequestMetadata,
   createCapabilityManifest,
   createTransportCandidates,
   createTransportSelectionSummary,
-  decodeCacheInvalidateMetadata,
-  decodeRuntimeControlMetadata,
-  decodeRuntimeObjectMetadata,
-  decodeSubmitPayload,
+  decodeNnrpRuntimeEvent,
   encodeCacheInvalidateMetadata,
+  encodeResultPushPayload,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
@@ -21,15 +17,16 @@ import {
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
-  type NnrpInputProfile,
   NnrpMessageType,
   NnrpProtocolError,
   type NnrpResult,
   type NnrpRuntimeEvent,
-  type NnrpRuntimeFrameEvent,
+  type NnrpRuntimeFrameHeader,
+  type NnrpSchemaDescriptorHeader,
+  NnrpSchemaRegistry,
   type NnrpServerProviderRoutes,
-  type NnrpSessionFlowControlOptions,
-  type NnrpSubmitRequest,
+  type NnrpSessionOpenMetadata,
+  NnrpStandardProfile,
   NnrpTimeoutError,
   type NnrpTransportCandidate,
   type NnrpTransportCandidateReadiness,
@@ -61,8 +58,8 @@ import {
   type RetryAfterMetadata,
   type RuntimeControlMetadata,
   RuntimeRole,
-  type SchedulingMetadata,
   selectTransport,
+  tokenDeltaSchemaDescriptor,
   type TraceContextMetadata,
   validateEventPollOptions,
 } from "@nnrp/core";
@@ -208,7 +205,7 @@ function objectLifecycleError(objectId: bigint, detail: string): NnrpProtocolErr
 }
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 4;
-const EXPECTED_ABI_MINOR = 3;
+const EXPECTED_ABI_MINOR = 4;
 const EXPECTED_ABI_PATCH = 0;
 const NATIVE_RUNTIME_CAPABILITIES = [
   "cache",
@@ -265,14 +262,13 @@ const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
   RUNTIME_FEATURE_PREVIEW4_RUNTIME_FRAME_SEND;
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const NATIVE_ROLE_IDS = Symbol.for("nnrp.internal.native.role-handle-ids.v1");
-const FRAME_SUBMIT_METADATA_SIZE = 72;
-const RESULT_PUSH_METADATA_SIZE = 64;
-const EVENT_KIND_SESSION_CLOSED = 4;
 const EVENT_KIND_SUBMIT_ACCEPTED = 5;
-const EVENT_KIND_RUNTIME_FRAME = 13;
 
-const serverRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (sessionId: string) => Promise<void>>();
-const serverAcceptors = new WeakMap<NnrpServer, () => Promise<NnrpNativeAcceptedSession>>();
+const serverRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (routingKey: string) => Promise<void>>();
+const serverAcceptors = new WeakMap<
+  NnrpServer,
+  (options: NnrpServerAcceptOptions) => Promise<InternalServerSessionRegistration>
+>();
 const serverClosers = new WeakMap<NnrpServer, () => Promise<void>>();
 const serverBoundProviderEndpoints = new WeakMap<
   NnrpServer,
@@ -280,15 +276,15 @@ const serverBoundProviderEndpoints = new WeakMap<
 >();
 const serverRoleEventReceivers = new WeakMap<
   NnrpBackendRuntime,
-  (request: NnrpNativeServerReceiveRequest) => Promise<NnrpRuntimeEvent>
+  (routingKey: string, request: NnrpNativeServerReceiveRequest) => Promise<NnrpRuntimeEvent>
 >();
 const serverRoleFrameSenders = new WeakMap<
   NnrpBackendRuntime,
-  (request: NnrpNativeRuntimeFrameSendRequest) => Promise<void>
+  (routingKey: string, request: NnrpNativeRuntimeFrameSendRequest) => Promise<void>
 >();
 const serverRoleResultSenders = new WeakMap<
   NnrpBackendRuntime,
-  (sessionOptions: NnrpSessionOptions, result: NnrpResult) => Promise<void>
+  (routingKey: string, result: NnrpResult) => Promise<void>
 >();
 
 interface InternalNativeHandle {
@@ -300,6 +296,7 @@ interface InternalNativeHandle {
 
 interface InternalRoleEvent {
   readonly kind: number;
+  readonly headerPresent: boolean;
   readonly messageType: number;
   readonly versionMajor: number;
   readonly wireFormat: number;
@@ -319,6 +316,7 @@ interface InternalRoleEvent {
 
 interface InternalServerRoleSession {
   readonly handle: InternalNativeHandle;
+  readonly sessionId: number;
   poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]>;
   sendResult(operation: InternalNativeHandle, payload: Uint8Array): Promise<void>;
   sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
@@ -328,6 +326,20 @@ interface InternalServerRoleSession {
 interface InternalTransportServerRole {
   accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<InternalServerRoleSession>;
   close(): Promise<void>;
+}
+
+interface InternalServerRoleOptions {
+  readonly supportedProfiles: readonly number[];
+  readonly supportedCacheObjects: readonly number[];
+  readonly maxCacheObjects: bigint;
+  readonly maxCacheObjectBytes: number;
+  readonly schemaDescriptors: readonly NnrpSchemaDescriptorHeader[];
+  readonly resumeTokenBytes: number;
+  readonly maxInFlightOperations: number;
+  readonly grantedOperationCredit: number;
+  readonly leaseTtlMs: number;
+  readonly resumeWindowMs: number;
+  readonly evaluateSession?: (open: NnrpSessionOpenMetadata) => Promise<NnrpServerSessionPolicyDecision>;
 }
 
 interface InternalAcceptedServerRoleSession {
@@ -458,7 +470,11 @@ class InternalServerRoleGroup implements InternalServerRole {
 }
 
 interface InternalServerRoleCarrier {
-  [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<InternalTransportServerRole>;
+  [SERVER_ROLE_ADOPT](
+    serverId: bigint,
+    generation: number,
+    options: InternalServerRoleOptions,
+  ): Promise<InternalTransportServerRole>;
 }
 
 interface NativeRoleIdState {
@@ -482,7 +498,7 @@ export interface NnrpNativeRuntimeCapabilities {
 }
 
 export interface NnrpNativeRuntimeFrameSendRequest {
-  readonly sessionOptions: NnrpSessionOptions;
+  readonly sessionId: number;
   readonly messageType: NnrpMessageType;
   readonly frameId: number;
   readonly payload: Uint8Array;
@@ -492,15 +508,21 @@ export interface NnrpNativeAcceptRequest {
   readonly endpoint: string;
   readonly providerRoutes?: NnrpServerProviderRoutes;
   readonly transportPolicy: NnrpTransportPolicy;
+  readonly sessionDefaults: NnrpServerSessionOptions;
+  readonly acceptOptions: NnrpServerAcceptOptions;
 }
 
 export interface NnrpNativeAcceptedSession {
-  readonly sessionOptions?: NnrpSessionOptions;
+  readonly sessionId: number;
   readonly activeTransport: NnrpTransportKind;
 }
 
+interface InternalServerSessionRegistration extends NnrpNativeAcceptedSession {
+  readonly routingKey: string;
+}
+
 export interface NnrpNativeServerReceiveRequest {
-  readonly sessionOptions: NnrpSessionOptions;
+  readonly sessionId: number;
   readonly timeoutMillis?: number;
 }
 
@@ -515,18 +537,38 @@ export interface NnrpNativeFfiBinding {
   close?(): void | Promise<void>;
 }
 
-export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
-  readonly sessionId?: string;
-  readonly inputProfile?: NnrpInputProfile;
-  readonly targetCadence?: number;
-  readonly qualityTier?: number;
-  readonly metadata?: Readonly<Record<string, string>>;
-}
-
 export interface NnrpBackendRuntimeOptions {
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly ffi?: NnrpNativeFfiBinding;
+}
+
+export interface NnrpServerSessionPolicyDecision {
+  readonly accepted: boolean;
+  readonly sessionErrorCode: number;
+  readonly diagnostic?: string;
+}
+
+export interface NnrpServerSessionPolicy {
+  evaluate(open: NnrpSessionOpenMetadata): Promise<NnrpServerSessionPolicyDecision>;
+}
+
+export interface NnrpServerSessionOptions {
+  readonly supportedProfiles?: readonly number[];
+  readonly supportedCacheObjects?: readonly number[];
+  readonly maxCacheObjects?: bigint;
+  readonly maxCacheObjectBytes?: number;
+  readonly schemaRegistry?: NnrpSchemaRegistry;
+  readonly resumeTokenBytes?: number;
+  readonly maxInFlightOperations?: number;
+  readonly grantedOperationCredit?: number;
+  readonly leaseTtlMs?: number;
+  readonly resumeWindowMs?: number;
+  readonly applicationPolicy?: NnrpServerSessionPolicy;
+}
+
+export interface NnrpServerAcceptOptions {
+  readonly timeoutMs?: number;
 }
 
 export interface NnrpListenOptions {
@@ -534,6 +576,93 @@ export interface NnrpListenOptions {
   readonly providerRoutes?: NnrpServerProviderRoutes;
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
+  readonly sessionDefaults?: NnrpServerSessionOptions;
+}
+
+interface NormalizedServerSessionOptions extends InternalServerRoleOptions {
+  readonly schemaRegistry: NnrpSchemaRegistry;
+  readonly applicationPolicy: NnrpServerSessionPolicy;
+}
+
+const ACCEPT_VALID_SERVER_SESSIONS: NnrpServerSessionPolicy = Object.freeze({
+  evaluate: () => Promise.resolve({ accepted: true, sessionErrorCode: 0 }),
+});
+
+function normalizeServerSessionOptions(options: NnrpServerSessionOptions = {}): NormalizedServerSessionOptions {
+  const supportedProfiles = Object.freeze([...(options.supportedProfiles ?? [NnrpStandardProfile.Token])]);
+  const supportedCacheObjects = Object.freeze([...(options.supportedCacheObjects ?? [])]);
+  const maxCacheObjects = options.maxCacheObjects ?? 0n;
+  const maxCacheObjectBytes = options.maxCacheObjectBytes ?? 0;
+  const schemaRegistry = options.schemaRegistry ?? new NnrpSchemaRegistry([tokenDeltaSchemaDescriptor()]);
+  const resumeTokenBytes = options.resumeTokenBytes ?? 24;
+  const maxInFlightOperations = options.maxInFlightOperations ?? 4;
+  const grantedOperationCredit = options.grantedOperationCredit ?? 2;
+  const leaseTtlMs = options.leaseTtlMs ?? 30_000;
+  const resumeWindowMs = options.resumeWindowMs ?? 120_000;
+  const applicationPolicy = options.applicationPolicy ?? ACCEPT_VALID_SERVER_SESSIONS;
+
+  if (supportedProfiles.length === 0) throw new RangeError("supportedProfiles must not be empty");
+  for (const profile of supportedProfiles) boundedInteger("supportedProfiles", profile, 0xffff);
+  for (const objectKind of supportedCacheObjects) boundedInteger("supportedCacheObjects", objectKind, 0xffff_ffff);
+  if (maxCacheObjects < 0n || maxCacheObjects > 0xffff_ffff_ffff_ffffn) {
+    throw new RangeError("maxCacheObjects must fit in u64");
+  }
+  boundedInteger("maxCacheObjectBytes", maxCacheObjectBytes, 0xffff_ffff);
+  boundedInteger("resumeTokenBytes", resumeTokenBytes, 0xffff_ffff);
+  boundedInteger("maxInFlightOperations", maxInFlightOperations, 0xffff, 1);
+  boundedInteger("grantedOperationCredit", grantedOperationCredit, maxInFlightOperations);
+  boundedInteger("leaseTtlMs", leaseTtlMs, 0xffff_ffff);
+  boundedInteger("resumeWindowMs", resumeWindowMs, 0xffff_ffff);
+  if (!(schemaRegistry instanceof NnrpSchemaRegistry)) {
+    throw new TypeError("schemaRegistry must be NnrpSchemaRegistry");
+  }
+  if (typeof applicationPolicy.evaluate !== "function") {
+    throw new TypeError("applicationPolicy must implement evaluate(open)");
+  }
+
+  return Object.freeze({
+    supportedProfiles,
+    supportedCacheObjects,
+    maxCacheObjects,
+    maxCacheObjectBytes,
+    schemaRegistry,
+    schemaDescriptors: schemaRegistry.snapshot(),
+    resumeTokenBytes,
+    maxInFlightOperations,
+    grantedOperationCredit,
+    leaseTtlMs,
+    resumeWindowMs,
+    applicationPolicy,
+    ...(applicationPolicy === ACCEPT_VALID_SERVER_SESSIONS ? {} : {
+      evaluateSession: async (open: NnrpSessionOpenMetadata) =>
+        validateServerPolicyDecision(await applicationPolicy.evaluate(open)),
+    }),
+  });
+}
+
+function validateServerPolicyDecision(decision: NnrpServerSessionPolicyDecision): NnrpServerSessionPolicyDecision {
+  if (typeof decision !== "object" || decision === null || typeof decision.accepted !== "boolean") {
+    throw new TypeError("applicationPolicy.evaluate(open) must return a policy decision");
+  }
+  boundedInteger("sessionErrorCode", decision.sessionErrorCode, 0xffff_ffff);
+  if (decision.accepted !== (decision.sessionErrorCode === 0)) {
+    throw new RangeError("accepted policy decisions require error code zero and rejections require a non-zero code");
+  }
+  if (decision.diagnostic !== undefined && typeof decision.diagnostic !== "string") {
+    throw new TypeError("policy decision diagnostic must be a string");
+  }
+  return Object.freeze({ ...decision });
+}
+
+function normalizeServerAcceptOptions(options: NnrpServerAcceptOptions = {}): Required<NnrpServerAcceptOptions> {
+  return Object.freeze({ timeoutMs: boundedInteger("timeoutMs", options.timeoutMs ?? 0, 0xffff_ffff) });
+}
+
+function boundedInteger(name: string, value: number, maximum: number, minimum = 0): number {
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new RangeError(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return value;
 }
 
 export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
@@ -588,7 +717,7 @@ export class NnrpBackendRuntime {
   #closed = false;
   readonly #roleServers = new Map<object, Promise<InternalServerRole>>();
   readonly #roleSessions = new Map<string, InternalServerRoleSession>();
-  readonly #roleOperations = new Map<string, InternalNativeHandle>();
+  readonly #roleOperations = new Map<string, Map<number, InternalNativeHandle>>();
 
   public constructor(
     binding: NnrpNativeRuntimeBinding,
@@ -598,10 +727,10 @@ export class NnrpBackendRuntime {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
     this.#transportProviders = [...transportProviders];
-    serverRoleSessionClosers.set(this, (sessionId) => this.#closeRoleSession(sessionId));
-    serverRoleEventReceivers.set(this, (request) => this.#receiveServerEvent(request));
-    serverRoleFrameSenders.set(this, (request) => this.#sendRuntimeFrame(request));
-    serverRoleResultSenders.set(this, (sessionOptions, result) => this.#sendServerResult(sessionOptions, result));
+    serverRoleSessionClosers.set(this, (routingKey) => this.#closeRoleSession(routingKey));
+    serverRoleEventReceivers.set(this, (routingKey, request) => this.#receiveServerEvent(routingKey, request));
+    serverRoleFrameSenders.set(this, (routingKey, request) => this.#sendRuntimeFrame(routingKey, request));
+    serverRoleResultSenders.set(this, (routingKey, result) => this.#sendServerResult(routingKey, result));
   }
 
   public get manifest(): NnrpCapabilityManifest {
@@ -616,15 +745,13 @@ export class NnrpBackendRuntime {
     return this.#binding.ffi?.mode ?? "unbound";
   }
 
-  #sendRuntimeFrame(request: NnrpNativeRuntimeFrameSendRequest): Promise<void> {
+  #sendRuntimeFrame(routingKey: string, request: NnrpNativeRuntimeFrameSendRequest): Promise<void> {
     this.#ensureOpen();
     const sendRuntimeFrame = this.#binding.ffi?.sendRuntimeFrame;
     if (sendRuntimeFrame !== undefined) {
       return Promise.resolve(sendRuntimeFrame(request));
     }
-    const sessionId = request.sessionOptions.sessionId;
-    if (sessionId === undefined) throw bindingNotConnectedError("sendRuntimeFrame");
-    const session = this.#roleSessions.get(sessionId);
+    const session = this.#roleSessions.get(routingKey);
     if (session === undefined) return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
     return session.sendRuntimeFrame(request.messageType, request.frameId, request.payload);
   }
@@ -633,13 +760,13 @@ export class NnrpBackendRuntime {
     listenerKey: object,
     request: NnrpNativeAcceptRequest,
     providers: readonly NnrpNativeTransportProvider[],
-  ): Promise<NnrpNativeAcceptedSession> {
+  ): Promise<InternalServerSessionRegistration> {
     this.#ensureOpen();
     const accept = this.#binding.ffi?.accept;
     if (accept !== undefined) {
       const accepted = await accept(request);
       if (accepted === undefined) throw bindingNotConnectedError("accept");
-      return accepted;
+      return { ...accepted, routingKey: `ffi-session-${allocateNativeRoleId("session")}` };
     }
     const server = await this.#roleServer(
       listenerKey,
@@ -647,58 +774,62 @@ export class NnrpBackendRuntime {
       request.providerRoutes,
       request.transportPolicy,
       providers,
+      normalizeServerSessionOptions(request.sessionDefaults),
     );
-    const accepted = await server.accept(allocateNativeRoleId("session"), 1, 0);
+    const sessionHandleId = allocateNativeRoleId("session");
+    const accepted = await server.accept(
+      sessionHandleId,
+      1,
+      normalizeServerAcceptOptions(request.acceptOptions).timeoutMs,
+    );
     const nativeSession = accepted.session;
-    const sessionId = `native-server-session-${nativeSession.handle.id.toString()}`;
-    this.#roleSessions.set(sessionId, nativeSession);
-    return { sessionOptions: { sessionId }, activeTransport: accepted.activeTransport };
+    const sessionId = nativeSession.sessionId;
+    const routingKey = `native-session-${sessionHandleId}`;
+    this.#roleSessions.set(routingKey, nativeSession);
+    return { routingKey, sessionId, activeTransport: accepted.activeTransport };
   }
 
-  async #receiveServerEvent(request: NnrpNativeServerReceiveRequest): Promise<NnrpRuntimeEvent> {
+  async #receiveServerEvent(
+    routingKey: string,
+    request: NnrpNativeServerReceiveRequest,
+  ): Promise<NnrpRuntimeEvent> {
     this.#ensureOpen();
     const receive = this.#binding.ffi?.receive;
     if (receive !== undefined) {
       return await receive(request);
     }
-    const sessionId = request.sessionOptions.sessionId;
-    if (sessionId === undefined) throw bindingNotConnectedError("receive");
-    const session = this.#roleSessions.get(sessionId);
+    const session = this.#roleSessions.get(routingKey);
     if (session === undefined) throw bindingNotConnectedError("receive");
     const events = await session.poll(1, request.timeoutMillis ?? 0);
     const event = events[0];
     if (event === undefined) throw eventPollTimeoutError("native");
+    const decoded = decodeServerRoleEvent(event);
     if (event.kind === EVENT_KIND_SUBMIT_ACCEPTED) {
-      this.#roleOperations.set(`${sessionId}:${event.frameId}`, event.operation);
-      return decodeServerSubmitEvent(event, sessionId);
+      let operations = this.#roleOperations.get(routingKey);
+      if (operations === undefined) {
+        operations = new Map();
+        this.#roleOperations.set(routingKey, operations);
+      }
+      operations.set(event.frameId, event.operation);
     }
-    if (event.kind === EVENT_KIND_SESSION_CLOSED) {
-      return { type: "close", sessionId };
-    }
-    if (event.kind === EVENT_KIND_RUNTIME_FRAME) {
-      return decodeRuntimeFrameEvent(event.messageType as NnrpMessageType, event.payload, sessionId);
-    }
-    return {
-      type: "diagnostic",
-      sessionId,
-      diagnostic: {
-        code: "NNRP_NATIVE_SERVER_ROLE_EVENT",
-        message: `Native server role emitted event kind ${event.kind}.`,
-        source: "native",
-        retryable: false,
-      },
-    };
+    return decoded;
   }
 
-  #sendServerResult(sessionOptions: NnrpSessionOptions, result: NnrpResult): Promise<void> {
-    const sessionId = sessionOptions.sessionId;
-    const session = sessionId === undefined ? undefined : this.#roleSessions.get(sessionId);
-    const operation = sessionId === undefined ? undefined : this.#roleOperations.get(`${sessionId}:${result.frameId}`);
-    if (session === undefined || operation === undefined) {
+  #sendServerResult(routingKey: string, result: NnrpResult): Promise<void> {
+    const session = this.#roleSessions.get(routingKey);
+    const terminalEvent = successfulRuntimeResultEvent(result);
+    const frameId = terminalEvent.header.frameId;
+    const operations = this.#roleOperations.get(routingKey);
+    const operation = operations?.get(frameId);
+    if (session === undefined || operations === undefined || operation === undefined) {
       return Promise.reject(bindingNotConnectedError("sendResult"));
     }
-    return session.sendResult(operation, encodeResultPushPayload(result)).then(() => {
-      this.#roleOperations.delete(`${sessionId}:${result.frameId}`);
+    return session.sendResult(
+      operation,
+      encodeResultPushPayload(terminalEvent.metadata.value, terminalEvent.tail.body),
+    ).then(() => {
+      operations.delete(frameId);
+      if (operations.size === 0) this.#roleOperations.delete(routingKey);
     });
   }
 
@@ -712,6 +843,7 @@ export class NnrpBackendRuntime {
     );
 
     const providers = options.transports ?? this.#transportProviders;
+    const sessionDefaults = normalizeServerSessionOptions(options.sessionDefaults);
     const listenerKey = {};
     const providerRoutes = copyServerProviderRoutes(options.providerRoutes);
     const state: NnrpServerState = {
@@ -720,6 +852,7 @@ export class NnrpBackendRuntime {
       runtime: this,
       transports: providers,
       transportPolicy: options.transportPolicy ?? this.#transportPolicy,
+      sessionDefaults,
     };
     const server = new NnrpServer(state);
     serverBoundProviderEndpoints.set(server, Object.freeze({}));
@@ -730,6 +863,7 @@ export class NnrpBackendRuntime {
         state.providerRoutes,
         state.transportPolicy,
         providers,
+        sessionDefaults,
       )
       : undefined;
     if (roleServer !== undefined) {
@@ -740,13 +874,15 @@ export class NnrpBackendRuntime {
     }
     serverAcceptors.set(
       server,
-      () =>
+      (acceptOptions) =>
         this.#acceptServerSession(
           listenerKey,
           {
             endpoint: state.endpoint,
             ...(state.providerRoutes === undefined ? {} : { providerRoutes: state.providerRoutes }),
             transportPolicy: state.transportPolicy,
+            sessionDefaults,
+            acceptOptions,
           },
           providers,
         ),
@@ -796,13 +932,11 @@ export class NnrpBackendRuntime {
     }
   }
 
-  async #closeRoleSession(sessionId: string): Promise<void> {
-    const session = this.#roleSessions.get(sessionId);
+  async #closeRoleSession(routingKey: string): Promise<void> {
+    const session = this.#roleSessions.get(routingKey);
     if (session === undefined) return;
-    this.#roleSessions.delete(sessionId);
-    for (const operationKey of this.#roleOperations.keys()) {
-      if (operationKey.startsWith(`${sessionId}:`)) this.#roleOperations.delete(operationKey);
-    }
+    this.#roleSessions.delete(routingKey);
+    this.#roleOperations.delete(routingKey);
     await session.close();
   }
 
@@ -812,6 +946,7 @@ export class NnrpBackendRuntime {
     providerRoutes: NnrpServerProviderRoutes | undefined,
     policy: NnrpTransportPolicy,
     providers: readonly NnrpNativeTransportProvider[],
+    sessionDefaults: NormalizedServerSessionOptions,
   ): Promise<InternalServerRole> {
     let server = this.#roleServers.get(listenerKey);
     if (server !== undefined) return server;
@@ -821,6 +956,7 @@ export class NnrpBackendRuntime {
       providers,
       policy,
       allocateNativeRoleId("connection"),
+      sessionDefaults,
     );
     this.#roleServers.set(listenerKey, server);
     return server;
@@ -958,6 +1094,7 @@ async function listenServerRoles(
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
   firstServerId: bigint,
+  sessionDefaults: NormalizedServerSessionOptions,
 ): Promise<InternalServerRole> {
   const entries: Array<{
     readonly kind: NnrpTransportKind;
@@ -988,7 +1125,7 @@ async function listenServerRoles(
         entries.push({
           kind: provider.kind,
           endpoint: listener.endpoint,
-          role: await adoption.call(listener, nextServerId, 1),
+          role: await adoption.call(listener, nextServerId, 1, sessionDefaults),
         });
       } catch (error) {
         await listener.close();
@@ -1199,203 +1336,47 @@ function copyServerProviderRoutes(
   return copy;
 }
 
-function decodeServerSubmitEvent(event: InternalRoleEvent, sessionId: string): NnrpRuntimeEvent {
-  if (event.payload.byteLength < FRAME_SUBMIT_METADATA_SIZE) {
+function decodeServerRoleEvent(event: InternalRoleEvent): NnrpRuntimeEvent {
+  if (!event.headerPresent) {
     throw new NnrpProtocolError({
-      code: "NNRP_NATIVE_SUBMIT_METADATA_TRUNCATED",
-      message: "Native server submit event omitted the fixed FRAME_SUBMIT metadata.",
+      code: "NNRP_NATIVE_LIFECYCLE_EVENT_UNEXPECTED",
+      message: `Native server role emitted headerless lifecycle event kind ${event.kind} on the wire event pump.`,
       source: "native",
       retryable: false,
     });
   }
-  const decoded = decodeSubmitPayload(event.payload);
-  const submit: NnrpSubmitRequest = {
-    operationId: decoded.operationId,
+  const header: NnrpRuntimeFrameHeader = {
+    versionMajor: event.versionMajor as 1,
+    wireFormat: event.wireFormat as 0,
+    messageType: event.messageType as NnrpMessageType,
+    flags: event.headerFlags,
+    sessionId: event.wireSessionId,
     frameId: event.frameId,
-    header: {
-      flags: event.headerFlags,
-      viewId: event.viewId,
-      routeId: event.routeId,
-      traceId: event.traceId,
-    },
-    metadata: decoded.metadata,
-    body: decoded.body,
+    viewId: event.viewId,
+    routeId: event.routeId,
+    traceId: event.traceId,
   };
-  return {
-    type: "submit",
-    sessionId,
-    submit,
-  };
+  return decodeNnrpRuntimeEvent(header, event.payload);
 }
 
-function encodeResultPushPayload(result: NnrpResult): Uint8Array {
-  const payload = result.payload ?? EMPTY_PAYLOAD;
-  const output = new Uint8Array(RESULT_PUSH_METADATA_SIZE + payload.byteLength);
-  const view = new DataView(output.buffer);
-  view.setUint32(56, 0x40, true);
-  view.setUint16(60, 1, true);
-  output.set(payload, RESULT_PUSH_METADATA_SIZE);
-  return output;
-}
-
-function decodeRuntimeFrameEvent(
-  messageType: NnrpMessageType,
-  payload: Uint8Array,
-  sessionId: string,
-): NnrpRuntimeFrameEvent {
-  const scope = { sessionId };
-  switch (messageType) {
-    case NnrpMessageType.Cancel:
-    case NnrpMessageType.Abort: {
-      const { metadata, tail } = decodeRuntimeControlMetadata(messageType, payload);
-      return {
-        type: messageType === NnrpMessageType.Cancel ? "cancel" : "abort",
-        messageType,
-        metadata: metadata as ControlRequestMetadata,
-        diagnostic: tail,
-        ...scope,
-      } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.PriorityUpdate:
-    case NnrpMessageType.Deadline:
-    case NnrpMessageType.ExpireAt: {
-      const { metadata } = decodeRuntimeControlMetadata(messageType, payload);
-      const type = messageType === NnrpMessageType.PriorityUpdate
-        ? "priority-update"
-        : messageType === NnrpMessageType.Deadline
-        ? "deadline"
-        : "expire-at";
-      return { type, messageType, metadata: metadata as SchedulingMetadata, ...scope } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.Supersede:
-    case NnrpMessageType.CapabilityNegotiation:
-    case NnrpMessageType.DegradeProfile:
-    case NnrpMessageType.RouteHint:
-    case NnrpMessageType.ExecutionHint:
-    case NnrpMessageType.TraceContext:
-    case NnrpMessageType.Progress:
-    case NnrpMessageType.PartialResult:
-    case NnrpMessageType.ResultDropReason:
-    case NnrpMessageType.ErrorRecoverable:
-    case NnrpMessageType.RetryAfter: {
-      const { metadata, tail } = decodeRuntimeControlMetadata(messageType, payload);
-      return runtimeControlEventWithTail(messageType, metadata, tail, scope);
-    }
-    case NnrpMessageType.BudgetUpdate:
-    case NnrpMessageType.Backpressure:
-    case NnrpMessageType.CreditUpdate: {
-      const { metadata } = decodeRuntimeControlMetadata(messageType, payload);
-      if (messageType === NnrpMessageType.BudgetUpdate) {
-        return { type: "budget-update", messageType, metadata: metadata as BudgetMetadata, ...scope };
-      }
-      return {
-        type: messageType === NnrpMessageType.Backpressure ? "backpressure" : "credit-update",
-        messageType,
-        metadata: metadata as PressureMetadata,
-        ...scope,
-      } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.ObjectDeclare:
-    case NnrpMessageType.ObjectRef:
-    case NnrpMessageType.ObjectRelease:
-    case NnrpMessageType.ObjectPatch:
-    case NnrpMessageType.ObjectDelta:
-    case NnrpMessageType.CacheReference:
-    case NnrpMessageType.CacheMiss: {
-      const { metadata, tail } = decodeRuntimeObjectMetadata(messageType, payload);
-      return runtimeObjectEvent(messageType, metadata, tail, scope);
-    }
-    case NnrpMessageType.CacheInvalidate:
-      return {
-        type: "cache-invalidate",
-        messageType,
-        metadata: decodeCacheInvalidateMetadata(payload),
-        ...scope,
-      };
-    default:
-      throw nativeArtifactError(
-        "NNRP_NATIVE_RUNTIME_MESSAGE_UNSUPPORTED",
-        `Native server event returned unsupported runtime message type 0x${Number(messageType).toString(16)}.`,
-      );
+function successfulRuntimeResultEvent(result: NnrpResult): NnrpRuntimeEvent & {
+  readonly metadata: { readonly type: "result_push"; readonly value: import("@nnrp/core").NnrpResultPushMetadata };
+  readonly tail: { readonly type: "body"; readonly body: Uint8Array };
+} {
+  if (
+    result.terminalState !== "success" || result.event.type !== "runtime" ||
+    result.event.event.header.messageType !== NnrpMessageType.ResultPush ||
+    result.event.event.metadata.type !== "result_push" || result.event.event.tail.type !== "body"
+  ) {
+    throw new NnrpProtocolError({
+      code: "NNRP_SERVER_RESULT_INVALID",
+      message: "sendResult requires successful RESULT_PUSH runtime evidence with a body tail.",
+      source: "protocol",
+      retryable: false,
+    });
   }
+  return result.event.event as ReturnType<typeof successfulRuntimeResultEvent>;
 }
-
-function runtimeControlEventWithTail(
-  messageType: NnrpMessageType,
-  metadata: RuntimeControlMetadata,
-  tail: Uint8Array,
-  scope: { readonly sessionId: string },
-): NnrpRuntimeFrameEvent {
-  const mapping = RUNTIME_CONTROL_EVENT_MAPPINGS[messageType];
-  if (mapping === undefined) throw new Error(`runtime control message ${messageType} has no event mapping`);
-  return {
-    type: mapping.type,
-    messageType,
-    metadata,
-    [mapping.tail]: tail,
-    ...scope,
-  } as NnrpRuntimeFrameEvent;
-}
-
-function runtimeObjectEvent(
-  messageType: NnrpMessageType,
-  metadata:
-    | ObjectDescriptorMetadata
-    | ObjectReferenceMetadata
-    | ObjectReleaseMetadata
-    | ObjectDeltaMetadata
-    | CacheReferenceMetadata
-    | CacheMissMetadata,
-  tail: Uint8Array,
-  scope: { readonly sessionId: string },
-): NnrpRuntimeFrameEvent {
-  if (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta) {
-    const delta = metadata as ObjectDeltaMetadata;
-    return {
-      type: messageType === NnrpMessageType.ObjectPatch ? "object-patch" : "object-delta",
-      messageType,
-      metadata: delta,
-      metadataBody: tail.slice(0, delta.metadataBytes),
-      delta: tail.slice(delta.metadataBytes),
-      ...scope,
-    } as NnrpRuntimeFrameEvent;
-  }
-  const mapping = RUNTIME_OBJECT_EVENT_MAPPINGS[messageType];
-  if (mapping === undefined) throw new Error(`runtime object message ${messageType} has no event mapping`);
-  return {
-    type: mapping.type,
-    messageType,
-    metadata,
-    [mapping.tail]: tail,
-    ...scope,
-  } as NnrpRuntimeFrameEvent;
-}
-
-const RUNTIME_CONTROL_EVENT_MAPPINGS: Readonly<
-  Partial<Record<NnrpMessageType, { readonly type: string; readonly tail: "body" | "diagnostic" }>>
-> = {
-  [NnrpMessageType.Supersede]: { type: "supersede", tail: "diagnostic" },
-  [NnrpMessageType.CapabilityNegotiation]: { type: "capability-negotiation", tail: "body" },
-  [NnrpMessageType.DegradeProfile]: { type: "degrade-profile", tail: "body" },
-  [NnrpMessageType.RouteHint]: { type: "route-hint", tail: "body" },
-  [NnrpMessageType.ExecutionHint]: { type: "execution-hint", tail: "body" },
-  [NnrpMessageType.TraceContext]: { type: "trace-context", tail: "body" },
-  [NnrpMessageType.Progress]: { type: "progress", tail: "body" },
-  [NnrpMessageType.PartialResult]: { type: "partial-result", tail: "body" },
-  [NnrpMessageType.ResultDropReason]: { type: "result-drop-reason", tail: "diagnostic" },
-  [NnrpMessageType.ErrorRecoverable]: { type: "recoverable-error", tail: "diagnostic" },
-  [NnrpMessageType.RetryAfter]: { type: "retry-after", tail: "diagnostic" },
-};
-
-const RUNTIME_OBJECT_EVENT_MAPPINGS: Readonly<
-  Partial<Record<NnrpMessageType, { readonly type: string; readonly tail: "body" | "diagnostic" }>>
-> = {
-  [NnrpMessageType.ObjectDeclare]: { type: "object-declare", tail: "body" },
-  [NnrpMessageType.ObjectRef]: { type: "object-ref", tail: "body" },
-  [NnrpMessageType.ObjectRelease]: { type: "object-release", tail: "diagnostic" },
-  [NnrpMessageType.CacheReference]: { type: "cache-reference", tail: "body" },
-  [NnrpMessageType.CacheMiss]: { type: "cache-miss", tail: "diagnostic" },
-};
 
 export interface NnrpServerState {
   readonly endpoint: string;
@@ -1403,6 +1384,7 @@ export interface NnrpServerState {
   readonly runtime: NnrpBackendRuntime;
   readonly transports: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy: NnrpTransportPolicy;
+  readonly sessionDefaults: NnrpServerSessionOptions;
 }
 
 export class NnrpServer {
@@ -1426,7 +1408,7 @@ export class NnrpServer {
     return serverBoundProviderEndpoints.get(this) ?? Object.freeze({});
   }
 
-  public accept(): Promise<NnrpServerSession> {
+  public accept(options: NnrpServerAcceptOptions = {}): Promise<NnrpServerSession> {
     try {
       this.#ensureOpen();
     } catch (error) {
@@ -1435,11 +1417,19 @@ export class NnrpServer {
 
     const accept = serverAcceptors.get(this);
     if (accept === undefined) return Promise.reject(bindingNotConnectedError("accept"));
-    return accept().then(
+    let normalizedOptions: Required<NnrpServerAcceptOptions>;
+    try {
+      normalizedOptions = normalizeServerAcceptOptions(options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return accept(normalizedOptions).then(
       async (accepted) => {
+        const sessionId = assertNegotiatedSessionId(accepted.sessionId);
         const session = new NnrpServerSession({
           runtime: this.#state.runtime,
-          options: accepted.sessionOptions ?? {},
+          routingKey: accepted.routingKey,
+          sessionId,
           activeTransport: accepted.activeTransport,
         });
         if (this.closed) {
@@ -1475,10 +1465,18 @@ export class NnrpServer {
   }
 }
 
-export interface NnrpServerSessionState {
+interface NnrpServerSessionState {
   readonly runtime: NnrpBackendRuntime;
-  readonly options: NnrpSessionOptions;
+  readonly routingKey: string;
+  readonly sessionId: number;
   readonly activeTransport: NnrpTransportKind;
+}
+
+function assertNegotiatedSessionId(sessionId: number): number {
+  if (!Number.isInteger(sessionId) || sessionId <= 0 || sessionId > 0xffff_ffff) {
+    throw new RangeError("negotiated sessionId must be a non-zero u32");
+  }
+  return sessionId;
 }
 
 export class NnrpServerSession {
@@ -1494,18 +1492,16 @@ export class NnrpServerSession {
     this.#state = state;
   }
 
-  public get options(): NnrpSessionOptions {
-    return this.#state?.options ?? {};
-  }
-
-  public get sessionId(): string {
-    return this.options.sessionId ?? "";
-  }
-
   public get activeTransport(): NnrpTransportKind {
     const activeTransport = this.#state?.activeTransport;
     if (activeTransport === undefined) throw bindingNotConnectedError("activeTransport");
     return activeTransport;
+  }
+
+  public get sessionId(): number {
+    const sessionId = this.#state?.sessionId;
+    if (sessionId === undefined) throw bindingNotConnectedError("sessionId");
+    return sessionId;
   }
 
   public receive(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
@@ -1522,14 +1518,19 @@ export class NnrpServerSession {
     }
 
     return raceEventPoll(
-      (serverRoleEventReceivers.get(state.runtime) ?? (() => Promise.reject(bindingNotConnectedError("receive"))))({
-        sessionOptions: state.options,
-        ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
-      }),
+      (serverRoleEventReceivers.get(state.runtime) ?? (() => Promise.reject(bindingNotConnectedError("receive"))))(
+        state.routingKey,
+        {
+          sessionId: state.sessionId,
+          ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
+        },
+      ),
       options,
     ).then(async (event) => {
       await this.#releaseForTerminalControl(event);
-      if (event.type === "submit") this.#frameByOperation.set(event.submit.operationId, event.submit.frameId);
+      if (event.metadata.type === "frame_submit") {
+        this.#frameByOperation.set(event.metadata.value.operationId, event.header.frameId);
+      }
       return event;
     });
   }
@@ -1540,12 +1541,14 @@ export class NnrpServerSession {
     if (state === undefined) return Promise.reject(bindingNotConnectedError("sendResult"));
     const sendResult = serverRoleResultSenders.get(state.runtime);
     if (sendResult === undefined) return Promise.reject(bindingNotConnectedError("sendResult"));
-    if (this.#terminalFrames.has(result.frameId)) {
-      return Promise.reject(serverTerminalDuplicateError(result.frameId));
+    const event = successfulRuntimeResultEvent(result);
+    const frameId = event.header.frameId;
+    if (this.#terminalFrames.has(frameId)) {
+      return Promise.reject(serverTerminalDuplicateError(frameId));
     }
-    this.#terminalFrames.add(result.frameId);
-    return sendResult(state.options, result).catch((error) => {
-      this.#terminalFrames.delete(result.frameId);
+    this.#terminalFrames.add(frameId);
+    return sendResult(state.routingKey, result).catch((error) => {
+      this.#terminalFrames.delete(frameId);
       throw error;
     });
   }
@@ -1656,8 +1659,8 @@ export class NnrpServerSession {
     this.#runtimeObjects.clear();
     const state = this.#state;
     const closeRoleSession = state === undefined ? undefined : serverRoleSessionClosers.get(state.runtime);
-    if (closeRoleSession !== undefined) {
-      await closeRoleSession(this.sessionId);
+    if (closeRoleSession !== undefined && state !== undefined) {
+      await closeRoleSession(state.routingKey);
     }
   }
 
@@ -1690,10 +1693,13 @@ export class NnrpServerSession {
   }
 
   async #releaseForTerminalControl(event: NnrpRuntimeEvent): Promise<void> {
-    if (event.type === "cancel" || event.type === "abort") {
-      await this.#releaseOperationObjects(event.metadata.operationId, ObjectReleaseReason.Cancelled);
-    } else if (event.type === "supersede") {
-      await this.#releaseOperationObjects(event.metadata.oldOperationId, ObjectReleaseReason.Replaced);
+    if (
+      (event.header.messageType === NnrpMessageType.Cancel || event.header.messageType === NnrpMessageType.Abort) &&
+      event.metadata.type === "control_request"
+    ) {
+      await this.#releaseOperationObjects(event.metadata.value.operationId, ObjectReleaseReason.Cancelled);
+    } else if (event.header.messageType === NnrpMessageType.Supersede && event.metadata.type === "supersede") {
+      await this.#releaseOperationObjects(event.metadata.value.oldOperationId, ObjectReleaseReason.Replaced);
     }
   }
 
@@ -1734,8 +1740,8 @@ export class NnrpServerSession {
       this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
       const sendRuntimeFrame = serverRoleFrameSenders.get(state.runtime);
       if (sendRuntimeFrame === undefined) return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
-      return sendRuntimeFrame({
-        sessionOptions: state.options,
+      return sendRuntimeFrame(state.routingKey, {
+        sessionId: state.sessionId,
         messageType,
         frameId,
         payload,

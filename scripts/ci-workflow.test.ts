@@ -1,17 +1,24 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 
 const ciWorkflow = await Deno.readTextFile(".github/workflows/ci.yml");
+const denoConfig = JSON.parse(await Deno.readTextFile("deno.json"));
 const installedPackageSmoke = await Deno.readTextFile("scripts/check-installed-package-smoke.ts");
 const nodeImportSmoke = await Deno.readTextFile("scripts/check-node-import-smoke.mjs");
 const preview4Adapter = await Deno.readTextFile("scripts/preview4-adapter.ts");
 const preview4Contract = await Deno.readTextFile("scripts/preview4-conformance-contract.ts");
 const preview4Capabilities = await Deno.readTextFile("conformance/nnrp-1-preview4.capabilities.json");
+const coverageGate = await Deno.readTextFile("scripts/run-coverage-gate.ts");
+const browserRoleIntegration = await Deno.readTextFile(
+  "packages/browser-client/test/browser-role.integration.test.ts",
+);
 
-const CONFORMANCE_REVISION = "b1836bcf372ac4fbd2a5f106cd09f6a628a4c647";
+const CONFORMANCE_REVISION = "0072970d1212a650fa8a1be83b7b2a61c817f799";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
   assertStringIncludes(ciWorkflow, 'head_ref="${{ github.head_ref }}"');
+  assertStringIncludes(ciWorkflow, 'range="origin/$base_ref..HEAD"');
+  assertEquals(ciWorkflow.includes('range="origin/$base_ref...HEAD"'), false);
   assertStringIncludes(ciWorkflow, 'if [[ "$base_ref" == "main" && "$head_ref" == "develop" ]]; then');
   assertStringIncludes(
     ciWorkflow,
@@ -60,4 +67,50 @@ Deno.test("CI gates Preview4 with suite-owned adapter and wire conformance", () 
   assertStringIncludes(preview4Adapter, "const CASE_EXECUTORS");
   assertStringIncludes(preview4Contract, '"l1.control.recoverable-error"');
   assertEquals(JSON.parse(preview4Capabilities).supports.length, 19);
+});
+
+Deno.test("CI compares the public API against the frozen nnrp-doc contract", () => {
+  assertStringIncludes(ciWorkflow, "Checkout frozen SDK contract");
+  assertStringIncludes(ciWorkflow, "repository: NagareWorks/nnrp-doc");
+  assertStringIncludes(ciWorkflow, "ref: master");
+  assertStringIncludes(ciWorkflow, "path: .docs");
+  assertStringIncludes(ciWorkflow, "NNRP_DOC_ROOT: ${{ github.workspace }}/.docs");
+  assertStringIncludes(ciWorkflow, "deno task api-consistency");
+  assertEquals(denoConfig.fmt.exclude.includes(".docs"), true);
+  assertEquals(denoConfig.lint.exclude.includes(".docs"), true);
+});
+
+Deno.test("CI isolates real browser integration lifecycles and bounds the build gate", () => {
+  assertStringIncludes(ciWorkflow, "build-test:");
+  assertStringIncludes(ciWorkflow, "timeout-minutes: 10");
+  assertStringIncludes(
+    denoConfig.tasks.test,
+    "packages/browser-client/test/wasm-role.test.ts packages/core/test/*.test.ts",
+  );
+  assertStringIncludes(
+    denoConfig.tasks.test,
+    "packages/browser-client/test/browser-role.integration.test.ts && deno test",
+  );
+  assertStringIncludes(
+    denoConfig.tasks.test,
+    "packages/browser-client/test/browser-wasm-duplex.integration.test.ts",
+  );
+  assertStringIncludes(coverageGate, "--coverage=${coverageDir}/raw/${coverageRun.name}");
+  assertStringIncludes(coverageGate, 'lcovReports.join("\\n")');
+  assertStringIncludes(browserRoleIntegration, "const client = await setupForTest(");
+  assertEquals(
+    browserRoleIntegration.indexOf("const accepting = server.accept({ timeoutMs: 20_000 });") >
+      browserRoleIntegration.indexOf("const client = await setupForTest("),
+    true,
+  );
+  assertStringIncludes(browserRoleIntegration, "server.accept({ timeoutMs: 20_000 })");
+  assertStringIncludes(browserRoleIntegration, '"browser carrier readiness"');
+  assertEquals(
+    browserRoleIntegration.indexOf('"browser carrier readiness"') <
+      browserRoleIntegration.indexOf('"browser session open"'),
+    true,
+  );
+  assertStringIncludes(browserRoleIntegration, 'within(accepting, "server session accept", 25_000)');
+  assertStringIncludes(browserRoleIntegration, "const closeReadinessCarrier = onceForTest(");
+  assertStringIncludes(browserRoleIntegration, "await closeAllForTest(cleanups)");
 });

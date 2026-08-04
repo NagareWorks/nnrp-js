@@ -1,4 +1,11 @@
 import { NnrpNativeBindingUnavailableError, openBackendRuntime } from "@nnrp/native-server";
+import {
+  createNnrpResultFromRuntimeEvent,
+  decodeNnrpRuntimeEvent,
+  encodeResultPushPayload,
+  NnrpMessageType,
+  NnrpResultClass,
+} from "@nnrp/core";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const runtime = await openBackendRuntime({
@@ -12,12 +19,30 @@ try {
   const session = await server.accept();
   const event = await session.receive();
 
-  if (event.type === "result-hint") {
-    await session.sendResult({
-      frameId: event.hint.frameId,
-      payload: new Uint8Array(),
-      metadata: { source: "native-server-adapter-example" },
-    });
+  if (event.metadata.type === "frame_submit") {
+    const resultEvent = decodeNnrpRuntimeEvent(
+      { ...event.header, messageType: NnrpMessageType.ResultPush },
+      encodeResultPushPayload({
+        statusCode: 0,
+        resultFlags: 0,
+        sectionCount: 0,
+        tileCount: 0,
+        activeProfileId: 0,
+        inferenceMs: 0,
+        queueMs: 0,
+        serverTotalMs: 0,
+        tileBaseId: 0,
+        tileIndexBytes: 0,
+        resultClass: NnrpResultClass.Complete,
+        appliedBudgetPolicy: 0,
+        reusedFrameId: 0,
+        coveredTileCount: 0,
+        droppedTileCount: 0,
+        payloadKindBitmap: 0,
+        payloadFrameCount: 0,
+      }),
+    );
+    await session.sendResult(createNnrpResultFromRuntimeEvent(event.metadata.value.operationId, resultEvent));
   }
 } catch (error) {
   if (error instanceof NnrpNativeBindingUnavailableError) {

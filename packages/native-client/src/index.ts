@@ -6,35 +6,39 @@ import {
   type CapabilityMetadata,
   type ControlRequestMetadata,
   createCapabilityManifest,
+  createNnrpResultFromRuntimeEvent,
   createTransportCandidates,
   createTransportSelectionSummary,
-  decodeCacheInvalidateMetadata,
-  decodeRuntimeControlMetadata,
-  decodeRuntimeObjectMetadata,
+  decodeNnrpRuntimeEvent,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
   encodeSubmitPayload,
+  NNRP_STANDARD_PROFILE_TOKEN,
+  NNRP_TOKEN_DELTA_SCHEMA_ID,
+  NNRP_TOKEN_DELTA_SCHEMA_VERSION,
   type NnrpAbortSignalLike,
+  type NnrpCacheObjectKind,
   type NnrpCapability,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpClientProviderRoutes,
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
-  type NnrpInputProfile,
+  NnrpFlowScopeKind,
   NnrpMessageType,
   type NnrpNormalizedSubmitRequest,
   NnrpProtocolError,
   NnrpRecoveryError,
   type NnrpResult,
   type NnrpRuntimeEvent,
-  type NnrpRuntimeFrameEvent,
-  type NnrpSessionFlowControlOptions,
+  type NnrpRuntimeFrameHeader,
   type NnrpSessionMigrationRequest,
   type NnrpSessionPatchRequest,
   type NnrpSessionPatchResult,
+  NnrpSessionPriorityClass,
+  NnrpSessionRecoveryTicket,
   type NnrpSubmitOptions,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
@@ -63,7 +67,6 @@ import {
   ObjectReleaseReason,
   OwnershipHint,
   parseApplicationEndpoint,
-  type PressureMetadata,
   resolveProviderEndpoint,
   type RouteHintMetadata,
   type RuntimeControlMetadata,
@@ -71,15 +74,13 @@ import {
   type SchedulingMetadata,
   selectTransport,
   type SupersedeMetadata,
-  throwIfResultDrop,
   type TraceContextMetadata,
   validateEventPollOptions,
-  validateSessionMetadata,
 } from "@nnrp/core";
 const EXPECTED_PROTOCOL_MAJOR = 1;
 const EXPECTED_PROTOCOL_WIRE_FORMAT = 0;
 const EXPECTED_ABI_MAJOR = 4;
-const EXPECTED_ABI_MINOR = 3;
+const EXPECTED_ABI_MINOR = 4;
 const EXPECTED_ABI_PATCH = 0;
 const TRANSPORT_KINDS = ["tcp", "quic", "ipc", "websocket"] as const satisfies readonly NnrpTransportKind[];
 
@@ -274,14 +275,41 @@ const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
   RUNTIME_FEATURE_PREVIEW4_RUNTIME_FRAME_SEND;
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const NATIVE_ROLE_IDS = Symbol.for("nnrp.internal.native.role-handle-ids.v1");
-const RESULT_PUSH_METADATA_SIZE = 64;
 const EVENT_KIND_RESULT_PUSHED = 6;
-const EVENT_KIND_RESULT_DROPPED = 7;
-const EVENT_KIND_RUNTIME_FRAME = 13;
-const EVENT_KIND_SESSION_CLOSED = 4;
 
 const clientRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (sessionId: string) => Promise<void>>();
-const clientRoleSessionOpeners = new WeakMap<NnrpBackendRuntime, (options: NnrpSessionOptions) => Promise<void>>();
+const clientRoutedEventReaders = new WeakMap<
+  NnrpClient,
+  (routingKey: string, options?: NnrpEventPollOptions) => Promise<NnrpRuntimeEvent>
+>();
+const clientSessionStateReleasers = new WeakMap<
+  NnrpClient,
+  (sessionId: number, routingKey: string) => void
+>();
+const clientSessionRoutingKeys = new WeakMap<NnrpClientSession, string>();
+interface InternalClientSessionRegistration {
+  readonly routingKey: string;
+  readonly sessionId: number;
+}
+
+const clientRoleSessionOpeners = new WeakMap<
+  NnrpBackendRuntime,
+  (options: NnrpNormalizedSessionOptions) => Promise<InternalClientSessionRegistration>
+>();
+const clientRoleSessionResumers = new WeakMap<
+  NnrpBackendRuntime,
+  (
+    ticket: NnrpSessionRecoveryTicket,
+    options: NnrpNormalizedSessionOptions,
+  ) => Promise<InternalClientSessionRegistration>
+>();
+const clientRoleRecoveryTicketReaders = new WeakMap<
+  NnrpBackendRuntime,
+  (routingKey: string) => Uint8Array | undefined
+>();
+const runtimeEventSessionIds = new WeakMap<NnrpRuntimeEvent, string>();
+const runtimeEventOperationIds = new WeakMap<NnrpRuntimeEvent, bigint>();
+const runtimeSessionRoutingKeys = new WeakMap<NnrpSessionOptions, string>();
 
 interface InternalNativeHandle {
   readonly kind: number;
@@ -292,6 +320,7 @@ interface InternalNativeHandle {
 
 interface InternalRoleEvent {
   readonly kind: number;
+  readonly headerPresent: boolean;
   readonly messageType: number;
   readonly versionMajor: number;
   readonly wireFormat: number;
@@ -311,6 +340,7 @@ interface InternalRoleEvent {
 
 interface InternalClientRoleSession {
   readonly handle: InternalNativeHandle;
+  readonly sessionId: number;
   submit(
     operationId: bigint,
     frameId: number,
@@ -322,18 +352,33 @@ interface InternalClientRoleSession {
   ): Promise<InternalNativeHandle>;
   poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]>;
   sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
+  recoveryTicket(): Uint8Array | undefined;
   close(): Promise<void>;
 }
 
 interface InternalClientRoleConnection {
-  openSession(
-    requestedSessionId: number,
-    generation: number,
-    profileId: number,
-    schemaId: number,
-    schemaVersion: number,
+  openSession(options: InternalClientSessionOpenOptions): Promise<InternalClientRoleSession>;
+  resumeSession(
+    options: InternalClientSessionOpenOptions,
+    recoveryTicket: Uint8Array,
   ): Promise<InternalClientRoleSession>;
   close(): Promise<void>;
+}
+
+interface InternalClientSessionOpenOptions {
+  readonly requestedSessionId: number;
+  readonly sessionHandleId: bigint;
+  readonly generation: number;
+  readonly profileId: number;
+  readonly priorityClass: number;
+  readonly allowResume: boolean;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly resumeTokenBytes: number;
+  readonly cacheHints: readonly number[];
 }
 
 interface InternalRoleCarrier {
@@ -412,12 +457,32 @@ export interface NnrpNativeFfiBinding {
   close?(): void | Promise<void>;
 }
 
-export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
-  readonly sessionId?: string;
-  readonly inputProfile?: NnrpInputProfile;
-  readonly targetCadence?: number;
-  readonly qualityTier?: number;
-  readonly metadata?: Readonly<Record<string, string>>;
+export interface NnrpSessionOptions {
+  readonly requestedSessionId?: number;
+  readonly profileId?: number;
+  readonly schemaId?: number;
+  readonly schemaVersion?: number;
+  readonly priorityClass?: NnrpSessionPriorityClass;
+  readonly defaultDeadlineMillis?: number;
+  readonly maxInFlightOperations?: number;
+  readonly leaseTtlHintMillis?: number;
+  readonly allowResume?: boolean;
+  readonly resumeTokenBytes?: number;
+  readonly cacheHints?: readonly NnrpCacheObjectKind[];
+}
+
+interface NnrpNormalizedSessionOptions {
+  readonly requestedSessionId: number;
+  readonly profileId: number;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly priorityClass: NnrpSessionPriorityClass;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly allowResume: boolean;
+  readonly resumeTokenBytes: number;
+  readonly cacheHints: readonly NnrpCacheObjectKind[];
 }
 
 export interface NnrpNativeClientOptions {
@@ -511,6 +576,7 @@ class NnrpBackendRuntime {
   #closed = false;
   #roleConnection: InternalClientRoleConnection | undefined;
   readonly #roleSessions = new Map<string, Promise<InternalClientRoleSession>>();
+  readonly #resolvedRoleSessions = new Map<string, InternalClientRoleSession>();
 
   public constructor(
     binding: NnrpNativeRuntimeBinding,
@@ -520,9 +586,29 @@ class NnrpBackendRuntime {
     this.#binding = binding;
     this.#transportPolicy = transportPolicy;
     this.#transportProviders = [...transportProviders];
-    clientRoleSessionOpeners.set(this, async (options) => {
-      if (this.#binding.ffi === undefined) await this.#roleSession(options);
+    clientRoleSessionOpeners.set(
+      this,
+      async (options) =>
+        this.#binding.ffi === undefined ? await this.#roleSession(options) : {
+          routingKey: `wire-${options.requestedSessionId}`,
+          sessionId: options.requestedSessionId,
+        },
+    );
+    clientRoleSessionResumers.set(this, async (ticket, options) => {
+      if (this.#binding.ffi !== undefined) {
+        throw new NnrpRecoveryError({
+          code: "NNRP_NATIVE_RESUME_UNAVAILABLE",
+          message: "The explicit FFI binding does not expose executable session resume.",
+          source: "native",
+          retryable: false,
+        });
+      }
+      return await this.#roleSession(options, ticket);
     });
+    clientRoleRecoveryTicketReaders.set(
+      this,
+      (routingKey) => this.#resolvedRoleSessions.get(routingKey)?.recoveryTicket(),
+    );
     clientRoleSessionClosers.set(this, (sessionId) => this.#closeRoleSession(sessionId));
   }
 
@@ -545,7 +631,7 @@ class NnrpBackendRuntime {
       return await submitResultCompact(await this.#validateSubmit(request));
     }
     const validated = await this.#validateSubmit(request);
-    const session = await this.#roleSession(validated.sessionOptions);
+    const session = await this.#roleSessionForOptions(validated.sessionOptions);
     await session.submit(
       validated.submit.operationId,
       validated.submit.frameId,
@@ -570,9 +656,8 @@ class NnrpBackendRuntime {
             retryable: false,
           });
         }
-        const decoded = decodeClientRoleEvent(result, validated.sessionOptions.sessionId);
-        if (decoded.type !== "result") throw new Error("Native result event decoding lost its terminal result kind.");
-        return decoded.result;
+        const decoded = decodeClientRoleEvent(result, runtimeSessionRoutingKeys.get(validated.sessionOptions));
+        return createNnrpResultFromRuntimeEvent(validated.submit.operationId, decoded);
       }
     }
   }
@@ -584,7 +669,7 @@ class NnrpBackendRuntime {
       return await submitNoWait(await this.#validateSubmit(request));
     }
     const validated = await this.#validateSubmit(request);
-    const session = await this.#roleSession(validated.sessionOptions);
+    const session = await this.#roleSessionForOptions(validated.sessionOptions);
     await session.submit(
       validated.submit.operationId,
       validated.submit.frameId,
@@ -603,7 +688,7 @@ class NnrpBackendRuntime {
     if (sendRuntimeFrame !== undefined) {
       return Promise.resolve(sendRuntimeFrame(request));
     }
-    return this.#roleSession(request.sessionOptions).then((session) =>
+    return this.#roleSessionForOptions(request.sessionOptions).then((session) =>
       session.sendRuntimeFrame(request.messageType, request.frameId, request.payload)
     );
   }
@@ -617,7 +702,9 @@ class NnrpBackendRuntime {
 
     return await patchSession(request) ?? {
       accepted: true,
-      ...(request.sessionOptions.sessionId === undefined ? {} : { sessionId: request.sessionOptions.sessionId }),
+      ...(request.sessionOptions.requestedSessionId === undefined
+        ? {}
+        : { sessionId: request.sessionOptions.requestedSessionId }),
     };
   }
 
@@ -722,29 +809,45 @@ class NnrpBackendRuntime {
     };
   }
 
-  #roleSession(options: NnrpSessionOptions): Promise<InternalClientRoleSession> {
+  async #roleSession(
+    options: NnrpNormalizedSessionOptions,
+    recoveryTicket?: NnrpSessionRecoveryTicket,
+  ): Promise<InternalClientSessionRegistration> {
     const connection = this.#roleConnection;
     if (connection === undefined) throw bindingNotConnectedError("clientRole");
-    const sessionId = options.sessionId ?? "native-session";
-    let session = this.#roleSessions.get(sessionId);
-    if (session !== undefined) return session;
-    const numericSessionId = Number(allocateNativeRoleId("session", 0xffff_ffffn));
-    const schema = standardProfileSchema(options.inputProfile);
-    session = connection.openSession(
-      numericSessionId,
-      1,
-      standardProfileId(options.inputProfile),
-      schema.id,
-      schema.version,
-    );
-    this.#roleSessions.set(sessionId, session);
-    return session;
+    const sessionHandleId = allocateNativeRoleId("session", 0xffff_ffffn);
+    const routingKey = `native-session-${sessionHandleId}`;
+    const request = internalSessionOpenOptions(options, sessionHandleId);
+    const session = recoveryTicket === undefined
+      ? connection.openSession(request)
+      : connection.resumeSession(request, recoveryTicket.toBytes());
+    this.#roleSessions.set(routingKey, session);
+    try {
+      const resolved = await session;
+      this.#resolvedRoleSessions.set(routingKey, resolved);
+      return {
+        routingKey,
+        sessionId: assertNegotiatedSessionId(resolved.sessionId),
+      };
+    } catch (error) {
+      this.#roleSessions.delete(routingKey);
+      throw error;
+    }
+  }
+
+  async #roleSessionForOptions(options: NnrpSessionOptions): Promise<InternalClientRoleSession> {
+    const routingKey = runtimeSessionRoutingKeys.get(options);
+    if (routingKey === undefined) throw bindingNotConnectedError("clientRoleSession");
+    const session = this.#roleSessions.get(routingKey);
+    if (session === undefined) throw bindingNotConnectedError("clientRoleSession");
+    return await session;
   }
 
   async #closeRoleSession(sessionId: string): Promise<void> {
     const session = this.#roleSessions.get(sessionId);
     if (session === undefined) return;
     this.#roleSessions.delete(sessionId);
+    this.#resolvedRoleSessions.delete(sessionId);
     await (await session).close();
   }
 
@@ -1077,62 +1180,30 @@ function resolvedRouteEndpoint(resolution: ResolvedClientProviderRoute): string 
   });
 }
 
-function standardProfileId(profile: NnrpInputProfile | undefined): number {
-  if (profile === "tensor") return 1;
-  if (profile === "token") return 2;
-  return 0;
-}
-
-function standardProfileSchema(
-  profile: NnrpInputProfile | undefined,
-): { readonly id: number; readonly version: number } {
-  return profile === "token" ? { id: 0x0000_1001, version: 3 } : { id: 0, version: 0 };
-}
-
 function decodeClientRoleEvent(event: InternalRoleEvent, sessionId?: string): NnrpRuntimeEvent {
-  if (event.kind === EVENT_KIND_SESSION_CLOSED) {
-    return {
-      type: "close",
-      ...(sessionId === undefined ? {} : { sessionId }),
-    };
-  }
-  if (event.kind === EVENT_KIND_RESULT_PUSHED) {
-    return {
-      type: "result",
-      result: {
-        frameId: event.frameId,
-        payload: event.payload.slice(RESULT_PUSH_METADATA_SIZE),
-        ...(sessionId === undefined ? {} : { sessionId }),
-      },
-      ...(sessionId === undefined ? {} : { sessionId }),
-    };
-  }
-  if (event.kind === EVENT_KIND_RESULT_DROPPED) {
-    return {
-      type: "drop",
-      frameId: event.frameId,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      diagnostic: {
-        code: "NNRP_RESULT_DROPPED",
-        message: "The native runtime dropped the result.",
-        source: "native",
-        retryable: false,
-      },
-    };
-  }
-  if (event.kind === EVENT_KIND_RUNTIME_FRAME) {
-    return decodeRuntimeFrameEvent(event.messageType as NnrpMessageType, event.payload, sessionId);
-  }
-  return {
-    type: "diagnostic",
-    ...(sessionId === undefined ? {} : { sessionId }),
-    diagnostic: {
-      code: "NNRP_NATIVE_ROLE_EVENT",
-      message: `Native client role emitted event kind ${event.kind}.`,
+  if (!event.headerPresent) {
+    throw new NnrpProtocolError({
+      code: "NNRP_NATIVE_LIFECYCLE_EVENT_UNEXPECTED",
+      message: `Native client role emitted headerless lifecycle event kind ${event.kind} on the wire event pump.`,
       source: "native",
       retryable: false,
-    },
+    });
+  }
+  const header: NnrpRuntimeFrameHeader = {
+    versionMajor: event.versionMajor as 1,
+    wireFormat: event.wireFormat as 0,
+    messageType: event.messageType as NnrpMessageType,
+    flags: event.headerFlags,
+    sessionId: event.wireSessionId,
+    frameId: event.frameId,
+    viewId: event.viewId,
+    routeId: event.routeId,
+    traceId: event.traceId,
   };
+  const decoded = decodeNnrpRuntimeEvent(header, event.payload);
+  if (sessionId !== undefined) runtimeEventSessionIds.set(decoded, sessionId);
+  if (event.relatedOperationId !== 0n) runtimeEventOperationIds.set(decoded, event.relatedOperationId);
+  return decoded;
 }
 
 export interface NnrpClientState {
@@ -1146,11 +1217,19 @@ export interface NnrpClientState {
 export class NnrpClient {
   readonly #state: NnrpClientState;
   readonly #eventQueues = new Map<string, NnrpRuntimeEvent[]>();
-  #nextSessionId = 1;
+  readonly #routingKeyByWireSessionId = new Map<number, string>();
   #closed = false;
 
   public constructor(state: NnrpClientState) {
     this.#state = state;
+    clientRoutedEventReaders.set(this, (routingKey, options) => this.#nextRoutedEvent(routingKey, options));
+    clientSessionStateReleasers.set(this, (sessionId, routingKey) => {
+      const observedRoutingKey = this.#routingKeyByWireSessionId.get(sessionId);
+      this.#routingKeyByWireSessionId.delete(sessionId);
+      this.#eventQueues.delete(routingKey);
+      this.#eventQueues.delete(`wire-${sessionId}`);
+      if (observedRoutingKey !== undefined) this.#eventQueues.delete(observedRoutingKey);
+    });
   }
 
   public get endpoint(): string {
@@ -1165,25 +1244,70 @@ export class NnrpClient {
     return this.#state.runtime;
   }
 
-  public openSession(options: NnrpSessionOptions = {}): NnrpClientSession {
+  public async openSession(options: NnrpSessionOptions = {}): Promise<NnrpClientSession> {
     this.#ensureOpen();
-    validateSessionMetadata(options);
     const normalized = this.#createSessionOptions(options);
-    const handshake = clientRoleSessionOpeners.get(this.#state.runtime)?.(normalized) ?? Promise.resolve();
-    void handshake.catch(() => {});
+    const registration = await (clientRoleSessionOpeners.get(this.#state.runtime)?.(normalized) ??
+      Promise.resolve({
+        routingKey: `wire-${normalized.requestedSessionId}`,
+        sessionId: normalized.requestedSessionId,
+      }));
+    const sessionId = assertNegotiatedSessionId(registration.sessionId);
+    runtimeSessionRoutingKeys.set(normalized, registration.routingKey);
 
-    return new NnrpClientSession({
+    const session = new NnrpClientSession({
       client: this,
       options: normalized,
+      sessionId,
     });
+    clientSessionRoutingKeys.set(session, registration.routingKey);
+    return session;
   }
 
-  public async nextSessionEvent(sessionId: string, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public async resumeSession(
+    ticket: NnrpSessionRecoveryTicket,
+    options: NnrpSessionOptions = {},
+  ): Promise<NnrpClientSession> {
+    this.#ensureOpen();
+    if (!(ticket instanceof NnrpSessionRecoveryTicket)) {
+      throw new TypeError("ticket must be NnrpSessionRecoveryTicket");
+    }
+    const normalized = this.#createSessionOptions({
+      ...options,
+      requestedSessionId: ticket.sessionId,
+      allowResume: true,
+    });
+    const resume = clientRoleSessionResumers.get(this.#state.runtime);
+    if (resume === undefined) throw bindingNotConnectedError("resumeSession");
+    const registration = await resume(ticket, normalized);
+    const sessionId = assertNegotiatedSessionId(registration.sessionId);
+    runtimeSessionRoutingKeys.set(normalized, registration.routingKey);
+    const session = new NnrpClientSession({
+      client: this,
+      options: normalized,
+      sessionId,
+    });
+    clientSessionRoutingKeys.set(session, registration.routingKey);
+    return session;
+  }
+
+  public async nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+    assertNegotiatedSessionId(sessionId);
+    return await this.#nextRoutedEvent(
+      this.#routingKeyByWireSessionId.get(sessionId) ?? `wire-${sessionId}`,
+      options,
+    );
+  }
+
+  async #nextRoutedEvent(
+    routingKey: string,
+    options: NnrpEventPollOptions = {},
+  ): Promise<NnrpRuntimeEvent> {
     this.#ensureOpen();
     validateEventPollOptions(options);
 
     while (true) {
-      const queued = this.#eventQueues.get(sessionId);
+      const queued = this.#eventQueues.get(routingKey);
       const event = queued?.shift();
       if (event !== undefined) {
         return event;
@@ -1204,10 +1328,14 @@ export class NnrpClient {
       }
 
       for (const candidate of events) {
-        const candidateSessionId = eventSessionId(candidate) ?? sessionId;
-        const queue = this.#eventQueues.get(candidateSessionId) ?? [];
+        const candidateRoutingKey = eventSessionId(candidate) ?? `wire-${candidate.header.sessionId}`;
+        this.#routingKeyByWireSessionId.set(candidate.header.sessionId, candidateRoutingKey);
+        const queue = this.#eventQueues.get(candidateRoutingKey) ?? [];
         queue.push(candidate);
-        this.#eventQueues.set(candidateSessionId, queue);
+        this.#eventQueues.set(candidateRoutingKey, queue);
+        if (candidate.header.sessionId !== 0 && routingKey === `wire-${candidate.header.sessionId}`) {
+          this.#eventQueues.set(routingKey, queue);
+        }
       }
     }
   }
@@ -1215,7 +1343,12 @@ export class NnrpClient {
   public async close(): Promise<void> {
     if (this.#closed) return Promise.resolve();
     this.#closed = true;
-    await this.#state.runtime.close();
+    try {
+      await this.#state.runtime.close();
+    } finally {
+      this.#eventQueues.clear();
+      this.#routingKeyByWireSessionId.clear();
+    }
   }
 
   public get closed(): boolean {
@@ -1228,18 +1361,15 @@ export class NnrpClient {
     }
   }
 
-  #createSessionOptions(options: NnrpSessionOptions): NnrpSessionOptions {
-    const merged = mergeSessionOptions(this.#state.sessionDefaults, options);
-    return {
-      ...merged,
-      sessionId: merged.sessionId ?? `native-session-${this.#nextSessionId++}`,
-    };
+  #createSessionOptions(options: NnrpSessionOptions): NnrpNormalizedSessionOptions {
+    return normalizeNativeSessionOptions(mergeSessionOptions(this.#state.sessionDefaults, options));
   }
 }
 
 export interface NnrpClientSessionState {
   readonly client: NnrpClient;
-  options: NnrpSessionOptions;
+  readonly options: NnrpSessionOptions;
+  readonly sessionId: number;
 }
 
 export class NnrpClientSession {
@@ -1253,21 +1383,22 @@ export class NnrpClientSession {
   readonly #capacityWaiters: Array<() => void> = [];
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
   #availableCredits: number;
+  #submitCapacityPolicy: "reject" | "await" = "reject";
   #nextControlSequence = 1n;
   #nextRuntimeFrameId = 1;
   #closed = false;
 
   public constructor(state: NnrpClientSessionState) {
     this.#state = state;
-    this.#availableCredits = state.options.initialCredits ?? Number.POSITIVE_INFINITY;
+    this.#availableCredits = Number.POSITIVE_INFINITY;
   }
 
   public get options(): NnrpSessionOptions {
     return this.#state.options;
   }
 
-  public get sessionId(): string {
-    return this.#state.options.sessionId ?? "";
+  public get sessionId(): number {
+    return this.#state.sessionId;
   }
 
   public async submit(request: NnrpSubmitRequest, options: NnrpSubmitOptions = {}): Promise<NnrpResult> {
@@ -1451,34 +1582,35 @@ export class NnrpClientSession {
   }
 
   public completeEvent(event: NnrpRuntimeEvent): void {
-    if (event.type === "cancel" || event.type === "abort") {
-      this.#cancelledOperations.add(event.metadata.operationId);
+    if (
+      (event.header.messageType === NnrpMessageType.Cancel || event.header.messageType === NnrpMessageType.Abort) &&
+      event.metadata.type === "control_request"
+    ) {
+      this.#cancelledOperations.add(event.metadata.value.operationId);
       return;
     }
 
-    if (event.type === "result") {
-      this.#finishTerminalFrame(event.result.frameId);
+    if (isRuntimeTerminalEvent(event)) {
+      const operationId = runtimeEventOperationIds.get(event) ??
+        terminalOperationId(event, this.#operationByFrame.get(event.header.frameId));
+      if (operationId !== undefined) runtimeEventOperationIds.set(event, operationId);
+      this.#finishTerminalFrame(event.header.frameId);
       return;
     }
 
-    if (event.type === "drop") {
-      this.#finishTerminalFrame(event.frameId);
-      return;
-    }
-
-    if (event.type === "flow-update") {
-      this.#availableCredits = event.update.credits;
+    if (event.metadata.type === "flow_update") {
+      this.#availableCredits = flowCredit(event.metadata.value);
       this.#drainCapacityWaiters();
       return;
     }
 
-    if (event.type === "credit-update") {
-      this.#availableCredits = normalizeCreditWindow(event.metadata.creditWindow);
+    if (event.header.messageType === NnrpMessageType.CreditUpdate && event.metadata.type === "pressure") {
+      this.#availableCredits = normalizeCreditWindow(event.metadata.value.creditWindow);
       this.#drainCapacityWaiters();
       return;
     }
 
-    if (event.type === "close") {
+    if (event.header.messageType === NnrpMessageType.SessionClose) {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
       this.#operationByFrame.clear();
@@ -1500,7 +1632,10 @@ export class NnrpClientSession {
       const pollOptions = deadlineMillis === undefined
         ? options
         : { ...options, timeoutMillis: Math.max(0, deadlineMillis - Date.now()) };
-      const event = await this.#state.client.nextSessionEvent(this.sessionId, pollOptions);
+      const routingKey = clientSessionRoutingKeys.get(this);
+      const nextEvent = clientRoutedEventReaders.get(this.#state.client);
+      if (routingKey === undefined || nextEvent === undefined) throw bindingNotConnectedError("nextEvent");
+      const event = await nextEvent(routingKey, pollOptions);
       await this.#releaseForTerminalControl(event);
       if (this.#shouldSuppressCancelledPayload(event)) {
         continue;
@@ -1513,9 +1648,17 @@ export class NnrpClientSession {
   public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
     while (true) {
       const event = await this.nextEvent(options);
-      throwIfResultDrop(event);
-      if (event.type === "result") {
-        return event.result;
+      if (isRuntimeTerminalEvent(event)) {
+        const operationId = runtimeEventOperationIds.get(event) ?? terminalOperationId(event);
+        if (operationId === undefined) {
+          throw new NnrpProtocolError({
+            code: "NNRP_TERMINAL_OPERATION_UNKNOWN",
+            message: `Terminal frame ${event.header.frameId} has no associated operation id.`,
+            source: "native",
+            retryable: false,
+          });
+        }
+        return createNnrpResultFromRuntimeEvent(operationId, event);
       }
     }
   }
@@ -1545,7 +1688,9 @@ export class NnrpClientSession {
       patch,
     });
 
-    this.#state.options = mergeSessionOptions(this.#state.options, patch);
+    if (result.accepted && patch.submitCapacityPolicy !== undefined) {
+      this.#submitCapacityPolicy = patch.submitCapacityPolicy;
+    }
     if (patch.initialCredits !== undefined) {
       this.#availableCredits = patch.initialCredits;
       this.#drainCapacityWaiters();
@@ -1558,6 +1703,14 @@ export class NnrpClientSession {
     while (!this.closed) {
       yield await this.nextEvent(options);
     }
+  }
+
+  public recoveryTicket(): NnrpSessionRecoveryTicket | undefined {
+    this.#ensureOpen();
+    const routingKey = clientSessionRoutingKeys.get(this);
+    if (routingKey === undefined) return undefined;
+    const encoded = clientRoleRecoveryTicketReaders.get(this.#state.client.runtime)?.(routingKey);
+    return encoded === undefined ? undefined : NnrpSessionRecoveryTicket.fromBytes(encoded);
   }
 
   public async close(): Promise<void> {
@@ -1574,8 +1727,16 @@ export class NnrpClientSession {
     this.#submitCancellationCleanups.clear();
     this.#drainCapacityWaiters();
     const closeRoleSession = clientRoleSessionClosers.get(this.#state.client.runtime);
-    if (closeRoleSession !== undefined) {
-      await closeRoleSession(this.sessionId);
+    const routingKey = clientSessionRoutingKeys.get(this);
+    try {
+      if (closeRoleSession !== undefined && routingKey !== undefined) {
+        await closeRoleSession(routingKey);
+      }
+    } finally {
+      if (routingKey !== undefined) {
+        clientSessionStateReleasers.get(this.#state.client)?.(this.sessionId, routingKey);
+      }
+      clientSessionRoutingKeys.delete(this);
     }
   }
 
@@ -1712,7 +1873,7 @@ export class NnrpClientSession {
     options: NnrpSubmitOptions,
     deadlineMillis: number | undefined,
   ): Promise<void> | undefined {
-    if (this.#state.options.submitCapacityPolicy !== "await") {
+    if (this.#submitCapacityPolicy !== "await") {
       return undefined;
     }
 
@@ -1775,7 +1936,7 @@ export class NnrpClientSession {
   }
 
   #reserveImmediateCapacity(): void {
-    if (this.#state.options.submitCapacityPolicy !== "await") {
+    if (this.#submitCapacityPolicy !== "await") {
       return;
     }
 
@@ -1829,16 +1990,17 @@ export class NnrpClientSession {
   }
 
   #shouldSuppressCancelledPayload(event: NnrpRuntimeEvent): boolean {
-    if (event.type === "partial-result") {
-      return this.#cancelledOperations.has(event.metadata.operationId);
+    if (event.metadata.type === "partial_result") {
+      return this.#cancelledOperations.has(event.metadata.value.operationId);
     }
 
-    const resultOperationId = event.type === "result" ? this.#operationByFrame.get(event.result.frameId) : undefined;
+    const resultOperationId = event.header.messageType === NnrpMessageType.ResultPush
+      ? runtimeEventOperationIds.get(event) ?? this.#operationByFrame.get(event.header.frameId)
+      : undefined;
     if (
-      event.type === "result" && resultOperationId !== undefined && this.#cancelledOperations.has(resultOperationId)
+      event.header.messageType === NnrpMessageType.ResultPush && resultOperationId !== undefined &&
+      this.#cancelledOperations.has(resultOperationId)
     ) {
-      this.#terminalFrames.add(event.result.frameId);
-      this.#finishFrame(event.result.frameId);
       return true;
     }
 
@@ -1864,10 +2026,13 @@ export class NnrpClientSession {
   }
 
   async #releaseForTerminalControl(event: NnrpRuntimeEvent): Promise<void> {
-    if (event.type === "cancel" || event.type === "abort") {
-      await this.#releaseOperationObjects(event.metadata.operationId, ObjectReleaseReason.Cancelled);
-    } else if (event.type === "supersede") {
-      await this.#releaseOperationObjects(event.metadata.oldOperationId, ObjectReleaseReason.Replaced);
+    if (
+      (event.header.messageType === NnrpMessageType.Cancel || event.header.messageType === NnrpMessageType.Abort) &&
+      event.metadata.type === "control_request"
+    ) {
+      await this.#releaseOperationObjects(event.metadata.value.operationId, ObjectReleaseReason.Cancelled);
+    } else if (event.header.messageType === NnrpMessageType.Supersede && event.metadata.type === "supersede") {
+      await this.#releaseOperationObjects(event.metadata.value.oldOperationId, ObjectReleaseReason.Replaced);
     }
   }
 
@@ -1926,168 +2091,6 @@ function createNativeRuntimeBinding(
 }
 
 const EMPTY_PAYLOAD = new Uint8Array();
-function decodeRuntimeFrameEvent(
-  messageType: NnrpMessageType,
-  payload: Uint8Array,
-  sessionId: string | undefined,
-): NnrpRuntimeFrameEvent {
-  const scope = sessionId === undefined ? {} : { sessionId };
-  switch (messageType) {
-    case NnrpMessageType.Cancel:
-    case NnrpMessageType.Abort: {
-      const { metadata, tail } = decodeRuntimeControlMetadata(messageType, payload);
-      return {
-        type: messageType === NnrpMessageType.Cancel ? "cancel" : "abort",
-        messageType,
-        metadata: metadata as ControlRequestMetadata,
-        diagnostic: tail,
-        ...scope,
-      } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.PriorityUpdate:
-    case NnrpMessageType.Deadline:
-    case NnrpMessageType.ExpireAt: {
-      const { metadata } = decodeRuntimeControlMetadata(messageType, payload);
-      const type = messageType === NnrpMessageType.PriorityUpdate
-        ? "priority-update"
-        : messageType === NnrpMessageType.Deadline
-        ? "deadline"
-        : "expire-at";
-      return { type, messageType, metadata: metadata as SchedulingMetadata, ...scope } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.Supersede:
-    case NnrpMessageType.CapabilityNegotiation:
-    case NnrpMessageType.DegradeProfile:
-    case NnrpMessageType.RouteHint:
-    case NnrpMessageType.ExecutionHint:
-    case NnrpMessageType.TraceContext:
-    case NnrpMessageType.Progress:
-    case NnrpMessageType.PartialResult:
-    case NnrpMessageType.ResultDropReason:
-    case NnrpMessageType.ErrorRecoverable:
-    case NnrpMessageType.RetryAfter: {
-      const { metadata, tail } = decodeRuntimeControlMetadata(messageType, payload);
-      return runtimeControlEventWithTail(messageType, metadata, tail, scope);
-    }
-    case NnrpMessageType.BudgetUpdate:
-    case NnrpMessageType.Backpressure:
-    case NnrpMessageType.CreditUpdate: {
-      const { metadata } = decodeRuntimeControlMetadata(messageType, payload);
-      if (messageType === NnrpMessageType.BudgetUpdate) {
-        return { type: "budget-update", messageType, metadata: metadata as BudgetMetadata, ...scope };
-      }
-      return {
-        type: messageType === NnrpMessageType.Backpressure ? "backpressure" : "credit-update",
-        messageType,
-        metadata: metadata as PressureMetadata,
-        ...scope,
-      } as NnrpRuntimeFrameEvent;
-    }
-    case NnrpMessageType.ObjectDeclare:
-    case NnrpMessageType.ObjectRef:
-    case NnrpMessageType.ObjectRelease:
-    case NnrpMessageType.ObjectPatch:
-    case NnrpMessageType.ObjectDelta:
-    case NnrpMessageType.CacheReference:
-    case NnrpMessageType.CacheMiss: {
-      const { metadata, tail } = decodeRuntimeObjectMetadata(messageType, payload);
-      return runtimeObjectEvent(messageType, metadata, tail, scope);
-    }
-    case NnrpMessageType.CacheInvalidate:
-      return {
-        type: "cache-invalidate",
-        messageType,
-        metadata: decodeCacheInvalidateMetadata(payload),
-        ...scope,
-      };
-    default:
-      throw nativeArtifactError(
-        "NNRP_DENO_FFI_RUNTIME_MESSAGE_UNSUPPORTED",
-        `Native event returned unsupported runtime message type 0x${Number(messageType).toString(16)}.`,
-      );
-  }
-}
-
-function runtimeControlEventWithTail(
-  messageType: NnrpMessageType,
-  metadata: RuntimeControlMetadata,
-  tail: Uint8Array,
-  scope: { readonly sessionId?: string },
-): NnrpRuntimeFrameEvent {
-  const mapping = RUNTIME_CONTROL_EVENT_MAPPINGS[messageType];
-  if (mapping === undefined) {
-    throw new Error(`runtime control message ${messageType} has no event mapping`);
-  }
-  return {
-    type: mapping.type,
-    messageType,
-    metadata,
-    [mapping.tail]: tail,
-    ...scope,
-  } as NnrpRuntimeFrameEvent;
-}
-
-function runtimeObjectEvent(
-  messageType: NnrpMessageType,
-  metadata:
-    | ObjectDescriptorMetadata
-    | ObjectReferenceMetadata
-    | ObjectReleaseMetadata
-    | ObjectDeltaMetadata
-    | CacheReferenceMetadata
-    | CacheMissMetadata,
-  tail: Uint8Array,
-  scope: { readonly sessionId?: string },
-): NnrpRuntimeFrameEvent {
-  if (messageType === NnrpMessageType.ObjectPatch || messageType === NnrpMessageType.ObjectDelta) {
-    const delta = metadata as ObjectDeltaMetadata;
-    return {
-      type: messageType === NnrpMessageType.ObjectPatch ? "object-patch" : "object-delta",
-      messageType,
-      metadata: delta,
-      metadataBody: tail.slice(0, delta.metadataBytes),
-      delta: tail.slice(delta.metadataBytes),
-      ...scope,
-    } as NnrpRuntimeFrameEvent;
-  }
-  const mapping = RUNTIME_OBJECT_EVENT_MAPPINGS[messageType];
-  if (mapping === undefined) {
-    throw new Error(`runtime object message ${messageType} has no event mapping`);
-  }
-  return {
-    type: mapping.type,
-    messageType,
-    metadata,
-    [mapping.tail]: tail,
-    ...scope,
-  } as NnrpRuntimeFrameEvent;
-}
-
-const RUNTIME_CONTROL_EVENT_MAPPINGS: Readonly<
-  Partial<Record<NnrpMessageType, { readonly type: string; readonly tail: "body" | "diagnostic" }>>
-> = {
-  [NnrpMessageType.Supersede]: { type: "supersede", tail: "diagnostic" },
-  [NnrpMessageType.CapabilityNegotiation]: { type: "capability-negotiation", tail: "body" },
-  [NnrpMessageType.DegradeProfile]: { type: "degrade-profile", tail: "body" },
-  [NnrpMessageType.RouteHint]: { type: "route-hint", tail: "body" },
-  [NnrpMessageType.ExecutionHint]: { type: "execution-hint", tail: "body" },
-  [NnrpMessageType.TraceContext]: { type: "trace-context", tail: "body" },
-  [NnrpMessageType.Progress]: { type: "progress", tail: "body" },
-  [NnrpMessageType.PartialResult]: { type: "partial-result", tail: "body" },
-  [NnrpMessageType.ResultDropReason]: { type: "result-drop-reason", tail: "diagnostic" },
-  [NnrpMessageType.ErrorRecoverable]: { type: "recoverable-error", tail: "diagnostic" },
-  [NnrpMessageType.RetryAfter]: { type: "retry-after", tail: "diagnostic" },
-};
-
-const RUNTIME_OBJECT_EVENT_MAPPINGS: Readonly<
-  Partial<Record<NnrpMessageType, { readonly type: string; readonly tail: "body" | "diagnostic" }>>
-> = {
-  [NnrpMessageType.ObjectDeclare]: { type: "object-declare", tail: "body" },
-  [NnrpMessageType.ObjectRef]: { type: "object-ref", tail: "body" },
-  [NnrpMessageType.ObjectRelease]: { type: "object-release", tail: "diagnostic" },
-  [NnrpMessageType.CacheReference]: { type: "cache-reference", tail: "body" },
-  [NnrpMessageType.CacheMiss]: { type: "cache-miss", tail: "diagnostic" },
-};
 
 function createNativeRuntimeManifest(transports: readonly NnrpTransportKind[]): NnrpCapabilityManifest {
   return createCapabilityManifest({
@@ -2165,24 +2168,111 @@ function mergeSessionOptions(
   defaults: NnrpSessionOptions | undefined,
   options: NnrpSessionOptions,
 ): NnrpSessionOptions {
-  const merged = {
+  const cacheHints = options.cacheHints ?? defaults?.cacheHints;
+  return {
     ...defaults,
     ...options,
-    metadata: {
-      ...(defaults?.metadata ?? {}),
-      ...(options.metadata ?? {}),
-    },
+    ...(cacheHints === undefined ? {} : { cacheHints }),
   };
-  validateSessionMetadata(merged);
-  return merged;
+}
+
+function normalizeNativeSessionOptions(options: NnrpSessionOptions): NnrpNormalizedSessionOptions {
+  const normalized: NnrpNormalizedSessionOptions = {
+    requestedSessionId: options.requestedSessionId ?? 0,
+    profileId: options.profileId ?? NNRP_STANDARD_PROFILE_TOKEN,
+    schemaId: options.schemaId ?? NNRP_TOKEN_DELTA_SCHEMA_ID,
+    schemaVersion: options.schemaVersion ?? NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+    priorityClass: options.priorityClass ?? NnrpSessionPriorityClass.Balanced,
+    defaultDeadlineMillis: options.defaultDeadlineMillis ?? 500,
+    maxInFlightOperations: options.maxInFlightOperations ?? 4,
+    leaseTtlHintMillis: options.leaseTtlHintMillis ?? 30_000,
+    allowResume: options.allowResume ?? false,
+    resumeTokenBytes: options.resumeTokenBytes ?? 0,
+    cacheHints: Object.freeze([...(options.cacheHints ?? [])]),
+  };
+
+  assertNativeSessionUnsigned("requestedSessionId", normalized.requestedSessionId, 0xffff_ffff);
+  assertNativeSessionUnsigned("profileId", normalized.profileId, 0xffff);
+  assertNativeSessionUnsigned("schemaId", normalized.schemaId, 0xffff_ffff);
+  assertNativeSessionUnsigned("schemaVersion", normalized.schemaVersion, 0xffff_ffff);
+  if (
+    normalized.priorityClass !== NnrpSessionPriorityClass.Interactive &&
+    normalized.priorityClass !== NnrpSessionPriorityClass.Balanced &&
+    normalized.priorityClass !== NnrpSessionPriorityClass.Background
+  ) {
+    throw new RangeError("priorityClass is not a current SESSION_OPEN priority class");
+  }
+  assertNativeSessionUnsigned("defaultDeadlineMillis", normalized.defaultDeadlineMillis, 0xffff_ffff);
+  assertNativeSessionUnsigned("maxInFlightOperations", normalized.maxInFlightOperations, 0xffff);
+  if (normalized.maxInFlightOperations === 0) {
+    throw new RangeError("maxInFlightOperations must be greater than zero");
+  }
+  assertNativeSessionUnsigned("leaseTtlHintMillis", normalized.leaseTtlHintMillis, 0xffff_ffff);
+  assertNativeSessionUnsigned("resumeTokenBytes", normalized.resumeTokenBytes, 0xffff_ffff);
+  for (const hint of normalized.cacheHints) {
+    assertNativeSessionUnsigned("cacheHints entry", hint, 0xffff_ffff);
+  }
+  return Object.freeze(normalized);
+}
+
+function internalSessionOpenOptions(
+  options: NnrpNormalizedSessionOptions,
+  sessionHandleId: bigint,
+): InternalClientSessionOpenOptions {
+  return {
+    requestedSessionId: options.requestedSessionId,
+    sessionHandleId,
+    generation: 1,
+    profileId: options.profileId,
+    priorityClass: options.priorityClass,
+    allowResume: options.allowResume,
+    schemaId: options.schemaId,
+    schemaVersion: options.schemaVersion,
+    defaultDeadlineMillis: options.defaultDeadlineMillis,
+    maxInFlightOperations: options.maxInFlightOperations,
+    leaseTtlHintMillis: options.leaseTtlHintMillis,
+    resumeTokenBytes: options.resumeTokenBytes,
+    cacheHints: options.cacheHints,
+  };
+}
+
+function assertNativeSessionUnsigned(name: string, value: number, maximum: number): void {
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) {
+    throw new RangeError(`${name} must fit in u${maximum === 0xffff ? 16 : 32}`);
+  }
+}
+
+function assertNegotiatedSessionId(sessionId: number): number {
+  if (!Number.isInteger(sessionId) || sessionId <= 0 || sessionId > 0xffff_ffff) {
+    throw new RangeError("negotiated sessionId must be a non-zero u32");
+  }
+  return sessionId;
 }
 
 function eventSessionId(event: NnrpRuntimeEvent): string | undefined {
-  if (event.type === "result") {
-    return event.sessionId ?? event.result.sessionId;
-  }
+  return runtimeEventSessionIds.get(event);
+}
 
-  return event.sessionId;
+function isRuntimeTerminalEvent(event: NnrpRuntimeEvent): boolean {
+  return event.header.messageType === NnrpMessageType.ResultPush ||
+    event.header.messageType === NnrpMessageType.ResultDrop ||
+    event.header.messageType === NnrpMessageType.ResultDropReason;
+}
+
+function terminalOperationId(event: NnrpRuntimeEvent, frameOperationId?: bigint): bigint | undefined {
+  if (event.metadata.type === "result_drop_reason") return event.metadata.value.operationId;
+  return runtimeEventOperationIds.get(event) ?? frameOperationId;
+}
+
+function flowCredit(update: import("@nnrp/core").NnrpFlowUpdateMetadata): number {
+  switch (update.scopeKind) {
+    case NnrpFlowScopeKind.Connection:
+      return update.connectionCredit;
+    case NnrpFlowScopeKind.Session:
+      return update.sessionCredit;
+    case NnrpFlowScopeKind.Operation:
+      return update.operationCredit;
+  }
 }
 
 function closedError(target: string): NnrpCapabilityError {

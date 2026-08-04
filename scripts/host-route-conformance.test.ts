@@ -4,6 +4,7 @@ import {
   createRollbackEvidence,
   createSuccessfulClientRouteEvidence,
   type HostRouteCaseResult,
+  hostRouteTimeoutMillis,
   validateHostRouteScenario,
 } from "./host-route-conformance.ts";
 import {
@@ -77,6 +78,23 @@ Deno.test("host-route manifest declares an independent host-only provider surfac
       browserManifest.wire_conformance.host_route_providers,
       ["suite_as_server", "suite_as_server"],
     )
+  );
+});
+
+Deno.test("host-route target preserves the suite timeout budget for protocol close", () => {
+  const scenario = validateHostRouteScenario({
+    ...clientScenario,
+    steps: [{ action: "connect_each_listener", timeout_ms: 3_000 }],
+  });
+  assertEquals(hostRouteTimeoutMillis(scenario, 2_000), 3_000);
+  assertEquals(hostRouteTimeoutMillis(validateHostRouteScenario(clientScenario), 2_000), 2_000);
+});
+
+Deno.test("host-route scenario rejects invalid timeout budgets", () => {
+  assertThrows(
+    () => validateHostRouteScenario({ ...clientScenario, steps: [{ action: "connect", timeout_ms: 0 }] }),
+    Error,
+    "positive safe integer",
   );
 });
 

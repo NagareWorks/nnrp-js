@@ -10,10 +10,9 @@ const runtime = await openBrowserRuntime({
 
 const client = runtime.connect({
   endpoint: "wss://nnrp.example.test/session",
-  sessionDefaults: { inputProfile: "token", metadata: { app: "nnrp-browser-client-example" } },
 });
 
-const session = client.openSession();
+const session = await client.openSession();
 
 try {
   const result = await session.submit(createTokenSubmitRequest({
@@ -22,7 +21,7 @@ try {
     chunks: [{ payload: new TextEncoder().encode("hello") }],
   }));
 
-  console.log("NNRP browser result", result.frameId);
+  console.log("NNRP browser result", result.operationId, result.terminalState);
 } catch (error) {
   if (error instanceof NnrpWasmBindingUnavailableError) {
     console.log("WASM runtime is not instantiated yet:", error.diagnostic.code);

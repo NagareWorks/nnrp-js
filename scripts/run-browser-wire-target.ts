@@ -2,7 +2,7 @@ import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
-  type NnrpRuntimeEvent,
+  NnrpMessageType,
   type NnrpTransportConnection,
 } from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
@@ -13,6 +13,7 @@ import {
   type BrowserWireObservedFrame,
   createBrowserWireResults,
 } from "./browser-wire-contract.ts";
+import { assertRuntimeMetadata, assertRuntimeTail } from "./runtime-event-fixtures.ts";
 
 const CONNECT_ATTEMPTS = 100;
 const CONNECT_RETRY_MILLIS = 50;
@@ -48,18 +49,24 @@ async function run(): Promise<void> {
   });
   await postReady(readyEndpoint);
   let client: ReturnType<typeof runtime.connect> | undefined;
-  let session: ReturnType<ReturnType<typeof runtime.connect>["openSession"]> | undefined;
+  let session: Awaited<ReturnType<ReturnType<typeof runtime.connect>["openSession"]>> | undefined;
   try {
     ({ client, session } = await connectAndSubmit(runtime, providerEndpoint));
     observe("received", "REQUEST", { operation_id: "301", frame_id: 301 });
-    const progress = expectEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }), "progress");
-    observe("sent", "PROGRESS", { operation_id: progress.metadata.operationId.toString() });
-    const credit = expectEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }), "credit-update");
-    observe("sent", "CREDIT_UPDATE", { max_in_flight: credit.metadata.creditWindow.toString() });
-    const partial = expectEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }), "partial-result");
-    observe("sent", "PARTIAL_RESULT", { operation_id: partial.metadata.operationId.toString() });
-    const result = expectEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }), "result");
-    if (!equalBytes(result.result.payload, RESPONSE_BODY)) {
+    const progress = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    assertRuntimeMetadata(progress, "progress");
+    observe("sent", "PROGRESS", { operation_id: progress.metadata.value.operationId.toString() });
+    const credit = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    assertMessageType(credit.header.messageType, NnrpMessageType.CreditUpdate, "CREDIT_UPDATE");
+    assertRuntimeMetadata(credit, "pressure");
+    observe("sent", "CREDIT_UPDATE", { max_in_flight: credit.metadata.value.creditWindow.toString() });
+    const partial = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    assertRuntimeMetadata(partial, "partial_result");
+    observe("sent", "PARTIAL_RESULT", { operation_id: partial.metadata.value.operationId.toString() });
+    const result = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    assertMessageType(result.header.messageType, NnrpMessageType.ResultPush, "RESULT_PUSH");
+    assertRuntimeTail(result, "body");
+    if (!equalBytes(result.tail.body, RESPONSE_BODY)) {
       throw new Error("browser wire target received an unexpected terminal result payload");
     }
     await session.close();
@@ -117,13 +124,14 @@ async function connectAndSubmit(
       providerRoutes: { websocket: { endpoint: providerEndpoint } },
       transportPolicy: "force-websocket",
     });
-    const session = client.openSession({ sessionId: `wire-browser-${attempt}`, inputProfile: "token" });
+    let session: Awaited<ReturnType<typeof client.openSession>> | undefined;
     try {
+      session = await client.openSession();
       await session.submitNoWait(tokenSubmit(301n, 301, REQUEST_BODY));
       return { client, session };
     } catch (error) {
       lastError = error;
-      await session.close().catch(() => undefined);
+      await session?.close().catch(() => undefined);
       await client.close().catch(() => undefined);
       await delay(CONNECT_RETRY_MILLIS);
     }
@@ -139,12 +147,8 @@ function tokenSubmit(operationId: bigint, frameId: number, payload: Uint8Array) 
   });
 }
 
-function expectEvent<T extends NnrpRuntimeEvent["type"]>(
-  event: NnrpRuntimeEvent,
-  type: T,
-): Extract<NnrpRuntimeEvent, { readonly type: T }> {
-  if (event.type !== type) throw new Error(`browser wire target expected ${type}, got ${event.type}`);
-  return event as Extract<NnrpRuntimeEvent, { readonly type: T }>;
+function assertMessageType(actual: NnrpMessageType, expected: NnrpMessageType, label: string): void {
+  if (actual !== expected) throw new Error(`browser wire target expected ${label}, got message ${actual}`);
 }
 
 function observe(

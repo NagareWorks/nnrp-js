@@ -23,10 +23,10 @@ Deno.test("LCOV coverage merges duplicate source mappings by file and line", () 
 Deno.test("LCOV coverage applies normalized exclusions on Windows and Unix paths", () => {
   const coverage = parseLcovCoverage(
     [
-      "SF:D:\\project\\nnrp-js\\packages\\native-client\\src\\index.ts",
+      "SF:D:\\project\\.codex-worktrees\\nnrp-js-sdk-v9\\packages\\native-client\\src\\index.ts",
       "DA:1,1",
       "end_of_record",
-      "SF:/work/nnrp-js/packages/core/src/index.ts",
+      "SF:/work/feature-checkout/packages/core/src/index.ts",
       "DA:1,1",
       "end_of_record",
     ].join("\n"),
