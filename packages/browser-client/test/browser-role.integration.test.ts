@@ -121,14 +121,6 @@ Deno.test({
     cleanups.push(() => client.close());
     const accepting = server.accept({ timeoutMs: 20_000 });
     void accepting.catch(() => undefined);
-    const readinessCarrier = await setupForTest(
-      () => browserProvider.connect({ endpoint: providerEndpoint }),
-      cleanups,
-      "browser carrier readiness",
-    );
-    const closeReadinessCarrier = onceForTest(() => readinessCarrier.close());
-    cleanups.push(closeReadinessCarrier);
-    await setupForTest(closeReadinessCarrier, cleanups, "browser carrier readiness close");
     const session = await setupForTest(
       () =>
         client.openSession({
@@ -664,11 +656,6 @@ async function within<T>(promise: Promise<T>, label: string, timeoutMillis = 10_
 }
 
 type TestCleanup = () => void | Promise<void>;
-
-function onceForTest(cleanup: TestCleanup): TestCleanup {
-  let pending: Promise<void> | undefined;
-  return () => pending ??= Promise.resolve().then(cleanup);
-}
 
 async function setupForTest<T>(
   operation: () => T | Promise<T>,
