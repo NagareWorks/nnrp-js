@@ -1,6 +1,142 @@
 export const NNRP_PROTOCOL_NAME = "NNRP";
 export const NNRP_PROTOCOL_VERSION = "1.0.0";
 export const NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES = 24;
+export const NNRP_SESSION_OPEN_METADATA_BYTES = 48;
+export const NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES = 28;
+export const NNRP_SCHEMA_DESCRIPTOR_HEADER_BYTES = 32;
+export const NNRP_STANDARD_PROFILE_TOKEN = 2;
+export const NNRP_TOKEN_DELTA_SCHEMA_ID = 0x0000_1001;
+export const NNRP_TOKEN_DELTA_SCHEMA_VERSION = 3;
+export const NNRP_TOKEN_DELTA_SCHEMA_HASH = 0x6e6e_7270_746f_6b33n;
+
+export enum NnrpStandardProfile {
+  Unspecified = 0,
+  Tensor = 1,
+  Token = 2,
+}
+
+export enum NnrpStreamSemantics {
+  Unspecified = 0,
+  Snapshot = 1,
+  Append = 2,
+}
+
+export enum NnrpSchemaDescriptorFlags {
+  None = 0,
+  BreakingChange = 0x01,
+  CompatibleUpdate = 0x02,
+  DependencyBound = 0x04,
+  BodySchemaPresent = 0x08,
+}
+
+export enum NnrpSchemaRegistryAction {
+  Installed = 1,
+  AlreadyInstalled = 2,
+  Updated = 3,
+  Invalidated = 4,
+}
+
+export enum NnrpSchemaRegistryFailure {
+  Unknown = 1,
+  VersionUnknown = 2,
+  HashConflict = 3,
+  Incompatible = 4,
+  UpdateRejected = 5,
+}
+
+export interface NnrpSchemaDescriptorHeader {
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly profileId: NnrpStandardProfile | number;
+  readonly schemaFlags: NnrpSchemaDescriptorFlags | number;
+  readonly minVersionMajor: number;
+  readonly maxVersionMajor: number;
+  readonly bodyBytes: number;
+  readonly dependencyCount: number;
+  readonly defaultStreamSemantics: NnrpStreamSemantics | number;
+  readonly schemaHash: bigint;
+}
+
+export class NnrpSchemaRegistry {
+  readonly #descriptors = new Map<string, NnrpSchemaDescriptorHeader>();
+
+  public constructor(descriptors: readonly NnrpSchemaDescriptorHeader[] = []) {
+    for (const descriptor of descriptors) this.install(descriptor);
+  }
+
+  public install(descriptor: NnrpSchemaDescriptorHeader): NnrpSchemaRegistryAction {
+    const normalized = normalizeSchemaDescriptorHeader(descriptor);
+    validateStandardProfile(normalized.profileId);
+    const key = schemaDescriptorKey(normalized.schemaId, normalized.schemaVersion);
+    const existing = this.#descriptors.get(key);
+    if (existing !== undefined) {
+      if (existing.schemaHash === normalized.schemaHash && existing.profileId === normalized.profileId) {
+        return NnrpSchemaRegistryAction.AlreadyInstalled;
+      }
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.HashConflict, "schema hash conflict for installed version");
+    }
+    const updatesExistingSchema = [...this.#descriptors.values()].some((candidate) =>
+      candidate.schemaId === normalized.schemaId && candidate.schemaVersion < normalized.schemaVersion
+    );
+    this.#descriptors.set(key, normalized);
+    return updatesExistingSchema ? NnrpSchemaRegistryAction.Updated : NnrpSchemaRegistryAction.Installed;
+  }
+
+  public lookup(schemaId: number, schemaVersion: number): NnrpSchemaDescriptorHeader {
+    assertUnsigned("schemaId", schemaId, 0xffff_ffff);
+    assertUnsigned("schemaVersion", schemaVersion, 0xffff_ffff);
+    const descriptor = this.#descriptors.get(schemaDescriptorKey(schemaId, schemaVersion));
+    if (descriptor !== undefined) return descriptor;
+    const failure = [...this.#descriptors.values()].some((candidate) => candidate.schemaId === schemaId)
+      ? NnrpSchemaRegistryFailure.VersionUnknown
+      : NnrpSchemaRegistryFailure.Unknown;
+    throw schemaRegistryError(failure, "schema descriptor is not installed");
+  }
+
+  public invalidate(schemaId: number, schemaVersion: number): NnrpSchemaRegistryAction {
+    assertUnsigned("schemaId", schemaId, 0xffff_ffff);
+    assertUnsigned("schemaVersion", schemaVersion, 0xffff_ffff);
+    if (!this.#descriptors.delete(schemaDescriptorKey(schemaId, schemaVersion))) {
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.VersionUnknown, "schema version is not installed");
+    }
+    return NnrpSchemaRegistryAction.Invalidated;
+  }
+
+  public validateBinding(descriptor: NnrpTypedPayloadDescriptor): void {
+    validateTypedPayloadDescriptor(descriptor);
+    validateStandardProfile(descriptor.profileId);
+    if (descriptor.profileId === NnrpStandardProfile.Unspecified) {
+      if (descriptor.schemaId === 0 && descriptor.schemaVersion === 0) return;
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.Incompatible, "unspecified profile cannot bind a schema");
+    }
+    if (descriptor.schemaId === 0) {
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.Unknown, "typed payload schema id is zero");
+    }
+    const schema = this.lookup(descriptor.schemaId, descriptor.schemaVersion);
+    if (schema.profileId !== descriptor.profileId) {
+      throw schemaRegistryError(NnrpSchemaRegistryFailure.Incompatible, "typed payload profile does not match schema");
+    }
+  }
+
+  public snapshot(): readonly NnrpSchemaDescriptorHeader[] {
+    return Object.freeze([...this.#descriptors.values()]);
+  }
+}
+
+export function tokenDeltaSchemaDescriptor(): NnrpSchemaDescriptorHeader {
+  return normalizeSchemaDescriptorHeader({
+    schemaId: NNRP_TOKEN_DELTA_SCHEMA_ID,
+    schemaVersion: NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+    profileId: NnrpStandardProfile.Token,
+    schemaFlags: NnrpSchemaDescriptorFlags.None,
+    minVersionMajor: 1,
+    maxVersionMajor: 1,
+    bodyBytes: 0,
+    dependencyCount: 0,
+    defaultStreamSemantics: NnrpStreamSemantics.Append,
+    schemaHash: NNRP_TOKEN_DELTA_SCHEMA_HASH,
+  });
+}
 
 export enum NnrpPayloadKind {
   Tensor = 0x01,
@@ -100,6 +236,230 @@ function validateTypedPayloadDescriptor(
 function assertUnsigned(name: string, value: number, maximum: number): void {
   if (!Number.isInteger(value) || value < 0 || value > maximum) {
     throw new RangeError(`${name} is outside its unsigned wire range`);
+  }
+}
+
+function assertUnsignedBigInt(name: string, value: bigint, maximum: bigint): void {
+  if (value < 0n || value > maximum) {
+    throw new RangeError(`${name} is outside its unsigned wire range`);
+  }
+}
+
+function normalizeSchemaDescriptorHeader(descriptor: NnrpSchemaDescriptorHeader): NnrpSchemaDescriptorHeader {
+  assertUnsigned("schemaId", descriptor.schemaId, 0xffff_ffff);
+  assertUnsigned("schemaVersion", descriptor.schemaVersion, 0xffff_ffff);
+  assertUnsigned("profileId", descriptor.profileId, 0xffff);
+  assertUnsigned("schemaFlags", descriptor.schemaFlags, 0xffff);
+  if ((descriptor.schemaFlags & ~0x0f) !== 0) throw new RangeError("schemaFlags contains reserved bits");
+  assertUnsigned("minVersionMajor", descriptor.minVersionMajor, 0xff);
+  assertUnsigned("maxVersionMajor", descriptor.maxVersionMajor, 0xff);
+  if (descriptor.minVersionMajor > descriptor.maxVersionMajor) {
+    throw new RangeError("minVersionMajor must not exceed maxVersionMajor");
+  }
+  assertUnsigned("bodyBytes", descriptor.bodyBytes, 0xffff_ffff);
+  assertUnsigned("dependencyCount", descriptor.dependencyCount, 0xffff);
+  assertUnsigned("defaultStreamSemantics", descriptor.defaultStreamSemantics, 0xffff);
+  if (!Object.values(NnrpStreamSemantics).includes(descriptor.defaultStreamSemantics)) {
+    throw new RangeError("defaultStreamSemantics is not registered");
+  }
+  assertUnsignedBigInt("schemaHash", descriptor.schemaHash, 0xffff_ffff_ffff_ffffn);
+  return Object.freeze({ ...descriptor });
+}
+
+function validateStandardProfile(profileId: number): void {
+  if (
+    profileId !== NnrpStandardProfile.Unspecified &&
+    profileId !== NnrpStandardProfile.Tensor &&
+    profileId !== NnrpStandardProfile.Token
+  ) {
+    throw schemaRegistryError(NnrpSchemaRegistryFailure.UpdateRejected, "profile id is not registered");
+  }
+}
+
+function schemaDescriptorKey(schemaId: number, schemaVersion: number): string {
+  return `${schemaId}:${schemaVersion}`;
+}
+
+function schemaRegistryError(failure: NnrpSchemaRegistryFailure, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: `NNRP_SCHEMA_REGISTRY_${
+      NnrpSchemaRegistryFailure[failure].replaceAll(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()
+    }`,
+    message,
+    source: "protocol",
+    retryable: false,
+    cause: failure,
+  });
+}
+
+export enum NnrpSessionPriorityClass {
+  Interactive = 0,
+  Balanced = 1,
+  Background = 2,
+}
+
+export interface NnrpSessionOpenMetadata {
+  readonly requestedSessionId: number;
+  readonly profileId: number;
+  readonly priorityClass: NnrpSessionPriorityClass;
+  readonly sessionFlags: number;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly resumeTokenBytes: number;
+  readonly authBytes: number;
+  readonly sessionExtensionBytes: number;
+  readonly clientSessionTag: bigint;
+}
+
+export function encodeSessionOpenMetadata(metadata: NnrpSessionOpenMetadata): Uint8Array {
+  validateSessionOpenMetadata(metadata);
+  const encoded = new Uint8Array(NNRP_SESSION_OPEN_METADATA_BYTES);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.requestedSessionId, true);
+  view.setUint16(4, metadata.profileId, true);
+  view.setUint8(6, metadata.priorityClass);
+  view.setUint8(7, metadata.sessionFlags);
+  view.setUint32(8, metadata.schemaId, true);
+  view.setUint32(12, metadata.schemaVersion, true);
+  view.setUint32(16, metadata.defaultDeadlineMillis, true);
+  view.setUint16(20, metadata.maxInFlightOperations, true);
+  view.setUint32(24, metadata.leaseTtlHintMillis, true);
+  view.setUint32(28, metadata.resumeTokenBytes, true);
+  view.setUint32(32, metadata.authBytes, true);
+  view.setUint32(36, metadata.sessionExtensionBytes, true);
+  view.setBigUint64(40, metadata.clientSessionTag, true);
+  return encoded;
+}
+
+export function decodeSessionOpenMetadata(encoded: Uint8Array): NnrpSessionOpenMetadata {
+  if (encoded.byteLength !== NNRP_SESSION_OPEN_METADATA_BYTES) {
+    throw new RangeError(`SESSION_OPEN metadata must be ${NNRP_SESSION_OPEN_METADATA_BYTES} bytes`);
+  }
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  if (view.getUint16(22, true) !== 0) {
+    throw new RangeError("SESSION_OPEN reserved0 must be zero");
+  }
+  const metadata: NnrpSessionOpenMetadata = {
+    requestedSessionId: view.getUint32(0, true),
+    profileId: view.getUint16(4, true),
+    priorityClass: view.getUint8(6) as NnrpSessionPriorityClass,
+    sessionFlags: view.getUint8(7),
+    schemaId: view.getUint32(8, true),
+    schemaVersion: view.getUint32(12, true),
+    defaultDeadlineMillis: view.getUint32(16, true),
+    maxInFlightOperations: view.getUint16(20, true),
+    leaseTtlHintMillis: view.getUint32(24, true),
+    resumeTokenBytes: view.getUint32(28, true),
+    authBytes: view.getUint32(32, true),
+    sessionExtensionBytes: view.getUint32(36, true),
+    clientSessionTag: view.getBigUint64(40, true),
+  };
+  validateSessionOpenMetadata(metadata);
+  return metadata;
+}
+
+function validateSessionOpenMetadata(metadata: NnrpSessionOpenMetadata): void {
+  assertUnsigned("requestedSessionId", metadata.requestedSessionId, 0xffff_ffff);
+  assertUnsigned("profileId", metadata.profileId, 0xffff);
+  if (
+    metadata.priorityClass !== NnrpSessionPriorityClass.Interactive &&
+    metadata.priorityClass !== NnrpSessionPriorityClass.Balanced &&
+    metadata.priorityClass !== NnrpSessionPriorityClass.Background
+  ) {
+    throw new RangeError("priorityClass is not a current SESSION_OPEN priority class");
+  }
+  assertUnsigned("sessionFlags", metadata.sessionFlags, 0xff);
+  if ((metadata.sessionFlags & ~0x0f) !== 0) {
+    throw new RangeError("sessionFlags contains reserved bits");
+  }
+  assertUnsigned("schemaId", metadata.schemaId, 0xffff_ffff);
+  assertUnsigned("schemaVersion", metadata.schemaVersion, 0xffff_ffff);
+  assertUnsigned("defaultDeadlineMillis", metadata.defaultDeadlineMillis, 0xffff_ffff);
+  assertUnsigned("maxInFlightOperations", metadata.maxInFlightOperations, 0xffff);
+  assertUnsigned("leaseTtlHintMillis", metadata.leaseTtlHintMillis, 0xffff_ffff);
+  assertUnsigned("resumeTokenBytes", metadata.resumeTokenBytes, 0xffff_ffff);
+  assertUnsigned("authBytes", metadata.authBytes, 0xffff_ffff);
+  assertUnsigned("sessionExtensionBytes", metadata.sessionExtensionBytes, 0xffff_ffff);
+  assertUnsignedBigInt("clientSessionTag", metadata.clientSessionTag, 0xffff_ffff_ffff_ffffn);
+}
+
+const SESSION_RECOVERY_TICKET_MAGIC = new Uint8Array([0x4e, 0x52, 0x54, 0x4b]);
+const SESSION_RECOVERY_TICKET_VERSION = 1;
+const SESSION_RECOVERY_TICKET_OPERATION_PRESENT = 0x0001;
+
+export class NnrpSessionRecoveryTicket {
+  readonly #resumeToken: Uint8Array;
+
+  private constructor(
+    public readonly sessionId: number,
+    resumeToken: Uint8Array,
+    public readonly resumeFromOperationId: bigint | undefined,
+    public readonly resumeWindowMillis: number,
+  ) {
+    this.#resumeToken = resumeToken.slice();
+    Object.freeze(this);
+  }
+
+  public get resumeToken(): Uint8Array {
+    return this.#resumeToken.slice();
+  }
+
+  public toBytes(): Uint8Array {
+    const encoded = new Uint8Array(NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES + this.#resumeToken.byteLength);
+    encoded.set(SESSION_RECOVERY_TICKET_MAGIC, 0);
+    const view = new DataView(encoded.buffer);
+    view.setUint16(4, SESSION_RECOVERY_TICKET_VERSION, true);
+    const operationPresent = this.resumeFromOperationId !== undefined;
+    view.setUint16(6, operationPresent ? SESSION_RECOVERY_TICKET_OPERATION_PRESENT : 0, true);
+    view.setUint32(8, this.sessionId, true);
+    view.setUint32(12, this.#resumeToken.byteLength, true);
+    view.setUint32(16, this.resumeWindowMillis, true);
+    view.setBigUint64(20, this.resumeFromOperationId ?? 0n, true);
+    encoded.set(this.#resumeToken, NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES);
+    return encoded;
+  }
+
+  public static fromBytes(encoded: Uint8Array): NnrpSessionRecoveryTicket {
+    if (!(encoded instanceof Uint8Array)) throw new TypeError("encoded recovery ticket must be a Uint8Array");
+    if (encoded.byteLength < NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES) {
+      throw new RangeError("recovery ticket is truncated");
+    }
+    if (!SESSION_RECOVERY_TICKET_MAGIC.every((value, index) => encoded[index] === value)) {
+      throw new RangeError("recovery ticket magic is invalid");
+    }
+    const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+    if (view.getUint16(4, true) !== SESSION_RECOVERY_TICKET_VERSION) {
+      throw new RangeError("recovery ticket version is unsupported");
+    }
+    const flags = view.getUint16(6, true);
+    if ((flags & ~SESSION_RECOVERY_TICKET_OPERATION_PRESENT) !== 0) {
+      throw new RangeError("recovery ticket contains reserved flags");
+    }
+    const sessionId = view.getUint32(8, true);
+    const resumeTokenBytes = view.getUint32(12, true);
+    const resumeWindowMillis = view.getUint32(16, true);
+    const operationId = view.getBigUint64(20, true);
+    if (sessionId === 0) throw new RangeError("recovery ticket sessionId must be non-zero");
+    if (resumeTokenBytes === 0) throw new RangeError("recovery ticket resumeToken must be non-empty");
+    if (encoded.byteLength !== NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES + resumeTokenBytes) {
+      throw new RangeError("recovery ticket length does not match its token length");
+    }
+    const operationPresent = (flags & SESSION_RECOVERY_TICKET_OPERATION_PRESENT) !== 0;
+    if (!operationPresent && operationId !== 0n) {
+      throw new RangeError("recovery ticket carries an operation id without its presence flag");
+    }
+    if (operationPresent && operationId === 0n) {
+      throw new RangeError("recovery ticket resumeFromOperationId must be non-zero when present");
+    }
+    return new NnrpSessionRecoveryTicket(
+      sessionId,
+      encoded.subarray(NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES),
+      operationPresent ? operationId : undefined,
+      resumeWindowMillis,
+    );
   }
 }
 
@@ -1382,7 +1742,7 @@ export interface NnrpSessionPatchRequest extends NnrpSessionMetadataOptions, Nnr
 
 export interface NnrpSessionPatchResult {
   readonly accepted: boolean;
-  readonly sessionId?: string;
+  readonly sessionId?: number;
   readonly diagnostic?: NnrpDiagnostic;
   readonly metadata?: Readonly<Record<string, string>>;
 }

@@ -1,5 +1,8 @@
 import {
+  decodeSessionOpenMetadata,
   type NnrpNativeTransportBinding,
+  type NnrpSchemaDescriptorHeader,
+  type NnrpSessionOpenMetadata,
   type NnrpTransportAcceptOptions,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
@@ -20,8 +23,7 @@ const TRANSPORT_KIND = "ipc" as const;
 const TRANSPORT_LABEL = "IPC";
 const PACKAGE_NAME = "nnrp-ffi-transport-ipc";
 const TRANSPORT_SCOPE = "ipc";
-const SECURITY_MODE: "none" | "required" | "websocket" = "none";
-const ABI_VERSION = "4.3.0";
+const ABI_VERSION = "4.4.0";
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const HANDLE_KIND_INVALID = 0;
@@ -29,7 +31,6 @@ const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
 const HANDLE_KIND_SERVER_ACCEPT = 13;
-const HANDLE_KIND_SECURITY_CONFIG = 12;
 
 interface NativeHandle {
   kind: number;
@@ -48,6 +49,47 @@ interface NativeStatus {
 interface NativeBufferView {
   ptr: unknown;
   len: number | bigint;
+}
+
+interface NativeSlice {
+  ptr: unknown;
+  len: number | bigint;
+}
+
+interface InternalServerPolicyDecision {
+  readonly accepted: boolean;
+  readonly sessionErrorCode: number;
+  readonly diagnostic?: string;
+}
+
+interface InternalServerRoleOptions {
+  readonly supportedProfiles: readonly number[];
+  readonly supportedCacheObjects: readonly number[];
+  readonly maxCacheObjects: bigint;
+  readonly maxCacheObjectBytes: number;
+  readonly schemaDescriptors: readonly NnrpSchemaDescriptorHeader[];
+  readonly resumeTokenBytes: number;
+  readonly maxInFlightOperations: number;
+  readonly grantedOperationCredit: number;
+  readonly leaseTtlMs: number;
+  readonly resumeWindowMs: number;
+  readonly evaluateSession?: (open: NnrpSessionOpenMetadata) => Promise<InternalServerPolicyDecision>;
+}
+
+interface InternalClientSessionOpenOptions {
+  readonly requestedSessionId: number;
+  readonly sessionHandleId: bigint;
+  readonly generation: number;
+  readonly profileId: number;
+  readonly priorityClass: number;
+  readonly allowResume: boolean;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly resumeTokenBytes: number;
+  readonly cacheHints: readonly number[];
 }
 
 interface NativeProbeResult {
@@ -132,6 +174,36 @@ const HandleType = koffi.struct({
   flags: "uint32_t",
 });
 const BufferViewType = koffi.struct({ ptr: "const uint8_t *", len: "size_t" });
+const U16SliceType = koffi.struct({ ptr: "const uint16_t *", len: "size_t" });
+const U32SliceType = koffi.struct({ ptr: "const uint32_t *", len: "size_t" });
+const ServerPolicyBeginCallbackType = koffi.proto("uint32_t", ["void *", "uint64_t", BufferViewType]);
+const ServerPolicySinkType = koffi.struct({
+  user_data: "void *",
+  begin: koffi.pointer(ServerPolicyBeginCallbackType),
+});
+const ServerPolicyDecisionType = koffi.struct({
+  accepted: "uint8_t",
+  reserved0: koffi.array("uint8_t", 3),
+  session_error_code: "uint32_t",
+  diagnostic: BufferViewType,
+});
+const ServerPolicyCompleteRequestType = koffi.struct({
+  request_id: "uint64_t",
+  decision: ServerPolicyDecisionType,
+});
+const SchemaDescriptorHeaderType = koffi.struct({
+  schema_id: "uint32_t",
+  schema_version: "uint32_t",
+  profile_id: "uint16_t",
+  schema_flags: "uint16_t",
+  min_version_major: "uint8_t",
+  max_version_major: "uint8_t",
+  reserved0: "uint16_t",
+  body_bytes: "uint32_t",
+  dependency_count: "uint16_t",
+  default_stream_semantics: "uint16_t",
+  schema_hash: "uint64_t",
+});
 const OpenRequestType = koffi.struct({
   transport_id: "uint32_t",
   flags: "uint32_t",
@@ -171,12 +243,6 @@ const ProbeResultType = koffi.struct({
   median_throughput_bytes_per_second: "uint64_t",
   median_rtt_microseconds: "uint64_t",
 });
-const SecurityConfigRequestType = koffi.struct({
-  transport_id: "uint32_t",
-  flags: "uint32_t",
-  first: BufferViewType,
-  second: BufferViewType,
-});
 const ClientConnectRequestType = koffi.struct({
   connection_id: "uint64_t",
   generation: "uint32_t",
@@ -188,15 +254,37 @@ const ServerBindRequestType = koffi.struct({
   generation: "uint32_t",
   reserved0: "uint32_t",
   transport_listener: HandleType,
+  supported_profiles: U16SliceType,
+  supported_cache_objects: U32SliceType,
+  max_cache_objects: "uint64_t",
+  max_cache_object_bytes: "uint32_t",
+  resume_token_bytes: "uint32_t",
+  max_in_flight_operations: "uint16_t",
+  granted_operation_credit: "uint16_t",
+  lease_ttl_ms: "uint32_t",
+  resume_window_ms: "uint32_t",
+  schema_registry: HandleType,
+  application_policy: ServerPolicySinkType,
 });
 const SessionOpenRequestType = koffi.struct({
   connection: HandleType,
   requested_session_id: "uint32_t",
+  session_handle_id: "uint64_t",
   generation: "uint32_t",
   profile_id: "uint16_t",
+  priority_class: "uint8_t",
+  allow_resume: "uint8_t",
   schema_id: "uint32_t",
   schema_version: "uint32_t",
+  default_deadline_ms: "uint32_t",
+  max_in_flight_operations: "uint16_t",
+  reserved0: "uint16_t",
+  lease_ttl_hint_ms: "uint32_t",
+  resume_token_bytes: "uint32_t",
+  cache_hints: U32SliceType,
 });
+const SessionResumeRequestType = koffi.struct({ open: SessionOpenRequestType, recovery_ticket: BufferViewType });
+const SessionRecoveryOutcomeType = koffi.struct({ outcome_code: "uint32_t", resume_window_ms: "uint32_t" });
 const SubmitRequestType = koffi.struct({
   session: HandleType,
   operation_id: "uint64_t",
@@ -273,78 +361,9 @@ const EventType = koffi.struct({
   diagnostic: DiagnosticType,
 });
 const pointerSize = koffi.sizeof("void *");
-if (pointerSize !== 4 && pointerSize !== 8) {
-  throw new Error(`${TRANSPORT_LABEL} native ABI uses unsupported pointer width ${pointerSize}.`);
-}
-const usesFourByteU64Alignment = pointerSize === 4 && process.arch === "ia32" && process.platform !== "win32";
-const requestLayout = pointerSize === 8
-  ? {
-    handleSize: 24,
-    handleId: 8,
-    bufferSize: 16,
-    bufferLength: 8,
-    openSize: 64,
-    openConfig: 24,
-    openMaxPacket: 48,
-    openReserved: 60,
-    adoptionSize: 40,
-    sessionOpenSize: 48,
-    submitSize: 72,
-    submitTrace: 48,
-    submitPayload: 56,
-    rolePollSize: 40,
-    acceptTicketSize: 40,
-    acceptWaitSize: 32,
-    runtimeFrameSize: 48,
-  }
-  : usesFourByteU64Alignment
-  ? {
-    handleSize: 20,
-    handleId: 4,
-    bufferSize: 8,
-    bufferLength: 4,
-    openSize: 52,
-    openConfig: 16,
-    openMaxPacket: 36,
-    openReserved: 48,
-    adoptionSize: 36,
-    sessionOpenSize: 40,
-    submitSize: 56,
-    submitTrace: 40,
-    submitPayload: 48,
-    rolePollSize: 36,
-    acceptTicketSize: 36,
-    acceptWaitSize: 28,
-    runtimeFrameSize: 36,
-  }
-  : {
-    handleSize: 24,
-    handleId: 8,
-    bufferSize: 8,
-    bufferLength: 4,
-    openSize: 56,
-    openConfig: 16,
-    openMaxPacket: 40,
-    openReserved: 52,
-    adoptionSize: 40,
-    sessionOpenSize: 48,
-    submitSize: 64,
-    submitTrace: 48,
-    submitPayload: 56,
-    rolePollSize: 40,
-    acceptTicketSize: 40,
-    acceptWaitSize: 32,
-    runtimeFrameSize: 40,
-  };
-const diagnosticLayout = usesFourByteU64Alignment
-  ? { size: 40, operation: 28, frame: 36 }
-  : { size: 48, operation: 32, frame: 40 };
-const headerLayout = usesFourByteU64Alignment ? { size: 28, trace: 20 } : { size: 32, trace: 24 };
-const eventLayout = pointerSize === 8
-  ? { size: 200, header: 8, connection: 40, session: 64, operation: 88, owner: 112, payload: 136, diagnostic: 152 }
-  : usesFourByteU64Alignment
-  ? { size: 160, header: 4, connection: 32, session: 52, operation: 72, owner: 92, payload: 112, diagnostic: 120 }
-  : { size: 192, header: 8, connection: 40, session: 64, operation: 88, owner: 112, payload: 136, diagnostic: 144 };
+const u64Alignment = koffi.alignof("uint64_t");
+const nativeLayout = selectNativeAbiLayout(pointerSize, u64Alignment);
+const { request: requestLayout, diagnostic: diagnosticLayout, header: headerLayout, event: eventLayout } = nativeLayout;
 const layoutChecks = [
   ["handle.size", koffi.sizeof(HandleType), requestLayout.handleSize],
   ["handle.kind", koffi.offsetof(HandleType, "kind"), 0],
@@ -355,7 +374,7 @@ const layoutChecks = [
   ["buffer.ptr", koffi.offsetof(BufferViewType, "ptr"), 0],
   ["buffer.len", koffi.offsetof(BufferViewType, "len"), requestLayout.bufferLength],
   ["transport_open.size", koffi.sizeof(OpenRequestType), requestLayout.openSize],
-  ["transport_open.endpoint", koffi.offsetof(OpenRequestType, "endpoint"), 8],
+  ["transport_open.endpoint", koffi.offsetof(OpenRequestType, "endpoint"), requestLayout.openEndpoint],
   ["transport_open.config", koffi.offsetof(OpenRequestType, "config"), requestLayout.openConfig],
   [
     "transport_open.max_packet_bytes",
@@ -364,14 +383,56 @@ const layoutChecks = [
   ],
   ["transport_open.reserved0", koffi.offsetof(OpenRequestType, "reserved0"), requestLayout.openReserved],
   ["client_connect.size", koffi.sizeof(ClientConnectRequestType), requestLayout.adoptionSize],
-  ["client_connect.reserved0", koffi.offsetof(ClientConnectRequestType, "reserved0"), 12],
-  ["client_connect.transport", koffi.offsetof(ClientConnectRequestType, "transport_connection"), 16],
-  ["server_bind.size", koffi.sizeof(ServerBindRequestType), requestLayout.adoptionSize],
-  ["server_bind.reserved0", koffi.offsetof(ServerBindRequestType, "reserved0"), 12],
-  ["server_bind.transport", koffi.offsetof(ServerBindRequestType, "transport_listener"), 16],
+  ["client_connect.reserved0", koffi.offsetof(ClientConnectRequestType, "reserved0"), requestLayout.adoptionReserved],
+  [
+    "client_connect.transport",
+    koffi.offsetof(ClientConnectRequestType, "transport_connection"),
+    requestLayout.adoptionTransport,
+  ],
+  ["server_bind.size", koffi.sizeof(ServerBindRequestType), requestLayout.serverBindSize],
+  ["server_bind.reserved0", koffi.offsetof(ServerBindRequestType, "reserved0"), requestLayout.adoptionReserved],
+  [
+    "server_bind.transport",
+    koffi.offsetof(ServerBindRequestType, "transport_listener"),
+    requestLayout.adoptionTransport,
+  ],
+  ["server_bind.profiles", koffi.offsetof(ServerBindRequestType, "supported_profiles"), requestLayout.serverProfiles],
+  [
+    "server_bind.cache_objects",
+    koffi.offsetof(ServerBindRequestType, "supported_cache_objects"),
+    requestLayout.serverCacheObjects,
+  ],
+  [
+    "server_bind.max_cache_objects",
+    koffi.offsetof(ServerBindRequestType, "max_cache_objects"),
+    requestLayout.serverMaxCacheObjects,
+  ],
+  [
+    "server_bind.schema_registry",
+    koffi.offsetof(ServerBindRequestType, "schema_registry"),
+    requestLayout.serverSchemaRegistry,
+  ],
+  [
+    "server_bind.application_policy",
+    koffi.offsetof(ServerBindRequestType, "application_policy"),
+    requestLayout.serverApplicationPolicy,
+  ],
   ["session_open.size", koffi.sizeof(SessionOpenRequestType), requestLayout.sessionOpenSize],
-  ["session_open.profile_id", koffi.offsetof(SessionOpenRequestType, "profile_id"), requestLayout.handleSize + 8],
-  ["session_open.schema_id", koffi.offsetof(SessionOpenRequestType, "schema_id"), requestLayout.handleSize + 12],
+  [
+    "session_open.session_handle_id",
+    koffi.offsetof(SessionOpenRequestType, "session_handle_id"),
+    requestLayout.sessionHandleId,
+  ],
+  ["session_open.generation", koffi.offsetof(SessionOpenRequestType, "generation"), requestLayout.sessionGeneration],
+  ["session_open.profile_id", koffi.offsetof(SessionOpenRequestType, "profile_id"), requestLayout.sessionProfileId],
+  ["session_open.schema_id", koffi.offsetof(SessionOpenRequestType, "schema_id"), requestLayout.sessionSchemaId],
+  ["session_open.cache_hints", koffi.offsetof(SessionOpenRequestType, "cache_hints"), requestLayout.sessionCacheHints],
+  ["session_resume.size", koffi.sizeof(SessionResumeRequestType), requestLayout.sessionResumeSize],
+  ["session_resume.ticket", koffi.offsetof(SessionResumeRequestType, "recovery_ticket"), requestLayout.sessionOpenSize],
+  ["session_recovery_outcome.size", koffi.sizeof(SessionRecoveryOutcomeType), 8],
+  ["schema_descriptor.size", koffi.sizeof(SchemaDescriptorHeaderType), 32],
+  ["policy_decision.size", koffi.sizeof(ServerPolicyDecisionType), requestLayout.policyDecisionSize],
+  ["policy_complete.size", koffi.sizeof(ServerPolicyCompleteRequestType), requestLayout.policyCompleteSize],
   ["submit.size", koffi.sizeof(SubmitRequestType), requestLayout.submitSize],
   ["submit.operation_id", koffi.offsetof(SubmitRequestType, "operation_id"), requestLayout.handleSize],
   ["submit.frame_id", koffi.offsetof(SubmitRequestType, "frame_id"), requestLayout.handleSize + 8],
@@ -390,8 +451,12 @@ const layoutChecks = [
   ["runtime_frame.message_type", koffi.offsetof(RuntimeFrameSendRequestType, "message_type"), requestLayout.handleSize],
   ["diagnostic.size", koffi.sizeof(DiagnosticType), diagnosticLayout.size],
   ["diagnostic.status", koffi.offsetof(DiagnosticType, "status"), 0],
-  ["diagnostic.related_connection_id", koffi.offsetof(DiagnosticType, "related_connection_id"), 16],
-  ["diagnostic.related_session_id", koffi.offsetof(DiagnosticType, "related_session_id"), 24],
+  [
+    "diagnostic.related_connection_id",
+    koffi.offsetof(DiagnosticType, "related_connection_id"),
+    diagnosticLayout.connection,
+  ],
+  ["diagnostic.related_session_id", koffi.offsetof(DiagnosticType, "related_session_id"), diagnosticLayout.session],
   [
     "diagnostic.related_operation_id",
     koffi.offsetof(DiagnosticType, "related_operation_id"),
@@ -399,11 +464,11 @@ const layoutChecks = [
   ],
   ["diagnostic.related_frame_id", koffi.offsetof(DiagnosticType, "related_frame_id"), diagnosticLayout.frame],
   ["header.size", koffi.sizeof(RuntimeFrameHeaderType), headerLayout.size],
-  ["header.flags", koffi.offsetof(RuntimeFrameHeaderType, "flags"), 4],
-  ["header.session_id", koffi.offsetof(RuntimeFrameHeaderType, "session_id"), 8],
-  ["header.frame_id", koffi.offsetof(RuntimeFrameHeaderType, "frame_id"), 12],
-  ["header.view_id", koffi.offsetof(RuntimeFrameHeaderType, "view_id"), 16],
-  ["header.route_id", koffi.offsetof(RuntimeFrameHeaderType, "route_id"), 18],
+  ["header.flags", koffi.offsetof(RuntimeFrameHeaderType, "flags"), headerLayout.flags],
+  ["header.session_id", koffi.offsetof(RuntimeFrameHeaderType, "session_id"), headerLayout.session],
+  ["header.frame_id", koffi.offsetof(RuntimeFrameHeaderType, "frame_id"), headerLayout.frame],
+  ["header.view_id", koffi.offsetof(RuntimeFrameHeaderType, "view_id"), headerLayout.view],
+  ["header.route_id", koffi.offsetof(RuntimeFrameHeaderType, "route_id"), headerLayout.route],
   ["header.trace_id", koffi.offsetof(RuntimeFrameHeaderType, "trace_id"), headerLayout.trace],
   ["event.size", koffi.sizeof(EventType), eventLayout.size],
   ["event.kind", koffi.offsetof(EventType, "kind"), 0],
@@ -421,6 +486,166 @@ if (mismatch) {
   throw new Error(`${TRANSPORT_LABEL} native ABI layout mismatch for ${field}: expected ${expected}, got ${actual}.`);
 }
 
+export function selectNativeAbiLayout(pointerBytes: number, u64Align: number) {
+  if (pointerBytes === 8 && u64Align === 8) {
+    return {
+      request: {
+        handleSize: 24,
+        handleId: 8,
+        bufferSize: 16,
+        bufferLength: 8,
+        openSize: 64,
+        openEndpoint: 8,
+        openConfig: 24,
+        openMaxPacket: 48,
+        openReserved: 60,
+        adoptionSize: 40,
+        adoptionReserved: 12,
+        adoptionTransport: 16,
+        serverBindSize: 144,
+        serverProfiles: 40,
+        serverCacheObjects: 56,
+        serverMaxCacheObjects: 72,
+        serverSchemaRegistry: 104,
+        serverApplicationPolicy: 128,
+        sessionOpenSize: 88,
+        sessionHandleId: 32,
+        sessionGeneration: 40,
+        sessionProfileId: 44,
+        sessionSchemaId: 48,
+        sessionCacheHints: 72,
+        sessionResumeSize: 104,
+        policyDecisionSize: 24,
+        policyCompleteSize: 32,
+        submitSize: 72,
+        submitTrace: 48,
+        submitPayload: 56,
+        rolePollSize: 40,
+        acceptTicketSize: 40,
+        acceptWaitSize: 32,
+        runtimeFrameSize: 48,
+      },
+      diagnostic: { size: 48, connection: 16, session: 24, operation: 32, frame: 40 },
+      header: { size: 32, flags: 4, session: 8, frame: 12, view: 16, route: 18, trace: 24 },
+      event: {
+        size: 200,
+        header: 8,
+        connection: 40,
+        session: 64,
+        operation: 88,
+        owner: 112,
+        payload: 136,
+        diagnostic: 152,
+      },
+    } as const;
+  }
+  if (pointerBytes === 4 && u64Align === 8) {
+    return {
+      request: {
+        handleSize: 24,
+        handleId: 8,
+        bufferSize: 8,
+        bufferLength: 4,
+        openSize: 56,
+        openEndpoint: 8,
+        openConfig: 16,
+        openMaxPacket: 40,
+        openReserved: 52,
+        adoptionSize: 40,
+        adoptionReserved: 12,
+        adoptionTransport: 16,
+        serverBindSize: 120,
+        serverProfiles: 40,
+        serverCacheObjects: 48,
+        serverMaxCacheObjects: 56,
+        serverSchemaRegistry: 88,
+        serverApplicationPolicy: 112,
+        sessionOpenSize: 80,
+        sessionHandleId: 32,
+        sessionGeneration: 40,
+        sessionProfileId: 44,
+        sessionSchemaId: 48,
+        sessionCacheHints: 72,
+        sessionResumeSize: 88,
+        policyDecisionSize: 16,
+        policyCompleteSize: 24,
+        submitSize: 64,
+        submitTrace: 48,
+        submitPayload: 56,
+        rolePollSize: 40,
+        acceptTicketSize: 40,
+        acceptWaitSize: 32,
+        runtimeFrameSize: 40,
+      },
+      diagnostic: { size: 48, connection: 16, session: 24, operation: 32, frame: 40 },
+      header: { size: 32, flags: 4, session: 8, frame: 12, view: 16, route: 18, trace: 24 },
+      event: {
+        size: 192,
+        header: 8,
+        connection: 40,
+        session: 64,
+        operation: 88,
+        owner: 112,
+        payload: 136,
+        diagnostic: 144,
+      },
+    } as const;
+  }
+  if (pointerBytes === 4 && u64Align === 4) {
+    return {
+      request: {
+        handleSize: 20,
+        handleId: 4,
+        bufferSize: 8,
+        bufferLength: 4,
+        openSize: 52,
+        openEndpoint: 8,
+        openConfig: 16,
+        openMaxPacket: 36,
+        openReserved: 48,
+        adoptionSize: 36,
+        adoptionReserved: 12,
+        adoptionTransport: 16,
+        serverBindSize: 108,
+        serverProfiles: 36,
+        serverCacheObjects: 44,
+        serverMaxCacheObjects: 52,
+        serverSchemaRegistry: 80,
+        serverApplicationPolicy: 100,
+        sessionOpenSize: 72,
+        sessionHandleId: 24,
+        sessionGeneration: 32,
+        sessionProfileId: 36,
+        sessionSchemaId: 40,
+        sessionCacheHints: 64,
+        sessionResumeSize: 80,
+        policyDecisionSize: 16,
+        policyCompleteSize: 24,
+        submitSize: 56,
+        submitTrace: 40,
+        submitPayload: 48,
+        rolePollSize: 36,
+        acceptTicketSize: 36,
+        acceptWaitSize: 28,
+        runtimeFrameSize: 36,
+      },
+      diagnostic: { size: 40, connection: 16, session: 24, operation: 28, frame: 36 },
+      header: { size: 28, flags: 4, session: 8, frame: 12, view: 16, route: 18, trace: 20 },
+      event: {
+        size: 160,
+        header: 4,
+        connection: 32,
+        session: 52,
+        operation: 72,
+        owner: 92,
+        payload: 112,
+        diagnostic: 120,
+      },
+    } as const;
+  }
+  throw new Error(`${TRANSPORT_LABEL} native ABI does not support pointer=${pointerBytes}, u64-align=${u64Align}.`);
+}
+
 interface NodeSymbols {
   readonly probe: NativeFunction;
   readonly connect: NativeFunction;
@@ -432,16 +657,21 @@ interface NodeSymbols {
   readonly close: NativeFunction;
   readonly shutdownRuntime: NativeFunction;
   readonly releaseBuffer: NativeFunction;
-  readonly createClientSecurity: NativeFunction;
-  readonly createServerSecurity: NativeFunction;
   readonly clientConnect: NativeFunction;
   readonly clientOpenSession: NativeFunction;
+  readonly sessionId: NativeFunction;
+  readonly clientResumeSession: NativeFunction;
+  readonly clientSessionRecoveryTicket: NativeFunction;
   readonly clientSubmit: NativeFunction;
   readonly clientAwaitEvents: NativeFunction;
   readonly clientClose: NativeFunction;
   readonly connectionClose: NativeFunction;
   readonly clientCloseConnection: NativeFunction;
   readonly serverBind: NativeFunction;
+  readonly schemaRegistryCreate: NativeFunction;
+  readonly schemaRegistryInstall: NativeFunction;
+  readonly schemaRegistryRelease: NativeFunction;
+  readonly serverPolicyComplete: NativeFunction;
   readonly serverAcceptBegin: NativeFunction;
   readonly serverAcceptWait: NativeFunction;
   readonly serverAcceptClaim: NativeFunction;
@@ -469,7 +699,7 @@ class NodeTransportBinding implements NnrpNativeTransportBinding {
   constructor(readonly library: LibraryHandle, readonly symbols: NodeSymbols) {}
 
   async probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics> {
-    return await withEndpointSecurity(this.symbols, options, "client", async (config) => {
+    return await withEndpointSecurity(options, async (config) => {
       const result: Partial<NativeProbeResult> = {};
       const status = await invoke<NativeStatus>(this.symbols.probe, [
         {
@@ -493,7 +723,7 @@ class NodeTransportBinding implements NnrpNativeTransportBinding {
   }
 
   async connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection> {
-    return await withEndpointSecurity(this.symbols, options, "client", async (config) => {
+    return await withEndpointSecurity(options, async (config) => {
       const output: Partial<NativeHandle> = {};
       assertStatus(
         await invoke<NativeStatus>(this.symbols.connect, [openRequest(options, config), output]),
@@ -508,7 +738,7 @@ class NodeTransportBinding implements NnrpNativeTransportBinding {
   }
 
   async listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer> {
-    return await withEndpointSecurity(this.symbols, options, "server", async (config) => {
+    return await withEndpointSecurity(options, async (config) => {
       const output: Partial<NativeHandle> = {};
       assertStatus(
         await invoke<NativeStatus>(this.symbols.listen, [openRequest(options, config), output]),
@@ -628,20 +858,50 @@ class NodeTransportServer implements NnrpTransportServer {
     return new NodeTransportConnection(this.symbols, requiredHandle(output, HANDLE_KIND_CONNECTION), this.endpoint);
   }
 
-  async [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<NodeServerRole> {
+  async [SERVER_ROLE_ADOPT](
+    serverId: bigint,
+    generation: number,
+    options: InternalServerRoleOptions,
+  ): Promise<NodeServerRole> {
     if (this.#closed) throw transportError("NNRP_LISTENER_CLOSED", `${TRANSPORT_LABEL} listener is closed.`);
     const output: Partial<NativeHandle> = {};
-    assertStatus(
-      await invoke<NativeStatus>(this.symbols.serverBind, [{
-        server_id: serverId,
-        generation,
-        reserved0: 0,
-        transport_listener: this.handle,
-      }, output]),
-      "server role adoption",
-    );
+    const profiles = Uint16Array.from(options.supportedProfiles);
+    const cacheObjects = Uint32Array.from(options.supportedCacheObjects);
+    const schemaRegistry = createNativeSchemaRegistry(this.symbols, options.schemaDescriptors);
+    let policyCallback: bigint | undefined;
+    try {
+      policyCallback = registerNodeServerPolicy(this.symbols, options.evaluateSession);
+      assertStatus(
+        await invoke<NativeStatus>(this.symbols.serverBind, [{
+          server_id: serverId,
+          generation,
+          reserved0: 0,
+          transport_listener: this.handle,
+          supported_profiles: { ptr: profiles, len: profiles.length },
+          supported_cache_objects: { ptr: cacheObjects, len: cacheObjects.length },
+          max_cache_objects: options.maxCacheObjects,
+          max_cache_object_bytes: options.maxCacheObjectBytes,
+          resume_token_bytes: options.resumeTokenBytes,
+          max_in_flight_operations: options.maxInFlightOperations,
+          granted_operation_credit: options.grantedOperationCredit,
+          lease_ttl_ms: options.leaseTtlMs,
+          resume_window_ms: options.resumeWindowMs,
+          schema_registry: schemaRegistry,
+          application_policy: {
+            user_data: null,
+            begin: policyCallback ?? null,
+          },
+        }, output]),
+        "server role adoption",
+      );
+    } catch (error) {
+      if (policyCallback !== undefined) koffi.unregister(policyCallback);
+      throw error;
+    } finally {
+      assertStatus(this.symbols.schemaRegistryRelease(schemaRegistry) as NativeStatus, "schema registry release");
+    }
     this.#closed = true;
-    return new NodeServerRole(this.symbols, requiredHandle(output));
+    return new NodeServerRole(this.symbols, requiredHandle(output), policyCallback);
   }
 
   close(): void {
@@ -656,27 +916,43 @@ class NodeClientRoleConnection {
 
   constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
 
-  async openSession(
-    requestedSessionId: number,
-    generation: number,
-    profileId: number,
-    schemaId: number,
-    schemaVersion: number,
-  ): Promise<NodeClientRoleSession> {
+  async openSession(options: InternalClientSessionOpenOptions): Promise<NodeClientRoleSession> {
     this.#requireOpen();
+    const cacheHints = Uint32Array.from(options.cacheHints);
     const output: Partial<NativeHandle> = {};
     assertStatus(
-      await invoke<NativeStatus>(this.symbols.clientOpenSession, [{
-        connection: this.handle,
-        requested_session_id: requestedSessionId,
-        generation,
-        profile_id: profileId,
-        schema_id: schemaId,
-        schema_version: schemaVersion,
-      }, output]),
+      await invoke<NativeStatus>(this.symbols.clientOpenSession, [
+        nativeSessionOpenRequest(this.handle, options, cacheHints),
+        output,
+      ]),
       "client session open",
     );
-    return new NodeClientRoleSession(this.symbols, requiredHandle(output));
+    const handle = requiredHandle(output);
+    return new NodeClientRoleSession(this.symbols, handle, readNodeSessionId(this.symbols, handle));
+  }
+
+  async resumeSession(
+    options: InternalClientSessionOpenOptions,
+    recoveryTicket: Uint8Array,
+  ): Promise<NodeClientRoleSession> {
+    this.#requireOpen();
+    const cacheHints = Uint32Array.from(options.cacheHints);
+    const ticket = Buffer.from(recoveryTicket);
+    const output: Partial<NativeHandle> = {};
+    const outcome: Record<string, number> = {};
+    assertStatus(
+      await invoke<NativeStatus>(this.symbols.clientResumeSession, [
+        {
+          open: nativeSessionOpenRequest(this.handle, options, cacheHints),
+          recovery_ticket: { ptr: ticket, len: ticket.byteLength },
+        },
+        output,
+        outcome,
+      ]),
+      "client session resume",
+    );
+    const handle = requiredHandle(output);
+    return new NodeClientRoleSession(this.symbols, handle, readNodeSessionId(this.symbols, handle));
   }
 
   async close(): Promise<void> {
@@ -696,7 +972,11 @@ class NodeClientRoleConnection {
 class NodeClientRoleSession {
   #closed = false;
 
-  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+  constructor(
+    readonly symbols: NodeSymbols,
+    readonly handle: NativeHandle,
+    readonly sessionId: number,
+  ) {}
 
   async submit(
     operationId: bigint,
@@ -745,6 +1025,21 @@ class NodeClientRoleSession {
     );
   }
 
+  recoveryTicket(): Uint8Array | undefined {
+    this.#requireOpen();
+    const ownerOutput: Partial<NativeHandle> = {};
+    const ticketOutput: Partial<NativeBufferView> = {};
+    const status = this.symbols.clientSessionRecoveryTicket(this.handle, ownerOutput, ticketOutput) as NativeStatus;
+    if (status.status_code === 4) return undefined;
+    assertStatus(status, "client recovery ticket snapshot");
+    const owner = requiredHandle(ownerOutput, HANDLE_KIND_BUFFER);
+    try {
+      return copyNativeBytes(ticketOutput as NativeBufferView);
+    } finally {
+      releaseBuffer(this.symbols, owner);
+    }
+  }
+
   async close(): Promise<void> {
     if (this.#closed) return;
     assertStatus(await invoke<NativeStatus>(this.symbols.clientClose, [this.handle]), "client session close");
@@ -756,11 +1051,122 @@ class NodeClientRoleSession {
   }
 }
 
+function createNativeSchemaRegistry(
+  symbols: NodeSymbols,
+  descriptors: readonly NnrpSchemaDescriptorHeader[],
+): NativeHandle {
+  const output: Partial<NativeHandle> = {};
+  assertStatus(symbols.schemaRegistryCreate(output) as NativeStatus, "schema registry create");
+  const registry = requiredHandle(output);
+  try {
+    for (const descriptor of descriptors) {
+      const action = new Uint32Array(1);
+      assertStatus(
+        symbols.schemaRegistryInstall(registry, nativeSchemaDescriptor(descriptor), action) as NativeStatus,
+        "schema registry install",
+      );
+    }
+    return registry;
+  } catch (error) {
+    assertStatus(symbols.schemaRegistryRelease(registry) as NativeStatus, "schema registry release");
+    throw error;
+  }
+}
+
+function nativeSessionOpenRequest(
+  connection: NativeHandle,
+  options: InternalClientSessionOpenOptions,
+  cacheHints: Uint32Array,
+): Record<string, unknown> {
+  return {
+    connection,
+    requested_session_id: options.requestedSessionId,
+    session_handle_id: options.sessionHandleId,
+    generation: options.generation,
+    profile_id: options.profileId,
+    priority_class: options.priorityClass,
+    allow_resume: options.allowResume ? 1 : 0,
+    schema_id: options.schemaId,
+    schema_version: options.schemaVersion,
+    default_deadline_ms: options.defaultDeadlineMillis,
+    max_in_flight_operations: options.maxInFlightOperations,
+    reserved0: 0,
+    lease_ttl_hint_ms: options.leaseTtlHintMillis,
+    resume_token_bytes: options.resumeTokenBytes,
+    cache_hints: { ptr: cacheHints, len: cacheHints.length },
+  };
+}
+
+function nativeSchemaDescriptor(descriptor: NnrpSchemaDescriptorHeader): Record<string, number | bigint> {
+  return {
+    schema_id: descriptor.schemaId,
+    schema_version: descriptor.schemaVersion,
+    profile_id: descriptor.profileId,
+    schema_flags: descriptor.schemaFlags,
+    min_version_major: descriptor.minVersionMajor,
+    max_version_major: descriptor.maxVersionMajor,
+    reserved0: 0,
+    body_bytes: descriptor.bodyBytes,
+    dependency_count: descriptor.dependencyCount,
+    default_stream_semantics: descriptor.defaultStreamSemantics,
+    schema_hash: descriptor.schemaHash,
+  };
+}
+
+function registerNodeServerPolicy(
+  symbols: NodeSymbols,
+  evaluateSession: InternalServerRoleOptions["evaluateSession"],
+): bigint | undefined {
+  if (evaluateSession === undefined) return undefined;
+  return koffi.register((_userData: unknown, requestId: bigint | number, metadata: NativeBufferView) => {
+    let evaluation: Promise<InternalServerPolicyDecision>;
+    try {
+      evaluation = evaluateSession(decodeSessionOpenMetadata(copyNativeBytes(metadata)));
+    } catch (error) {
+      evaluation = Promise.reject(error);
+    }
+    void evaluation.then(
+      (decision) => completeNodeServerPolicy(symbols, BigInt(requestId), decision),
+      (error) =>
+        completeNodeServerPolicy(symbols, BigInt(requestId), {
+          accepted: false,
+          sessionErrorCode: 0x0001_0007,
+          diagnostic: error instanceof Error ? error.message : "Application policy evaluation failed.",
+        }),
+    );
+    return 0;
+  }, koffi.pointer(ServerPolicyBeginCallbackType));
+}
+
+function completeNodeServerPolicy(
+  symbols: NodeSymbols,
+  requestId: bigint,
+  decision: InternalServerPolicyDecision,
+): void {
+  const diagnostic = Buffer.from(new TextEncoder().encode(decision.diagnostic ?? ""));
+  assertStatus(
+    symbols.serverPolicyComplete({
+      request_id: requestId,
+      decision: {
+        accepted: decision.accepted ? 1 : 0,
+        reserved0: [0, 0, 0],
+        session_error_code: decision.sessionErrorCode,
+        diagnostic: { ptr: diagnostic, len: diagnostic.byteLength },
+      },
+    }) as NativeStatus,
+    "server policy completion",
+  );
+}
+
 class NodeServerRole {
   #closed = false;
   readonly #accepts = new Map<string, NativeHandle>();
 
-  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+  constructor(
+    readonly symbols: NodeSymbols,
+    readonly handle: NativeHandle,
+    readonly policyCallback: bigint | undefined,
+  ) {}
 
   async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<NodeServerRoleSession> {
     this.#requireOpen();
@@ -799,7 +1205,8 @@ class NodeServerRole {
         "server session accept claim",
       );
       this.#accepts.delete(acceptKey);
-      return new NodeServerRoleSession(this.symbols, requiredHandle(output.session ?? {}));
+      const handle = requiredHandle(output.session ?? {});
+      return new NodeServerRoleSession(this.symbols, handle, readNodeSessionId(this.symbols, handle));
     } finally {
       if (this.#accepts.delete(acceptKey)) {
         assertStatus(this.symbols.serverAcceptRelease(accept) as NativeStatus, "server session accept release");
@@ -814,7 +1221,11 @@ class NodeServerRole {
       assertStatus(this.symbols.serverAcceptRelease(accept) as NativeStatus, "server session accept release");
     }
     this.#accepts.clear();
-    assertStatus(await invoke<NativeStatus>(this.symbols.connectionClose, [this.handle]), "server close");
+    try {
+      assertStatus(await invoke<NativeStatus>(this.symbols.connectionClose, [this.handle]), "server close");
+    } finally {
+      if (this.policyCallback !== undefined) koffi.unregister(this.policyCallback);
+    }
   }
 
   #requireOpen(): void {
@@ -825,7 +1236,11 @@ class NodeServerRole {
 class NodeServerRoleSession {
   #closed = false;
 
-  constructor(readonly symbols: NodeSymbols, readonly handle: NativeHandle) {}
+  constructor(
+    readonly symbols: NodeSymbols,
+    readonly handle: NativeHandle,
+    readonly sessionId: number,
+  ) {}
 
   async poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]> {
     this.#requireOpen();
@@ -956,16 +1371,19 @@ function bindSymbols(library: LibraryHandle): NodeSymbols {
     close: library.func("nnrp_transport_close", StatusType, [HandleType]),
     shutdownRuntime: library.func("nnrp_transport_runtime_shutdown", StatusType, []),
     releaseBuffer: library.func("nnrp_buffer_release", StatusType, [HandleType]),
-    createClientSecurity: library.func("nnrp_transport_client_security_config_create", StatusType, [
-      SecurityConfigRequestType,
-      outHandle,
-    ]),
-    createServerSecurity: library.func("nnrp_transport_server_security_config_create", StatusType, [
-      SecurityConfigRequestType,
-      outHandle,
-    ]),
     clientConnect: library.func("nnrp_client_connect", StatusType, [ClientConnectRequestType, outHandle]),
     clientOpenSession: library.func("nnrp_client_open_session", StatusType, [SessionOpenRequestType, outHandle]),
+    sessionId: library.func("nnrp_session_id", StatusType, [HandleType, koffi.out(koffi.pointer("uint32_t"))]),
+    clientResumeSession: library.func("nnrp_client_resume_session", StatusType, [
+      SessionResumeRequestType,
+      outHandle,
+      koffi.out(koffi.pointer(SessionRecoveryOutcomeType)),
+    ]),
+    clientSessionRecoveryTicket: library.func("nnrp_client_session_recovery_ticket", StatusType, [
+      HandleType,
+      outHandle,
+      koffi.out(koffi.pointer(BufferViewType)),
+    ]),
     clientSubmit: library.func("nnrp_client_submit", StatusType, [SubmitRequestType, outHandle]),
     clientAwaitEvents: library.func("nnrp_client_await_events", StatusType, [
       RoleEventPollRequestType,
@@ -977,10 +1395,15 @@ function bindSymbols(library: LibraryHandle): NodeSymbols {
     connectionClose: library.func("nnrp_connection_close", StatusType, [HandleType]),
     clientCloseConnection: library.func("nnrp_client_close_connection", StatusType, [HandleType]),
     serverBind: library.func("nnrp_server_bind", StatusType, [ServerBindRequestType, outHandle]),
-    serverAcceptBegin: library.func("nnrp_server_accept_begin", StatusType, [
-      ServerAcceptBeginRequestType,
-      outHandle,
+    schemaRegistryCreate: library.func("nnrp_schema_registry_create", StatusType, [outHandle]),
+    schemaRegistryInstall: library.func("nnrp_schema_registry_install", StatusType, [
+      HandleType,
+      SchemaDescriptorHeaderType,
+      koffi.pointer("uint32_t"),
     ]),
+    schemaRegistryRelease: library.func("nnrp_schema_registry_release", StatusType, [HandleType]),
+    serverPolicyComplete: library.func("nnrp_server_policy_complete", StatusType, [ServerPolicyCompleteRequestType]),
+    serverAcceptBegin: library.func("nnrp_server_accept_begin", StatusType, [ServerAcceptBeginRequestType, outHandle]),
     serverAcceptWait: library.func("nnrp_server_accept_wait", StatusType, [ServerAcceptWaitRequestType]),
     serverAcceptClaim: library.func("nnrp_server_accept_claim", StatusType, [
       ServerAcceptClaimRequestType,
@@ -1036,65 +1459,16 @@ async function readListenerEndpoint(symbols: NodeSymbols, listener: NativeHandle
 }
 
 async function withEndpointSecurity<T>(
-  symbols: NodeSymbols,
   options: NnrpTransportEndpoint,
-  mode: "client" | "server",
   operation: (config: NativeHandle) => Promise<T>,
 ): Promise<T> {
-  if (SECURITY_MODE === "none") {
-    if (options.security !== undefined) {
-      throw transportError(
-        "NNRP_SECURITY_INVALID",
-        `${TRANSPORT_LABEL} endpoints reject transport security configuration.`,
-      );
-    }
-    return await operation(invalidHandle());
-  }
-  if (SECURITY_MODE === "websocket" && new URL(options.endpoint).protocol === "ws:") {
-    if (options.security !== undefined) {
-      throw transportError("NNRP_SECURITY_INVALID", "ws:// endpoints reject security configuration.");
-    }
-    return await operation(invalidHandle());
-  }
-  const config = createSecurityConfig(symbols, options, mode);
-  try {
-    return await operation(config);
-  } finally {
-    closeHandle(symbols, config, "transport security config close");
-  }
-}
-
-function createSecurityConfig(
-  symbols: NodeSymbols,
-  options: NnrpTransportEndpoint,
-  mode: "client" | "server",
-): NativeHandle {
-  const security = options.security;
-  if (security === undefined || security.mode !== mode) {
+  if (options.security !== undefined) {
     throw transportError(
-      "NNRP_SECURITY_REQUIRED",
-      `${TRANSPORT_LABEL} ${mode} requires ${mode} security configuration.`,
+      "NNRP_SECURITY_INVALID",
+      `${TRANSPORT_LABEL} endpoints reject transport security configuration.`,
     );
   }
-  const first = Buffer.from(
-    security.mode === "client" ? new TextEncoder().encode(security.serverName) : security.certificateDer,
-  );
-  const second = Buffer.from(security.mode === "client" ? security.trustedCertificateDer : security.privateKeyPkcs8Der);
-  if (first.byteLength === 0 || second.byteLength === 0) {
-    throw transportError("NNRP_SECURITY_INVALID", `${TRANSPORT_LABEL} ${mode} security fields must be non-empty.`);
-  }
-  const output: Partial<NativeHandle> = {};
-  const fn = mode === "client" ? symbols.createClientSecurity : symbols.createServerSecurity;
-  assertStatus(
-    fn({
-      transport_id: TRANSPORT_ID,
-      flags: 0,
-      first: { ptr: first, len: first.byteLength },
-      second: { ptr: second, len: second.byteLength },
-    }, output) as NativeStatus,
-    `transport ${mode} security config create`,
-  );
-  return requiredHandle(output, HANDLE_KIND_SECURITY_CONFIG);
+  return await operation(invalidHandle());
 }
 
 function normalizePackets(packets: Uint8Array | readonly Uint8Array[]): readonly Uint8Array[] {
@@ -1145,6 +1519,12 @@ function requiredHandle(value: Partial<NativeHandle>, expectedKind?: number): Na
     );
   }
   return handle;
+}
+
+function readNodeSessionId(symbols: NodeSymbols, session: NativeHandle): number {
+  const output = new Uint32Array(1);
+  assertStatus(symbols.sessionId(session, output) as NativeStatus, "negotiated session id");
+  return output[0]!;
 }
 
 function handleKey(handle: NativeHandle): string {
@@ -1231,6 +1611,7 @@ function validateManifest(value: unknown, os: string, arch: string): string {
     "nnrp_transport_read_batch",
     "nnrp_transport_close",
     "nnrp_transport_runtime_shutdown",
+    "nnrp_session_id",
     "nnrp_server_accept_begin",
     "nnrp_server_accept_wait",
     "nnrp_server_accept_claim",

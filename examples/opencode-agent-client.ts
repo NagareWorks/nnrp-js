@@ -12,10 +12,9 @@ async function submitAgentTurn(turn: AgentTurn): Promise<void> {
     endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider()],
     transportPolicy: "auto",
-    sessionDefaults: { inputProfile: "token", metadata: { app: "opencode-agent" } },
   });
 
-  const session = client.openSession();
+  const session = await client.openSession();
 
   try {
     await session.submitNoWait(createTokenSubmitRequest({

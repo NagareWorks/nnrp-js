@@ -50,7 +50,14 @@ npm install @nnrp/native-client @nnrp/transport-tcp
 ```
 
 ```ts
-import { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY } from "@nnrp/core";
+import {
+  createTokenSubmitRequest,
+  NNRP_DEFAULT_SUBMIT_HEADER,
+  NNRP_DEFAULT_SUBMIT_POLICY,
+  NNRP_STANDARD_PROFILE_TOKEN,
+  NNRP_TOKEN_DELTA_SCHEMA_ID,
+  NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+} from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
@@ -60,7 +67,11 @@ const client = await openNativeClient({
   transportPolicy: "auto",
 });
 
-const session = client.openSession({ inputProfile: "token" });
+const session = await client.openSession({
+  profileId: NNRP_STANDARD_PROFILE_TOKEN,
+  schemaId: NNRP_TOKEN_DELTA_SCHEMA_ID,
+  schemaVersion: NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+});
 const result = await session.submit(createTokenSubmitRequest({
   identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
   policy: NNRP_DEFAULT_SUBMIT_POLICY,
@@ -88,7 +99,9 @@ are never serialized into operation payloads.
 Native and browser clients expose the same submit, cancellation, deadline, priority, progress, partial-result, runtime
 object, cache reference, and event polling concepts. `@nnrp/native-server` additionally exposes listen/accept and
 server-only response controls. Public methods use structured Preview4 metadata and `bigint` for wire `u64` fields;
-native handles, WASM handles, and transport-library handles remain private.
+native handles, WASM handles, and transport-library handles remain private. Session open and resume are asynchronous,
+and resumable sessions expose runtime-issued tickets through `session.recoveryTicket()` for
+`client.resumeSession(ticket)`.
 
 ## Conformance And Benchmarks
 

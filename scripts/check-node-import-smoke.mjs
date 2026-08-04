@@ -239,8 +239,14 @@ async function verifyNativeTransportLoopbacks() {
       transports: [createTcpTransportProvider()],
       transportPolicy: "force-tcp",
     });
-    const clientSession = client.openSession({ sessionId: "node-role-smoke", inputProfile: "token" });
+    const clientSession = await client.openSession({ requestedSessionId: 0 });
     const serverSession = await accepting;
+    if (clientSession.sessionId === 0 || clientSession.sessionId !== serverSession.sessionId) {
+      throw new Error(
+        "Node role smoke negotiated mismatched session identity " +
+          "(client=" + clientSession.sessionId + ", server=" + serverSession.sessionId + ")",
+      );
+    }
     for (let exchange = 1; exchange <= 2; exchange += 1) {
       await clientSession.submitNoWait(createTokenSubmitRequest({
         identity: {

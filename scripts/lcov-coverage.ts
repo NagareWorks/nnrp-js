@@ -53,7 +53,12 @@ export function parseLcovCoverage(lcov: string, excluded: ReadonlySet<string>): 
 
 function normalizeSourcePath(path: string): string {
   const normalized = path.replaceAll("\\", "/");
-  const marker = "/nnrp-js/";
-  const markerIndex = normalized.lastIndexOf(marker);
-  return markerIndex === -1 ? normalized : normalized.slice(markerIndex + marker.length);
+  for (const sourceRoot of ["packages/", "scripts/"]) {
+    const marker = `/${sourceRoot}`;
+    const markerIndex = normalized.lastIndexOf(marker);
+    if (markerIndex !== -1) {
+      return normalized.slice(markerIndex + 1);
+    }
+  }
+  return normalized;
 }

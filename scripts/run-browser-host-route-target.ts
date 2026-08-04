@@ -43,7 +43,7 @@ async function run(): Promise<void> {
     providerRoutes: { websocket: { endpoint: resolvedRoute.locator } },
     transportPolicy: "force-websocket",
   });
-  const session = client.openSession({ sessionId: `host-route-${scenario.id}`, inputProfile: "token" });
+  const session = await client.openSession();
   try {
     const submission = session.submitNoWait(createTokenSubmitRequest({
       identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },

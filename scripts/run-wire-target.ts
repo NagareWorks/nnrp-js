@@ -340,7 +340,7 @@ async function handleProgressClient(options: {
   readonly security?: NnrpTransportClientSecurity;
 }): Promise<void> {
   const client = await connectWithRetry(options);
-  const session = client.openSession({ inputProfile: "token" });
+  const session = await client.openSession();
   try {
     await session.submitNoWait(tokenSubmit(301n, 301, REQUEST_BODY));
     const progress = expectMessage(

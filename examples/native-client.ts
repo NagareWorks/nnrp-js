@@ -7,10 +7,9 @@ const client = await openNativeClient({
   endpoint: "nnrp://127.0.0.1:4433/session/default",
   transports: [createTcpTransportProvider(), createQuicTransportProvider()],
   transportPolicy: "auto",
-  sessionDefaults: { inputProfile: "token", metadata: { app: "nnrp-native-client-example" } },
 });
 
-const session = client.openSession();
+const session = await client.openSession();
 
 try {
   const result = await session.submit(createTokenSubmitRequest({

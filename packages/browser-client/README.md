@@ -32,7 +32,7 @@ const client = runtime.connect({
   endpoint: "nnrps://example.test/session/default",
   providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
 });
-const session = client.openSession({ inputProfile: "structured_event" });
+const session = await client.openSession();
 
 await session.submit(createTypedPayloadSubmitRequest({
   identity: { operationId: 1n, frameId: 1, header: NNRP_DEFAULT_SUBMIT_HEADER },
@@ -50,6 +50,7 @@ await runtime.close();
 ```
 
 The browser client mirrors the native client control, object, cache, and event concepts. It exports no server API and
-loads no `.dll`, `.so`, or `.dylib`.
+loads no `.dll`, `.so`, or `.dylib`. One browser carrier connection can own multiple protocol sessions; session open and
+resume remain Rust WASM operations, and recovery tickets stay opaque to application code.
 
 SDK reference: https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/api/browser-client

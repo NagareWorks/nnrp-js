@@ -66,10 +66,10 @@ Deno.test("@nnrp/native-client opens a client with explicit transport providers"
     endpoint: "nnrp://127.0.0.1:4433/session/default",
     ffi: { mode: "test" },
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
-    sessionDefaults: { inputProfile: "tensor", metadata: { app: "agent" } },
+    sessionDefaults: { requestedSessionId: 17, profileId: 1, defaultDeadlineMillis: 700 },
   });
 
-  const session = client.openSession({ metadata: { request: "one" } });
+  const session = await client.openSession({ defaultDeadlineMillis: 300 });
 
   assertEquals(client.endpoint, "nnrp://127.0.0.1:4433/session/default");
   assertEquals(client.runtime.manifest.transports, ["tcp"]);
@@ -100,8 +100,10 @@ Deno.test("@nnrp/native-client opens a client with explicit transport providers"
     "cache.reference",
   ]);
   assertEquals("listen" in client.runtime, false);
-  assertEquals(session.sessionId, "native-session-1");
-  assertEquals(session.options.metadata, { app: "agent", request: "one" });
+  assertEquals(session.sessionId, 17);
+  assertEquals(session.options.profileId, 1);
+  assertEquals(session.options.defaultDeadlineMillis, 300);
+  assertEquals(session.options.maxInFlightOperations, 4);
   await client.close();
 });
 
@@ -164,7 +166,7 @@ Deno.test("@nnrp/native-client preserves not-connected diagnostics", async () =>
     endpoint: "nnrp://127.0.0.1:4433/session/default",
     ffi: { mode: "test" },
   });
-  const session = client.openSession();
+  const session = await client.openSession({ requestedSessionId: 1 });
 
   const error = await assertRejects(
     () => session.submit(tokenSubmit(1n, 1, new Uint8Array([1]))),
@@ -172,6 +174,34 @@ Deno.test("@nnrp/native-client preserves not-connected diagnostics", async () =>
   );
 
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_BINDING_NOT_CONNECTED");
+});
+
+Deno.test("@nnrp/native-client rejects a zero session id from an explicit FFI binding", async () => {
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    ffi: { mode: "test" },
+  });
+
+  await assertRejects(
+    () => client.openSession(),
+    RangeError,
+    "negotiated sessionId must be a non-zero u32",
+  );
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client rejects polling the reserved zero session id", async () => {
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    ffi: { mode: "test" },
+  });
+
+  await assertRejects(
+    () => client.nextSessionEvent(0),
+    RangeError,
+    "negotiated sessionId must be a non-zero u32",
+  );
+  await client.close();
 });
 
 Deno.test("@nnrp/native-client selects the best installed transport provider", async () => {
@@ -554,6 +584,7 @@ Deno.test("@nnrp/native-client starts the Rust session handshake when the sessio
               await handshake;
               return {
                 handle: { kind: 2, id: 1n, generation: 1, flags: 0 },
+                sessionId: 101,
                 submit: (_operationId: bigint, _frameId: number, _payload: Uint8Array) => {
                   submitCalls += 1;
                   return Promise.resolve({ kind: 3, id: 1n, generation: 1, flags: 0 });
@@ -573,18 +604,20 @@ Deno.test("@nnrp/native-client starts the Rust session handshake when the sessio
     transportPolicy: "force-tcp",
   });
 
-  const session = client.openSession({ sessionId: "eager-handshake" });
+  const pendingSession = client.openSession({ requestedSessionId: 0 });
   assertEquals(openSessionCalls, 1);
-  let submitSettled = false;
-  const submit = session.submitNoWait(tokenSubmit(1n, 1)).then((operationId) => {
-    submitSettled = true;
-    return operationId;
+  let sessionSettled = false;
+  const observedSession = pendingSession.then((session) => {
+    sessionSettled = true;
+    return session;
   });
   await Promise.resolve();
-  assertEquals(submitSettled, false);
+  assertEquals(sessionSettled, false);
 
   releaseHandshake?.();
-  assertEquals(await submit, 1n);
+  const session = await observedSession;
+  assertEquals(session.sessionId, 101);
+  assertEquals(await session.submitNoWait(tokenSubmit(1n, 1)), 1n);
   assertEquals(submitCalls, 1);
   await session.close();
   await client.close();
@@ -629,6 +662,7 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
               const openedSession = ++openedSessions;
               return Promise.resolve({
                 handle: { kind: 2, id: 1n, generation: 1, flags: 0 },
+                sessionId: openedSession === 1 ? 12 : 13,
                 submit: () => Promise.resolve({ kind: 4, id: 70_042n, generation: 1, flags: 0 }),
                 poll: () =>
                   Promise.resolve(
@@ -649,7 +683,7 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
     transports: [createTcpTransportProvider({ binding })],
     transportPolicy: "force-tcp",
   });
-  const session = client.openSession({ sessionId: "operation-id-match" });
+  const session = await client.openSession({ requestedSessionId: 12 });
 
   const result = await session.submit(tokenSubmit(42n, 7));
 
@@ -660,7 +694,7 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
     assertEquals(result.event.event.tail, { type: "body", body: new Uint8Array([42]) });
   }
 
-  const mismatchSession = client.openSession({ sessionId: "operation-frame-mismatch" });
+  const mismatchSession = await client.openSession({ requestedSessionId: 13 });
   const mismatch = await assertRejects(
     () => mismatchSession.submit(tokenSubmit(43n, 9)),
     NnrpProtocolError,
@@ -668,6 +702,82 @@ Deno.test("@nnrp/native-client matches role results by protocol operation id", a
   assertEquals(mismatch.diagnostic.code, "NNRP_OPERATION_FRAME_MISMATCH");
   await mismatchSession.close();
   await session.close();
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client releases routed event state when a session closes", async () => {
+  let openedSessions = 0;
+  const roleEvent = (marker: number) => {
+    const payload = new Uint8Array(65);
+    payload[64] = marker;
+    return {
+      kind: 6,
+      headerPresent: true,
+      messageType: NnrpMessageType.ResultPush,
+      versionMajor: 1,
+      wireFormat: 0,
+      headerFlags: 0,
+      wireSessionId: 23,
+      connection: { kind: 1, id: 1n, generation: 1, flags: 0 },
+      session: { kind: 2, id: 23n, generation: 1, flags: 0 },
+      operation: { kind: 4, id: BigInt(marker), generation: 1, flags: 0 },
+      relatedOperationId: BigInt(marker),
+      relatedFrameId: marker,
+      frameId: marker,
+      viewId: 0,
+      routeId: 0,
+      traceId: 0n,
+      payload,
+    };
+  };
+  const binding: NnrpNativeTransportBinding = {
+    ...fakeTransportBinding("tcp"),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "tcp",
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+        [CLIENT_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            openSession: () => {
+              const openedSession = ++openedSessions;
+              let polled = false;
+              return Promise.resolve({
+                handle: { kind: 2, id: BigInt(openedSession), generation: 1, flags: 0 },
+                sessionId: 23,
+                submit: () => Promise.resolve({ kind: 4, id: 1n, generation: 1, flags: 0 }),
+                poll: () => {
+                  if (polled) return Promise.resolve([]);
+                  polled = true;
+                  return Promise.resolve(openedSession === 1 ? [roleEvent(1), roleEvent(2)] : [roleEvent(3)]);
+                },
+                sendRuntimeFrame: () => Promise.resolve(),
+                close: () => Promise.resolve(),
+              });
+            },
+            close: () => Promise.resolve(),
+          }),
+      } as NnrpTransportConnection),
+  };
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding })],
+    transportPolicy: "force-tcp",
+  });
+
+  const firstSession = await client.openSession({ requestedSessionId: 23 });
+  const firstEvent = await client.nextSessionEvent(23);
+  assertEquals(firstEvent.tail, { type: "body", body: new Uint8Array([1]) });
+  await firstSession.close();
+
+  const replacementSession = await client.openSession({ requestedSessionId: 23 });
+  const replacementEvent = await client.nextSessionEvent(23);
+  assertEquals(replacementEvent.tail, { type: "body", body: new Uint8Array([3]) });
+
+  await replacementSession.close();
   await client.close();
 });
 
@@ -716,7 +826,7 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
       },
     },
   });
-  const session = client.openSession({ sessionId: "explicit-cache" });
+  const session = await client.openSession({ requestedSessionId: 14 });
 
   await session.submit(tokenSubmit(1n, 1));
 
@@ -758,7 +868,7 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
       },
     },
   });
-  const session = client.openSession({ sessionId });
+  const session = await client.openSession({ requestedSessionId: 1 });
   assertEquals(await session.submitNoWait(tokenSubmit(7n, 70)), 7n);
 
   await session.cancel({
@@ -818,7 +928,7 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
       },
     },
   });
-  const session = client.openSession({ sessionId: "submit-cancel" });
+  const session = await client.openSession({ requestedSessionId: 16 });
   await session.cancel({
     operationId: 40n,
     controlSequence: 10n,
@@ -874,7 +984,7 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
       },
     },
   });
-  const session = client.openSession({ sessionId: "submit-listener" });
+  const session = await client.openSession({ requestedSessionId: 17 });
   const preAborted = new AbortController();
   preAborted.abort("before-dispatch");
 
@@ -901,6 +1011,47 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   assertEquals(controls[1]?.metadata.reasonCode, 3);
 });
 
+Deno.test("@nnrp/native-client applies patched submit capacity policy", async () => {
+  let submitCalls = 0;
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+    ffi: {
+      mode: "test",
+      patchSession: ({ sessionOptions }) => ({
+        accepted: true,
+        sessionId: sessionOptions.requestedSessionId,
+      }),
+      submitResultCompact: ({ submit }) => {
+        submitCalls += 1;
+        return createSuccessResult(submit.operationId, submit.frameId, new Uint8Array());
+      },
+    },
+  });
+  const session = await client.openSession({ requestedSessionId: 18 });
+
+  await session.patch({ initialCredits: 0, submitCapacityPolicy: "await" });
+  let waitingSettled = false;
+  const waiting = session.submit(tokenSubmit(61n, 61)).then((result) => {
+    waitingSettled = true;
+    return result;
+  });
+  await Promise.resolve();
+  assertEquals(waitingSettled, false);
+  assertEquals(submitCalls, 0);
+
+  await session.patch({ initialCredits: 1 });
+  assertEquals((await waiting).operationId, 61n);
+  assertEquals(submitCalls, 1);
+
+  await session.patch({ initialCredits: 0, submitCapacityPolicy: "reject" });
+  assertEquals((await session.submit(tokenSubmit(62n, 62))).operationId, 62n);
+  assertEquals(submitCalls, 2);
+
+  await session.close();
+  await client.close();
+});
+
 Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime API", async () => {
   const seen: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number; readonly payload: Uint8Array }> =
     [];
@@ -914,7 +1065,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
       },
     },
   });
-  const session = client.openSession({ sessionId: "runtime-api" });
+  const session = await client.openSession({ requestedSessionId: 18 });
   const one = new Uint8Array([1]);
   const control = {
     operationId: 1n,
@@ -1127,7 +1278,7 @@ Deno.test("@nnrp/native-client enforces operation-owned runtime object lifecycle
       },
     },
   });
-  const session = client.openSession({ sessionId: "runtime-object-lifecycle" });
+  const session = await client.openSession({ requestedSessionId: 19 });
   const reference = {
     objectId: 41n,
     operationId: 7n,
@@ -1390,7 +1541,7 @@ class TrackingAbortSignal {
 function preview4RuntimeCapabilities(): NnrpNativeRuntimeCapabilities {
   return {
     abiMajor: 4,
-    abiMinor: 3,
+    abiMinor: 4,
     abiPatch: 0,
     protocolMajor: 1,
     protocolWireFormat: 0,

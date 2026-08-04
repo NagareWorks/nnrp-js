@@ -23,12 +23,14 @@ import {
   decodeNnrpRuntimeEvent,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
+  decodeSessionOpenMetadata,
   decodeTypedPayloadDescriptor,
   encodeCacheInvalidateMetadata,
   encodeResultPushPayload,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeSessionOpenMetadata,
   encodeSubmitMetadata,
   encodeSubmitPayload,
   encodeTypedPayloadDescriptor,
@@ -36,6 +38,8 @@ import {
   isStandardInputProfile,
   MemoryLocationHint,
   NNRP_PROTOCOL_VERSION,
+  NNRP_SESSION_OPEN_METADATA_BYTES,
+  NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES,
   NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES,
   NnrpBackpressureLevel,
   NnrpBudgetPolicy,
@@ -62,8 +66,16 @@ import {
   NnrpResultHintBudgetPolicy,
   NnrpResultHintCongestionState,
   NnrpResultHintReason,
+  NnrpSchemaDescriptorFlags,
+  NnrpSchemaRegistry,
+  NnrpSchemaRegistryAction,
+  NnrpSchemaRegistryFailure,
   type NnrpServerProviderRoutes,
   NnrpSessionCloseReason,
+  NnrpSessionPriorityClass,
+  NnrpSessionRecoveryTicket,
+  NnrpStandardProfile,
+  NnrpStreamSemantics,
   type NnrpSubmitRequest,
   NnrpTensorInputProfile,
   NnrpTileIndexMode,
@@ -92,6 +104,7 @@ import {
   RuntimeRole,
   selectTransport,
   throwIfResultDrop,
+  tokenDeltaSchemaDescriptor,
   validateEventPollOptions,
   validateSessionMetadata,
 } from "../src/index.ts";
@@ -121,6 +134,87 @@ function submitPolicy() {
   };
 }
 
+Deno.test("@nnrp/core round-trips canonical SESSION_OPEN metadata", () => {
+  const metadata = {
+    requestedSessionId: 7,
+    profileId: 2,
+    priorityClass: NnrpSessionPriorityClass.Interactive,
+    sessionFlags: 0x0f,
+    schemaId: 0x1001,
+    schemaVersion: 3,
+    defaultDeadlineMillis: 500,
+    maxInFlightOperations: 4,
+    leaseTtlHintMillis: 30_000,
+    resumeTokenBytes: 24,
+    authBytes: 5,
+    sessionExtensionBytes: 6,
+    clientSessionTag: 0x0102_0304_0506_0708n,
+  };
+  const encoded = encodeSessionOpenMetadata(metadata);
+  assertEquals(encoded.byteLength, NNRP_SESSION_OPEN_METADATA_BYTES);
+  assertEquals(decodeSessionOpenMetadata(encoded), metadata);
+
+  const reserved = encoded.slice();
+  reserved[22] = 1;
+  assertThrows(() => decodeSessionOpenMetadata(reserved), RangeError, "reserved0");
+  assertThrows(
+    () => encodeSessionOpenMetadata({ ...metadata, sessionFlags: 0x10 }),
+    RangeError,
+    "reserved bits",
+  );
+  assertThrows(
+    () => encodeSessionOpenMetadata({ ...metadata, priorityClass: 3 as NnrpSessionPriorityClass }),
+    RangeError,
+    "priorityClass",
+  );
+  assertThrows(
+    () =>
+      encodeSessionOpenMetadata({
+        ...metadata,
+        priorityClass: "Balanced" as unknown as NnrpSessionPriorityClass,
+      }),
+    RangeError,
+    "priorityClass",
+  );
+  for (const sessionFlags of [Number.NaN, 1.5]) {
+    assertThrows(
+      () => encodeSessionOpenMetadata({ ...metadata, sessionFlags }),
+      RangeError,
+      "sessionFlags",
+    );
+  }
+});
+
+Deno.test("@nnrp/core persists runtime-issued recovery tickets canonically", () => {
+  const encoded = new Uint8Array(NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES + 4);
+  encoded.set([0x4e, 0x52, 0x54, 0x4b]);
+  const view = new DataView(encoded.buffer);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint32(8, 9, true);
+  view.setUint32(12, 4, true);
+  view.setUint32(16, 120_000, true);
+  view.setBigUint64(20, 77n, true);
+  encoded.set([1, 2, 3, 4], NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES);
+
+  const ticket = NnrpSessionRecoveryTicket.fromBytes(encoded);
+  assertEquals(ticket.sessionId, 9);
+  assertEquals(ticket.resumeToken, new Uint8Array([1, 2, 3, 4]));
+  assertEquals(ticket.resumeFromOperationId, 77n);
+  assertEquals(ticket.resumeWindowMillis, 120_000);
+  assertEquals(ticket.toBytes(), encoded);
+
+  const exposedToken = ticket.resumeToken;
+  exposedToken[0] = 99;
+  assertEquals(ticket.resumeToken, new Uint8Array([1, 2, 3, 4]));
+  assertEquals(ticket.toBytes(), encoded);
+
+  const nonCanonical = encoded.slice();
+  nonCanonical[6] = 0;
+  assertThrows(() => NnrpSessionRecoveryTicket.fromBytes(nonCanonical), RangeError, "without its presence flag");
+  assertThrows(() => NnrpSessionRecoveryTicket.fromBytes(encoded.subarray(0, encoded.length - 1)), RangeError);
+});
+
 Deno.test("@nnrp/core round-trips the current explicit-kind typed payload descriptor", () => {
   const descriptor = {
     profileId: 2,
@@ -147,6 +241,66 @@ Deno.test("@nnrp/core round-trips the current explicit-kind typed payload descri
         payloadKind: 0x03 as NnrpPayloadKind,
       }),
     RangeError,
+  );
+});
+
+Deno.test("@nnrp/core owns the frozen schema registry semantics", () => {
+  const registry = new NnrpSchemaRegistry();
+  const token = tokenDeltaSchemaDescriptor();
+
+  assertEquals(registry.snapshot(), []);
+  assertEquals(registry.install(token), NnrpSchemaRegistryAction.Installed);
+  assertEquals(registry.install(token), NnrpSchemaRegistryAction.AlreadyInstalled);
+  assertEquals(registry.lookup(token.schemaId, token.schemaVersion), token);
+  registry.validateBinding({
+    profileId: NnrpStandardProfile.Token,
+    payloadKind: NnrpPayloadKind.TokenChunk,
+    descriptorFlags: NnrpTypedPayloadDescriptorFlags.Partial,
+    schemaId: token.schemaId,
+    schemaVersion: token.schemaVersion,
+    streamSemantics: NnrpStreamSemantics.Append,
+    offset: 0,
+    length: 4,
+  });
+
+  const snapshot = registry.snapshot();
+  assertEquals(Object.isFrozen(snapshot), true);
+  assertEquals(registry.invalidate(token.schemaId, token.schemaVersion), NnrpSchemaRegistryAction.Invalidated);
+  const missing = assertThrows(() => registry.lookup(token.schemaId, token.schemaVersion), NnrpProtocolError);
+  assertEquals(missing.diagnostic.cause, NnrpSchemaRegistryFailure.Unknown);
+});
+
+Deno.test("@nnrp/core rejects conflicting and incompatible schema bindings", () => {
+  const token = tokenDeltaSchemaDescriptor();
+  const registry = new NnrpSchemaRegistry([token]);
+  const conflict = assertThrows(
+    () => registry.install({ ...token, schemaHash: token.schemaHash + 1n }),
+    NnrpProtocolError,
+  );
+  assertEquals(conflict.diagnostic.cause, NnrpSchemaRegistryFailure.HashConflict);
+  const incompatible = assertThrows(
+    () =>
+      registry.validateBinding({
+        profileId: NnrpStandardProfile.Tensor,
+        payloadKind: NnrpPayloadKind.Tensor,
+        descriptorFlags: NnrpTypedPayloadDescriptorFlags.None,
+        schemaId: token.schemaId,
+        schemaVersion: token.schemaVersion,
+        streamSemantics: NnrpStreamSemantics.Snapshot,
+        offset: 0,
+        length: 4,
+      }),
+    NnrpProtocolError,
+  );
+  assertEquals(incompatible.diagnostic.cause, NnrpSchemaRegistryFailure.Incompatible);
+  assertThrows(
+    () =>
+      registry.install({
+        ...token,
+        profileId: 99,
+        schemaFlags: NnrpSchemaDescriptorFlags.None,
+      }),
+    NnrpProtocolError,
   );
 });
 
