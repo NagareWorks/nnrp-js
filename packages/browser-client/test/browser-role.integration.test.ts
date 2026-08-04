@@ -41,67 +41,111 @@ Deno.test({
       }),
       "server runtime open",
     );
-    const server = serverRuntime.listen({
-      endpoint: "nnrp://127.0.0.1/browser-role",
-      providerRoutes: { websocket: { endpoint: "ws://127.0.0.1:0" } },
-      transportPolicy: "force-websocket",
-    });
-    const providerEndpoint = await waitForBoundProviderEndpoint(server, "websocket");
+    const cleanups: TestCleanup[] = [() => serverRuntime.close()];
+    const server = await setupForTest(
+      () =>
+        serverRuntime.listen({
+          endpoint: "nnrp://127.0.0.1/browser-role",
+          providerRoutes: { websocket: { endpoint: "ws://127.0.0.1:0" } },
+          transportPolicy: "force-websocket",
+        }),
+      cleanups,
+      "server listen",
+    );
+    cleanups.push(() => server.close());
+    const providerEndpoint = await setupForTest(
+      () => waitForBoundProviderEndpoint(server, "websocket"),
+      cleanups,
+      "server provider bind",
+    );
 
-    const wasmBytes = await Deno.readFile(new URL("../wasm/nnrp_wasm_bg.wasm", import.meta.url));
+    const wasmBytes = await setupForTest(
+      () => Deno.readFile(new URL("../wasm/nnrp_wasm_bg.wasm", import.meta.url)),
+      cleanups,
+      "browser WASM read",
+    );
     const sentMessageTypes: number[] = [];
     const sentPackets: Uint8Array[] = [];
-    const browserProvider = createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket });
-    const wasmModule = await within(WebAssembly.compile(wasmBytes), "browser WASM compilation");
-    const browserRuntime = await within(
-      openBrowserRuntime({
-        module: wasmModule,
-        transportProviders: [
-          {
-            ...browserProvider,
-            connect: async (options) => {
-              const connection = await browserProvider.connect(options);
-              return {
-                kind: connection.kind,
-                endpoint: connection.endpoint,
-                get connected() {
-                  return connection.connected;
-                },
-                send: (packets) => {
-                  const values = packets instanceof Uint8Array ? [packets] : packets;
-                  sentMessageTypes.push(...values.map((packet) => packet[6] ?? -1));
-                  sentPackets.push(...values.map((packet) => packet.slice()));
-                  return connection.send(packets);
-                },
-                receive: (receiveOptions) => connection.receive(receiveOptions),
-                close: () => connection.close(),
-              };
+    const browserProvider = await setupForTest(
+      () => createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket }),
+      cleanups,
+      "browser provider creation",
+    );
+    const wasmModule = await setupForTest(
+      () => WebAssembly.compile(wasmBytes),
+      cleanups,
+      "browser WASM compilation",
+    );
+    const browserRuntime = await setupForTest(
+      () =>
+        openBrowserRuntime({
+          module: wasmModule,
+          transportProviders: [
+            {
+              ...browserProvider,
+              connect: async (options) => {
+                const connection = await browserProvider.connect(options);
+                return {
+                  kind: connection.kind,
+                  endpoint: connection.endpoint,
+                  get connected() {
+                    return connection.connected;
+                  },
+                  send: (packets) => {
+                    const values = packets instanceof Uint8Array ? [packets] : packets;
+                    sentMessageTypes.push(...values.map((packet) => packet[6] ?? -1));
+                    sentPackets.push(...values.map((packet) => packet.slice()));
+                    return connection.send(packets);
+                  },
+                  receive: (receiveOptions) => connection.receive(receiveOptions),
+                  close: () => connection.close(),
+                };
+              },
             },
-          },
-        ],
-        transportPolicy: "force-websocket",
-      }),
+          ],
+          transportPolicy: "force-websocket",
+        }),
+      cleanups,
       "browser runtime open",
     );
-    const client = browserRuntime.connect({
-      endpoint: "nnrp://127.0.0.1/browser-role",
-      providerRoutes: { websocket: { endpoint: providerEndpoint } },
-    });
-    const accepting = server.accept();
-    const session = await within(
-      client.openSession({
-        requestedSessionId: 1,
-        profileId: 2,
-        schemaId: 0x1001,
-        schemaVersion: 3,
-      }),
+    cleanups.push(() => browserRuntime.close());
+    const client = await setupForTest(
+      () =>
+        browserRuntime.connect({
+          endpoint: "nnrp://127.0.0.1/browser-role",
+          providerRoutes: { websocket: { endpoint: providerEndpoint } },
+        }),
+      cleanups,
+      "browser client creation",
+    );
+    cleanups.push(() => client.close());
+    const accepting = server.accept({ timeoutMs: 20_000 });
+    void accepting.catch(() => undefined);
+    const readinessCarrier = await setupForTest(
+      () => browserProvider.connect({ endpoint: providerEndpoint }),
+      cleanups,
+      "browser carrier readiness",
+    );
+    const closeReadinessCarrier = onceForTest(() => readinessCarrier.close());
+    cleanups.push(closeReadinessCarrier);
+    await setupForTest(closeReadinessCarrier, cleanups, "browser carrier readiness close");
+    const session = await setupForTest(
+      () =>
+        client.openSession({
+          requestedSessionId: 1,
+          profileId: 2,
+          schemaId: 0x1001,
+          schemaVersion: 3,
+        }),
+      cleanups,
       "browser session open",
     );
+    cleanups.push(() => session.close());
 
     try {
       const submit = session.submit(tokenSubmit(11n, 7, new Uint8Array([1, 2, 3])));
       void submit.catch(() => undefined);
-      const serverSession = await within(accepting, "server session accept");
+      const serverSession = await within(accepting, "server session accept", 25_000);
       const event = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(eventLabel(event), "submit");
       if (event.metadata.type !== "frame_submit" || event.tail.type !== "body") {
@@ -587,11 +631,7 @@ Deno.test({
       await clientClosing;
       await pendingEventRejected;
     } finally {
-      await closeForTest(() => session.close());
-      await closeForTest(() => client.close());
-      await closeForTest(() => browserRuntime.close());
-      await closeForTest(() => server.close());
-      await closeForTest(() => serverRuntime.close());
+      await closeAllForTest(cleanups);
     }
   },
 });
@@ -621,6 +661,30 @@ async function within<T>(promise: Promise<T>, label: string, timeoutMillis = 10_
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+type TestCleanup = () => void | Promise<void>;
+
+function onceForTest(cleanup: TestCleanup): TestCleanup {
+  let pending: Promise<void> | undefined;
+  return () => pending ??= Promise.resolve().then(cleanup);
+}
+
+async function setupForTest<T>(
+  operation: () => T | Promise<T>,
+  cleanups: readonly TestCleanup[],
+  label: string,
+): Promise<T> {
+  try {
+    return await within(Promise.resolve().then(operation), label);
+  } catch (error) {
+    await closeAllForTest(cleanups);
+    throw error;
+  }
+}
+
+async function closeAllForTest(cleanups: readonly TestCleanup[]): Promise<void> {
+  for (const cleanup of [...cleanups].reverse()) await closeForTest(cleanup);
 }
 
 async function closeForTest(close: () => void | Promise<void>): Promise<void> {

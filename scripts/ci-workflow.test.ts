@@ -97,9 +97,20 @@ Deno.test("CI isolates real browser integration lifecycles and bounds the build 
   );
   assertStringIncludes(coverageGate, "--coverage=${coverageDir}/raw/${coverageRun.name}");
   assertStringIncludes(coverageGate, 'lcovReports.join("\\n")');
+  assertStringIncludes(browserRoleIntegration, "const client = await setupForTest(");
   assertEquals(
-    browserRoleIntegration.indexOf("const accepting = server.accept();") >
-      browserRoleIntegration.indexOf("const client = browserRuntime.connect({"),
+    browserRoleIntegration.indexOf("const accepting = server.accept({ timeoutMs: 20_000 });") >
+      browserRoleIntegration.indexOf("const client = await setupForTest("),
     true,
   );
+  assertStringIncludes(browserRoleIntegration, "server.accept({ timeoutMs: 20_000 })");
+  assertStringIncludes(browserRoleIntegration, '"browser carrier readiness"');
+  assertEquals(
+    browserRoleIntegration.indexOf('"browser carrier readiness"') <
+      browserRoleIntegration.indexOf('"browser session open"'),
+    true,
+  );
+  assertStringIncludes(browserRoleIntegration, 'within(accepting, "server session accept", 25_000)');
+  assertStringIncludes(browserRoleIntegration, "const closeReadinessCarrier = onceForTest(");
+  assertStringIncludes(browserRoleIntegration, "await closeAllForTest(cleanups)");
 });
