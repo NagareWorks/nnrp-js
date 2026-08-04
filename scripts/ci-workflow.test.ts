@@ -83,6 +83,7 @@ Deno.test("CI compares the public API against the frozen nnrp-doc contract", () 
 Deno.test("CI isolates real browser integration lifecycles and bounds the build gate", () => {
   assertStringIncludes(ciWorkflow, "build-test:");
   assertStringIncludes(ciWorkflow, "timeout-minutes: 10");
+  assertStringIncludes(ciWorkflow, 'TOKIO_WORKER_THREADS: "1"');
   assertStringIncludes(
     denoConfig.tasks.test,
     "packages/browser-client/test/wasm-role.test.ts packages/core/test/*.test.ts",
@@ -104,13 +105,9 @@ Deno.test("CI isolates real browser integration lifecycles and bounds the build 
     true,
   );
   assertStringIncludes(browserRoleIntegration, "server.accept({ timeoutMs: 20_000 })");
-  assertStringIncludes(browserRoleIntegration, '"browser carrier readiness"');
-  assertEquals(
-    browserRoleIntegration.indexOf('"browser carrier readiness"') <
-      browserRoleIntegration.indexOf('"browser session open"'),
-    true,
-  );
+  assertEquals(browserRoleIntegration.match(/browserProvider\.connect\s*\(/g)?.length, 1);
   assertStringIncludes(browserRoleIntegration, 'within(accepting, "server session accept", 25_000)');
-  assertStringIncludes(browserRoleIntegration, "const closeReadinessCarrier = onceForTest(");
   assertStringIncludes(browserRoleIntegration, "await closeAllForTest(cleanups)");
+  assertEquals(coverageGate.includes("browser-role.integration.test.ts"), false);
+  assertStringIncludes(coverageGate, "browser-wasm-duplex.integration.test.ts");
 });

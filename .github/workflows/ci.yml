@@ -199,6 +199,11 @@ jobs:
       - name: Typecheck
         run: deno task typecheck
       - name: Test
+        # The Deno-hosted browser/WASM role test co-locates its native server in
+        # this process. Keep that synthetic gate on one Deno Tokio worker; the
+        # real-browser wire job below still exercises the default runtime.
+        env:
+          TOKIO_WORKER_THREADS: "1"
         run: deno task test
       - name: Build
         run: deno task build
