@@ -3,8 +3,7 @@ import { parseLcovCoverage } from "./lcov-coverage.ts";
 const coverageDir = "artifacts/coverage";
 const lcovPath = `${coverageDir}/lcov.info`;
 const lineThreshold = parseLineThreshold(Deno.args);
-const browserIntegrationTests = [
-  "packages/browser-client/test/browser-role.integration.test.ts",
+const coverageIntegrationTests = [
   "packages/browser-client/test/browser-wasm-duplex.integration.test.ts",
 ] as const;
 const unitTestPaths = [
@@ -50,7 +49,7 @@ await Deno.remove(coverageDir, { recursive: true }).catch((error) => {
 
 const coverageRuns = [
   { name: "unit", tests: unitTestPaths },
-  ...browserIntegrationTests.map((test, index) => ({
+  ...coverageIntegrationTests.map((test, index) => ({
     name: `browser-integration-${index + 1}`,
     tests: [test] as readonly string[],
   })),
