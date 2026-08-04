@@ -144,7 +144,7 @@ jobs:
           set -euo pipefail
           base_ref="${{ github.base_ref }}"
           head_ref="${{ github.head_ref }}"
-          range="origin/$base_ref...HEAD"
+          range="origin/$base_ref..HEAD"
           count="$(git rev-list --count "$range")"
           if [[ "$base_ref" == "main" && "$head_ref" == "develop" ]]; then
             echo "Develop-to-main integration PR detected; preserving reviewed integration history is allowed."
@@ -164,6 +164,7 @@ jobs:
   build-test:
     name: build-test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     steps:
