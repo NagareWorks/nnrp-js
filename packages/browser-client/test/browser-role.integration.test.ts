@@ -34,53 +34,60 @@ Deno.test({
   sanitizeResources: false,
   fn: async () => {
     const nativeProvider = createWebSocketTransportProvider();
-    const serverRuntime = await openBackendRuntime({
-      transports: [nativeProvider],
-      transportPolicy: "force-websocket",
-    });
+    const serverRuntime = await within(
+      openBackendRuntime({
+        transports: [nativeProvider],
+        transportPolicy: "force-websocket",
+      }),
+      "server runtime open",
+    );
     const server = serverRuntime.listen({
       endpoint: "nnrp://127.0.0.1/browser-role",
       providerRoutes: { websocket: { endpoint: "ws://127.0.0.1:0" } },
       transportPolicy: "force-websocket",
     });
-    const accepting = server.accept();
     const providerEndpoint = await waitForBoundProviderEndpoint(server, "websocket");
 
     const wasmBytes = await Deno.readFile(new URL("../wasm/nnrp_wasm_bg.wasm", import.meta.url));
     const sentMessageTypes: number[] = [];
     const sentPackets: Uint8Array[] = [];
     const browserProvider = createWebSocketTransportProvider({ WebSocket: globalThis.WebSocket });
-    const browserRuntime = await openBrowserRuntime({
-      module: await WebAssembly.compile(wasmBytes),
-      transportProviders: [
-        {
-          ...browserProvider,
-          connect: async (options) => {
-            const connection = await browserProvider.connect(options);
-            return {
-              kind: connection.kind,
-              endpoint: connection.endpoint,
-              get connected() {
-                return connection.connected;
-              },
-              send: (packets) => {
-                const values = packets instanceof Uint8Array ? [packets] : packets;
-                sentMessageTypes.push(...values.map((packet) => packet[6] ?? -1));
-                sentPackets.push(...values.map((packet) => packet.slice()));
-                return connection.send(packets);
-              },
-              receive: (receiveOptions) => connection.receive(receiveOptions),
-              close: () => connection.close(),
-            };
+    const wasmModule = await within(WebAssembly.compile(wasmBytes), "browser WASM compilation");
+    const browserRuntime = await within(
+      openBrowserRuntime({
+        module: wasmModule,
+        transportProviders: [
+          {
+            ...browserProvider,
+            connect: async (options) => {
+              const connection = await browserProvider.connect(options);
+              return {
+                kind: connection.kind,
+                endpoint: connection.endpoint,
+                get connected() {
+                  return connection.connected;
+                },
+                send: (packets) => {
+                  const values = packets instanceof Uint8Array ? [packets] : packets;
+                  sentMessageTypes.push(...values.map((packet) => packet[6] ?? -1));
+                  sentPackets.push(...values.map((packet) => packet.slice()));
+                  return connection.send(packets);
+                },
+                receive: (receiveOptions) => connection.receive(receiveOptions),
+                close: () => connection.close(),
+              };
+            },
           },
-        },
-      ],
-      transportPolicy: "force-websocket",
-    });
+        ],
+        transportPolicy: "force-websocket",
+      }),
+      "browser runtime open",
+    );
     const client = browserRuntime.connect({
       endpoint: "nnrp://127.0.0.1/browser-role",
       providerRoutes: { websocket: { endpoint: providerEndpoint } },
     });
+    const accepting = server.accept();
     const session = await within(
       client.openSession({
         requestedSessionId: 1,
@@ -602,13 +609,13 @@ async function waitForBoundProviderEndpoint(
   throw new Error(`provider ${providerKind} did not bind within 5000ms`);
 }
 
-async function within<T>(promise: Promise<T>, label: string): Promise<T> {
+async function within<T>(promise: Promise<T>, label: string, timeoutMillis = 10_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after 10000ms`)), 10_000);
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMillis}ms`)), timeoutMillis);
       }),
     ]);
   } finally {

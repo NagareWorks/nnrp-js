@@ -7,12 +7,18 @@ const nodeImportSmoke = await Deno.readTextFile("scripts/check-node-import-smoke
 const preview4Adapter = await Deno.readTextFile("scripts/preview4-adapter.ts");
 const preview4Contract = await Deno.readTextFile("scripts/preview4-conformance-contract.ts");
 const preview4Capabilities = await Deno.readTextFile("conformance/nnrp-1-preview4.capabilities.json");
+const coverageGate = await Deno.readTextFile("scripts/run-coverage-gate.ts");
+const browserRoleIntegration = await Deno.readTextFile(
+  "packages/browser-client/test/browser-role.integration.test.ts",
+);
 
 const CONFORMANCE_REVISION = "0072970d1212a650fa8a1be83b7b2a61c817f799";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
   assertStringIncludes(ciWorkflow, 'head_ref="${{ github.head_ref }}"');
+  assertStringIncludes(ciWorkflow, 'range="origin/$base_ref..HEAD"');
+  assertEquals(ciWorkflow.includes('range="origin/$base_ref...HEAD"'), false);
   assertStringIncludes(ciWorkflow, 'if [[ "$base_ref" == "main" && "$head_ref" == "develop" ]]; then');
   assertStringIncludes(
     ciWorkflow,
@@ -72,4 +78,28 @@ Deno.test("CI compares the public API against the frozen nnrp-doc contract", () 
   assertStringIncludes(ciWorkflow, "deno task api-consistency");
   assertEquals(denoConfig.fmt.exclude.includes(".docs"), true);
   assertEquals(denoConfig.lint.exclude.includes(".docs"), true);
+});
+
+Deno.test("CI isolates real browser integration lifecycles and bounds the build gate", () => {
+  assertStringIncludes(ciWorkflow, "build-test:");
+  assertStringIncludes(ciWorkflow, "timeout-minutes: 10");
+  assertStringIncludes(
+    denoConfig.tasks.test,
+    "packages/browser-client/test/wasm-role.test.ts packages/core/test/*.test.ts",
+  );
+  assertStringIncludes(
+    denoConfig.tasks.test,
+    "packages/browser-client/test/browser-role.integration.test.ts && deno test",
+  );
+  assertStringIncludes(
+    denoConfig.tasks.test,
+    "packages/browser-client/test/browser-wasm-duplex.integration.test.ts",
+  );
+  assertStringIncludes(coverageGate, "--coverage=${coverageDir}/raw/${coverageRun.name}");
+  assertStringIncludes(coverageGate, 'lcovReports.join("\\n")');
+  assertEquals(
+    browserRoleIntegration.indexOf("const accepting = server.accept();") >
+      browserRoleIntegration.indexOf("const client = browserRuntime.connect({"),
+    true,
+  );
 });

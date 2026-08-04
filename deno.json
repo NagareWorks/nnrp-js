@@ -46,7 +46,7 @@
     "todo:check": "deno run --allow-read scripts/check-preview4-todo.ts",
     "todo:release-check": "deno run --allow-read scripts/check-preview4-todo.ts --require-complete",
     "runtime-policy": "deno run --allow-read scripts/check-runtime-policy.ts",
-    "test": "deno test --unstable-sloppy-imports --allow-env --allow-ffi --allow-net=127.0.0.1 --allow-read --allow-write packages/*/test/*.test.ts scripts/*.test.ts",
+    "test": "deno test --unstable-sloppy-imports --allow-env --allow-ffi --allow-net=127.0.0.1 --allow-read --allow-write packages/browser-client/test/index.test.ts packages/browser-client/test/rust-codec-parity.test.ts packages/browser-client/test/wasm-role.test.ts packages/core/test/*.test.ts packages/native-client/test/*.test.ts packages/native-server/test/*.test.ts packages/transport-*/test/*.test.ts scripts/*.test.ts && deno test --unstable-sloppy-imports --allow-env --allow-ffi --allow-net=127.0.0.1 --allow-read --allow-write packages/browser-client/test/browser-role.integration.test.ts && deno test --unstable-sloppy-imports --allow-env --allow-ffi --allow-net=127.0.0.1 --allow-read --allow-write packages/browser-client/test/browser-wasm-duplex.integration.test.ts",
     "coverage": "deno run --allow-read --allow-write=artifacts/coverage --allow-run scripts/run-coverage-gate.ts --line 90",
     "typecheck": "deno check --unstable-sloppy-imports packages/*/src/index.ts packages/*/test/*.test.ts scripts/*.ts examples/*.ts"
   },
