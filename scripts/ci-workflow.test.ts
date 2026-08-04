@@ -8,7 +8,7 @@ const preview4Adapter = await Deno.readTextFile("scripts/preview4-adapter.ts");
 const preview4Contract = await Deno.readTextFile("scripts/preview4-conformance-contract.ts");
 const preview4Capabilities = await Deno.readTextFile("conformance/nnrp-1-preview4.capabilities.json");
 
-const CONFORMANCE_REVISION = "b1836bcf372ac4fbd2a5f106cd09f6a628a4c647";
+const CONFORMANCE_REVISION = "0072970d1212a650fa8a1be83b7b2a61c817f799";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');

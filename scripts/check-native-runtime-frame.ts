@@ -34,7 +34,7 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
   });
   const accepting = server.accept();
   let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
-  let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;
+  let clientSession: Awaited<ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]>> | undefined;
   let serverSession: Awaited<ReturnType<typeof server.accept>> | undefined;
 
   try {
@@ -45,7 +45,7 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
       transports: [provider],
       transportPolicy: "force-tcp",
     });
-    clientSession = client.openSession({ sessionId: "native-runtime-frame-smoke", inputProfile: "token" });
+    clientSession = await client.openSession();
     const bootstrapResult = clientSession.submit(tokenSubmit(1n, 1, new Uint8Array([0x62, 0x6f, 0x6f, 0x74])));
     serverSession = await accepting;
     const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });

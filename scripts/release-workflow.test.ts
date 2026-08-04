@@ -8,12 +8,12 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "b1836bcf372ac4fbd2a5f106cd09f6a628a4c647";
+const CONFORMANCE_REVISION = "0072970d1212a650fa8a1be83b7b2a61c817f799";
 
-Deno.test("release workflow and local preparation pin Rust preview4.21", () => {
-  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.21/g)?.length ?? 0) >= 3, true);
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.21"');
-  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.21"');
+Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
+  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.22/g)?.length ?? 0) >= 3, true);
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22"');
+  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22"');
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.17"), false);
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.18"), false);
   assertEquals(artifactPreparation.includes("1.0.0-preview.4.17"), false);
@@ -23,10 +23,10 @@ Deno.test("release workflow and local preparation pin Rust preview4.21", () => {
 });
 
 Deno.test("CI consumes an immutable successful Rust workflow artifact without weakening release inputs", () => {
-  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "30698665598"');
+  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "30862254352"');
   assertStringIncludes(
     ciWorkflow,
-    "NNRP_JS_RUST_ARTIFACT_COMMIT: bc0a5fcf4ed1f6c175a30ad788d4e34c458f96b3",
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: 784a4a354f4e6a73798248f93cf574bd7a5af829",
   );
   assertStringIncludes(artifactPreparation, "run.headSha !== expectedCommit");
   assertStringIncludes(artifactPreparation, 'run.status !== "completed" || run.conclusion !== "success"');

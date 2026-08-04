@@ -1,6 +1,65 @@
 export declare const NNRP_PROTOCOL_NAME = "NNRP";
 export declare const NNRP_PROTOCOL_VERSION = "1.0.0";
 export declare const NNRP_TYPED_PAYLOAD_DESCRIPTOR_BYTES = 24;
+export declare const NNRP_SESSION_OPEN_METADATA_BYTES = 48;
+export declare const NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES = 28;
+export declare const NNRP_SCHEMA_DESCRIPTOR_HEADER_BYTES = 32;
+export declare const NNRP_STANDARD_PROFILE_TOKEN = 2;
+export declare const NNRP_TOKEN_DELTA_SCHEMA_ID = 4097;
+export declare const NNRP_TOKEN_DELTA_SCHEMA_VERSION = 3;
+export declare const NNRP_TOKEN_DELTA_SCHEMA_HASH = 7957423418925607731n;
+export declare enum NnrpStandardProfile {
+    Unspecified = 0,
+    Tensor = 1,
+    Token = 2
+}
+export declare enum NnrpStreamSemantics {
+    Unspecified = 0,
+    Snapshot = 1,
+    Append = 2
+}
+export declare enum NnrpSchemaDescriptorFlags {
+    None = 0,
+    BreakingChange = 1,
+    CompatibleUpdate = 2,
+    DependencyBound = 4,
+    BodySchemaPresent = 8
+}
+export declare enum NnrpSchemaRegistryAction {
+    Installed = 1,
+    AlreadyInstalled = 2,
+    Updated = 3,
+    Invalidated = 4
+}
+export declare enum NnrpSchemaRegistryFailure {
+    Unknown = 1,
+    VersionUnknown = 2,
+    HashConflict = 3,
+    Incompatible = 4,
+    UpdateRejected = 5
+}
+export interface NnrpSchemaDescriptorHeader {
+    readonly schemaId: number;
+    readonly schemaVersion: number;
+    readonly profileId: NnrpStandardProfile | number;
+    readonly schemaFlags: NnrpSchemaDescriptorFlags | number;
+    readonly minVersionMajor: number;
+    readonly maxVersionMajor: number;
+    readonly bodyBytes: number;
+    readonly dependencyCount: number;
+    readonly defaultStreamSemantics: NnrpStreamSemantics | number;
+    readonly schemaHash: bigint;
+}
+export declare class NnrpSchemaRegistry {
+    #private;
+    constructor(descriptors?: readonly NnrpSchemaDescriptorHeader[]);
+    install(descriptor: NnrpSchemaDescriptorHeader): NnrpSchemaRegistryAction;
+    lookup(schemaId: number, schemaVersion: number): NnrpSchemaDescriptorHeader;
+    invalidate(schemaId: number, schemaVersion: number): NnrpSchemaRegistryAction;
+    validateBinding(descriptor: NnrpTypedPayloadDescriptor): void;
+    snapshot(): readonly NnrpSchemaDescriptorHeader[];
+}
+export declare function tokenDeltaSchemaDescriptor(): NnrpSchemaDescriptorHeader;
 export declare enum NnrpPayloadKind {
     Tensor = 1,
     TokenChunk = 2,
@@ -33,6 +92,38 @@ export interface NnrpTypedPayloadFrame {
 }
 export declare function encodeTypedPayloadDescriptor(descriptor: NnrpTypedPayloadDescriptor): Uint8Array;
 export declare function decodeTypedPayloadDescriptor(source: Uint8Array): NnrpTypedPayloadDescriptor;
+export declare enum NnrpSessionPriorityClass {
+    Interactive = 0,
+    Balanced = 1,
+    Background = 2
+}
+export interface NnrpSessionOpenMetadata {
+    readonly requestedSessionId: number;
+    readonly profileId: number;
+    readonly priorityClass: NnrpSessionPriorityClass;
+    readonly sessionFlags: number;
+    readonly schemaId: number;
+    readonly schemaVersion: number;
+    readonly defaultDeadlineMillis: number;
+    readonly maxInFlightOperations: number;
+    readonly leaseTtlHintMillis: number;
+    readonly resumeTokenBytes: number;
+    readonly authBytes: number;
+    readonly sessionExtensionBytes: number;
+    readonly clientSessionTag: bigint;
+}
+export declare function encodeSessionOpenMetadata(metadata: NnrpSessionOpenMetadata): Uint8Array;
+export declare function decodeSessionOpenMetadata(encoded: Uint8Array): NnrpSessionOpenMetadata;
+export declare class NnrpSessionRecoveryTicket {
+    #private;
+    readonly sessionId: number;
+    readonly resumeFromOperationId: bigint | undefined;
+    readonly resumeWindowMillis: number;
+    private constructor();
+    get resumeToken(): Uint8Array;
+    toBytes(): Uint8Array;
+    static fromBytes(encoded: Uint8Array): NnrpSessionRecoveryTicket;
+}
 export declare enum NnrpMessageType {
     ClientHello = 1,
     ServerHelloAck = 2,
@@ -1049,7 +1140,7 @@ export interface NnrpSessionPatchRequest extends NnrpSessionMetadataOptions, Nnr
 }
 export interface NnrpSessionPatchResult {
     readonly accepted: boolean;
-    readonly sessionId?: string;
+    readonly sessionId?: number;
     readonly diagnostic?: NnrpDiagnostic;
     readonly metadata?: Readonly<Record<string, string>>;
 }

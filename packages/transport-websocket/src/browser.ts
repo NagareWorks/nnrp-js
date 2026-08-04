@@ -103,10 +103,10 @@ class BrowserWebSocketConnection implements NnrpTransportConnection {
     readonly endpoint: string,
   ) {
     socket.addEventListener("message", (event) => void this.#onMessage(event));
-    socket.addEventListener("close", () => this.#wake());
+    socket.addEventListener("close", () => this.#wakeAll());
     socket.addEventListener("error", () => {
       this.#protocolError ??= transportError("NNRP_WEBSOCKET_IO_FAILED", "WebSocket transport I/O failed.", true);
-      this.#wake();
+      this.#wakeAll();
     });
   }
 
@@ -137,7 +137,9 @@ class BrowserWebSocketConnection implements NnrpTransportConnection {
     if (this.#packets.length === 0 && !this.connected) {
       throw transportError("NNRP_WEBSOCKET_CLOSED", "WebSocket connection closed before a packet arrived.");
     }
-    return this.#packets.splice(0, maxPackets);
+    const packets = this.#packets.splice(0, maxPackets);
+    if (this.#packets.length > 0) this.#wakeNext();
+    return packets;
   }
 
   close(): void {
@@ -151,8 +153,10 @@ class BrowserWebSocketConnection implements NnrpTransportConnection {
       this.#protocolError = error instanceof NnrpTransportError
         ? error
         : transportError("NNRP_WEBSOCKET_BINARY_REQUIRED", "WebSocket transport accepts binary messages only.");
+      this.#wakeAll();
+      return;
     }
-    this.#wake();
+    this.#wakeNext();
   }
 
   #wait(timeoutMillis: number): Promise<void> {
@@ -170,7 +174,11 @@ class BrowserWebSocketConnection implements NnrpTransportConnection {
     });
   }
 
-  #wake(): void {
+  #wakeNext(): void {
+    this.#waiters.shift()?.();
+  }
+
+  #wakeAll(): void {
     for (const waiter of this.#waiters.splice(0)) waiter();
   }
 }

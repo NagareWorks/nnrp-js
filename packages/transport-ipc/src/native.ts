@@ -1,6 +1,9 @@
 import {
+  decodeSessionOpenMetadata,
   type NnrpDiagnostic,
   type NnrpNativeTransportBinding,
+  type NnrpSchemaDescriptorHeader,
+  type NnrpSessionOpenMetadata,
   type NnrpTransportAcceptOptions,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
@@ -11,14 +14,18 @@ import {
   type NnrpTransportServer,
 } from "@nnrp/core";
 
-const TRANSPORT_ID_IPC = 3;
+const TRANSPORT_ID = 3;
+const TRANSPORT_KIND = "ipc" as const;
 const TRANSPORT_LABEL = "IPC";
+const PACKAGE_NAME = "nnrp-ffi-transport-ipc";
+const TRANSPORT_SCOPE = "ipc";
+const DEFAULT_ENDPOINT_SCHEME: string | undefined = undefined;
 const HANDLE_KIND_INVALID = 0;
 const HANDLE_KIND_BUFFER = 5;
 const HANDLE_KIND_CONNECTION = 10;
 const HANDLE_KIND_LISTENER = 11;
 const HANDLE_KIND_SERVER_ACCEPT = 13;
-const ABI_VERSION = "4.3.0";
+const ABI_VERSION = "4.4.0";
 const HANDLE_SIZE = 24;
 const BUFFER_VIEW_SIZE = 16;
 const STATUS_SIZE = 16;
@@ -28,7 +35,21 @@ const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1"
 
 const HANDLE_STRUCT = { struct: ["u32", "u64", "u32", "u32"] } as const;
 const BUFFER_VIEW_STRUCT = { struct: ["pointer", "usize"] } as const;
+const U16_SLICE_STRUCT = { struct: ["pointer", "usize"] } as const;
+const U32_SLICE_STRUCT = { struct: ["pointer", "usize"] } as const;
 const STATUS_STRUCT = { struct: ["u32", "u32", "u32", "u32"] } as const;
+const SERVER_POLICY_CALLBACK_DEFINITION = {
+  parameters: ["pointer", "u64", BUFFER_VIEW_STRUCT],
+  result: "u32",
+} as const;
+const SERVER_POLICY_SINK_STRUCT = { struct: ["pointer", "pointer"] } as const;
+const SERVER_POLICY_DECISION_STRUCT = {
+  struct: ["u8", "u8", "u8", "u8", "u32", BUFFER_VIEW_STRUCT],
+} as const;
+const SERVER_POLICY_COMPLETE_REQUEST_STRUCT = { struct: ["u64", SERVER_POLICY_DECISION_STRUCT] } as const;
+const SCHEMA_DESCRIPTOR_HEADER_STRUCT = {
+  struct: ["u32", "u32", "u16", "u16", "u8", "u8", "u16", "u32", "u16", "u16", "u64"],
+} as const;
 const OPEN_REQUEST_STRUCT = {
   struct: ["u32", "u32", BUFFER_VIEW_STRUCT, HANDLE_STRUCT, "u64", "u32", "u32"],
 } as const;
@@ -37,10 +58,45 @@ const WRITE_BATCH_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "pointer", "u32", "
 const READ_BATCH_REQUEST_STRUCT = { struct: [HANDLE_STRUCT, "u32", "u32", "u64"] } as const;
 const PROBE_REQUEST_STRUCT = { struct: [OPEN_REQUEST_STRUCT, "u32", "u32"] } as const;
 const CLIENT_CONNECT_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT] } as const;
-const SERVER_BIND_REQUEST_STRUCT = { struct: ["u64", "u32", "u32", HANDLE_STRUCT] } as const;
-const SESSION_OPEN_REQUEST_STRUCT = {
-  struct: [HANDLE_STRUCT, "u32", "u32", "u16", "u32", "u32"],
+const SERVER_BIND_REQUEST_STRUCT = {
+  struct: [
+    "u64",
+    "u32",
+    "u32",
+    HANDLE_STRUCT,
+    U16_SLICE_STRUCT,
+    U32_SLICE_STRUCT,
+    "u64",
+    "u32",
+    "u32",
+    "u16",
+    "u16",
+    "u32",
+    "u32",
+    HANDLE_STRUCT,
+    SERVER_POLICY_SINK_STRUCT,
+  ],
 } as const;
+const SESSION_OPEN_REQUEST_STRUCT = {
+  struct: [
+    HANDLE_STRUCT,
+    "u32",
+    "u64",
+    "u32",
+    "u16",
+    "u8",
+    "u8",
+    "u32",
+    "u32",
+    "u32",
+    "u16",
+    "u16",
+    "u32",
+    "u32",
+    U32_SLICE_STRUCT,
+  ],
+} as const;
+const SESSION_RESUME_REQUEST_STRUCT = { struct: [SESSION_OPEN_REQUEST_STRUCT, BUFFER_VIEW_STRUCT] } as const;
 const SUBMIT_REQUEST_STRUCT = {
   struct: [HANDLE_STRUCT, "u64", "u32", "u32", "u16", "u16", "u64", BUFFER_VIEW_STRUCT],
 } as const;
@@ -103,6 +159,16 @@ const DENO_TRANSPORT_SYMBOLS = {
     result: STATUS_STRUCT,
     nonblocking: true,
   },
+  nnrp_session_id: { parameters: [HANDLE_STRUCT, "buffer"], result: STATUS_STRUCT },
+  nnrp_client_resume_session: {
+    parameters: [SESSION_RESUME_REQUEST_STRUCT, "buffer", "buffer"],
+    result: STATUS_STRUCT,
+    nonblocking: true,
+  },
+  nnrp_client_session_recovery_ticket: {
+    parameters: [HANDLE_STRUCT, "buffer", "buffer"],
+    result: STATUS_STRUCT,
+  },
   nnrp_client_submit: {
     parameters: [SUBMIT_REQUEST_STRUCT, "buffer"],
     result: STATUS_STRUCT,
@@ -120,6 +186,16 @@ const DENO_TRANSPORT_SYMBOLS = {
     parameters: [SERVER_BIND_REQUEST_STRUCT, "buffer"],
     result: STATUS_STRUCT,
     nonblocking: true,
+  },
+  nnrp_schema_registry_create: { parameters: ["buffer"], result: STATUS_STRUCT },
+  nnrp_schema_registry_install: {
+    parameters: [HANDLE_STRUCT, SCHEMA_DESCRIPTOR_HEADER_STRUCT, "buffer"],
+    result: STATUS_STRUCT,
+  },
+  nnrp_schema_registry_release: { parameters: [HANDLE_STRUCT], result: STATUS_STRUCT },
+  nnrp_server_policy_complete: {
+    parameters: [SERVER_POLICY_COMPLETE_REQUEST_STRUCT],
+    result: STATUS_STRUCT,
   },
   nnrp_server_accept_begin: {
     parameters: [SERVER_ACCEPT_REQUEST_STRUCT, "buffer"],
@@ -170,6 +246,13 @@ interface DenoTransportSymbols {
   nnrp_buffer_release(handle: Uint8Array): Uint8Array;
   nnrp_client_connect(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_client_open_session(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_session_id(session: Uint8Array, output: Uint8Array): Uint8Array;
+  nnrp_client_resume_session(request: Uint8Array, output: Uint8Array, outcome: Uint8Array): Promise<Uint8Array>;
+  nnrp_client_session_recovery_ticket(
+    session: Uint8Array,
+    owner: Uint8Array,
+    ticket: Uint8Array,
+  ): Uint8Array;
   nnrp_client_submit(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
   nnrp_client_await_events(
     request: Uint8Array,
@@ -181,6 +264,10 @@ interface DenoTransportSymbols {
   nnrp_connection_close(handle: Uint8Array): Promise<Uint8Array>;
   nnrp_client_close_connection(handle: Uint8Array): Promise<Uint8Array>;
   nnrp_server_bind(request: Uint8Array, output: Uint8Array): Promise<Uint8Array>;
+  nnrp_schema_registry_create(output: Uint8Array): Uint8Array;
+  nnrp_schema_registry_install(registry: Uint8Array, descriptor: Uint8Array, action: Uint8Array): Uint8Array;
+  nnrp_schema_registry_release(registry: Uint8Array): Uint8Array;
+  nnrp_server_policy_complete(request: Uint8Array): Uint8Array;
   nnrp_server_accept_begin(request: Uint8Array, output: Uint8Array): Uint8Array;
   nnrp_server_accept_wait(request: Uint8Array): Promise<Uint8Array>;
   nnrp_server_accept_claim(request: Uint8Array, output: Uint8Array): Uint8Array;
@@ -211,6 +298,13 @@ interface DenoRuntime {
   readonly UnsafePointerView: new (pointer: unknown) => {
     getArrayBuffer(byteLength: number, offset?: number): ArrayBuffer;
   };
+  readonly UnsafeCallback: new (
+    definition: typeof SERVER_POLICY_CALLBACK_DEFINITION,
+    callback: (userData: unknown, requestId: bigint, metadata: Uint8Array) => number,
+  ) => {
+    readonly pointer: unknown;
+    close(): void;
+  };
   readTextFileSync(path: string): string;
   statSync(path: string): { isFile: boolean };
   dlopen(path: string, symbols: typeof DENO_TRANSPORT_SYMBOLS): DenoTransportLibrary;
@@ -221,6 +315,42 @@ interface FfiHandle {
   readonly id: bigint;
   readonly generation: number;
   readonly flags: number;
+}
+
+interface InternalServerPolicyDecision {
+  readonly accepted: boolean;
+  readonly sessionErrorCode: number;
+  readonly diagnostic?: string;
+}
+
+interface InternalServerRoleOptions {
+  readonly supportedProfiles: readonly number[];
+  readonly supportedCacheObjects: readonly number[];
+  readonly maxCacheObjects: bigint;
+  readonly maxCacheObjectBytes: number;
+  readonly schemaDescriptors: readonly NnrpSchemaDescriptorHeader[];
+  readonly resumeTokenBytes: number;
+  readonly maxInFlightOperations: number;
+  readonly grantedOperationCredit: number;
+  readonly leaseTtlMs: number;
+  readonly resumeWindowMs: number;
+  readonly evaluateSession?: (open: NnrpSessionOpenMetadata) => Promise<InternalServerPolicyDecision>;
+}
+
+interface InternalClientSessionOpenOptions {
+  readonly requestedSessionId: number;
+  readonly sessionHandleId: bigint;
+  readonly generation: number;
+  readonly profileId: number;
+  readonly priorityClass: number;
+  readonly allowResume: boolean;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+  readonly defaultDeadlineMillis: number;
+  readonly maxInFlightOperations: number;
+  readonly leaseTtlHintMillis: number;
+  readonly resumeTokenBytes: number;
+  readonly cacheHints: readonly number[];
 }
 
 interface InternalRoleEvent {
@@ -352,52 +482,59 @@ class DenoIpcBinding implements NnrpNativeTransportBinding {
   constructor(readonly library: DenoTransportLibrary) {}
 
   async probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics> {
-    assertNoSecurity(options);
     const endpoint = endpointBytes(options.endpoint, "probe");
-    const request = packProbeRequest(options, endpoint);
-    const output = bytes(24);
-    assertStatus(await this.library.symbols.nnrp_transport_probe(request, output), "transport probe");
-    const view = dataView(output);
-    return {
-      sampleCount: view.getUint32(0, true),
-      successCount: view.getUint32(4, true),
-      medianThroughputBytesPerSecond: view.getBigUint64(8, true),
-      medianRttMicroseconds: view.getBigUint64(16, true),
-    };
+    return await withTransportSecurityConfig(options, async (config) => {
+      const request = packProbeRequest(options, endpoint, config);
+      const output = bytes(24);
+      assertStatus(await this.library.symbols.nnrp_transport_probe(request, output), "transport probe");
+      const view = dataView(output);
+      return {
+        sampleCount: view.getUint32(0, true),
+        successCount: view.getUint32(4, true),
+        medianThroughputBytesPerSecond: view.getBigUint64(8, true),
+        medianRttMicroseconds: view.getBigUint64(16, true),
+      };
+    });
   }
 
   async connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection> {
-    assertNoSecurity(options);
     const endpoint = endpointBytes(options.endpoint, "connect");
-    const output = bytes(HANDLE_SIZE);
-    assertStatus(
-      await this.library.symbols.nnrp_transport_connect(packOpenRequest(options, endpoint), output),
-      "transport connect",
-    );
-    return new DenoIpcConnection(this.library, decodeHandle(output, HANDLE_KIND_CONNECTION), String(options.endpoint));
+    return await withTransportSecurityConfig(options, async (config) => {
+      const output = bytes(HANDLE_SIZE);
+      assertStatus(
+        await this.library.symbols.nnrp_transport_connect(packOpenRequest(options, endpoint, config), output),
+        "transport connect",
+      );
+      return new DenoIpcConnection(
+        this.library,
+        decodeHandle(output, HANDLE_KIND_CONNECTION),
+        String(options.endpoint),
+      );
+    });
   }
 
   async listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer> {
-    assertNoSecurity(options);
     const endpoint = endpointBytes(options.endpoint, "listen");
-    const output = bytes(HANDLE_SIZE);
-    assertStatus(
-      await this.library.symbols.nnrp_transport_listen(packOpenRequest(options, endpoint), output),
-      "transport listen",
-    );
-    const handle = decodeHandle(output, HANDLE_KIND_LISTENER);
-    try {
-      const boundEndpoint = await readListenerEndpoint(this.library, handle);
-      return new DenoIpcServer(this.library, handle, boundEndpoint);
-    } catch (error) {
-      closeHandle(this.library, handle, "transport listener cleanup");
-      throw error;
-    }
+    return await withTransportSecurityConfig(options, async (config) => {
+      const output = bytes(HANDLE_SIZE);
+      assertStatus(
+        await this.library.symbols.nnrp_transport_listen(packOpenRequest(options, endpoint, config), output),
+        "transport listen",
+      );
+      const handle = decodeHandle(output, HANDLE_KIND_LISTENER);
+      try {
+        const boundEndpoint = await readListenerEndpoint(this.library, handle);
+        return new DenoIpcServer(this.library, handle, boundEndpoint);
+      } catch (error) {
+        closeHandle(this.library, handle, "transport listener cleanup");
+        throw error;
+      }
+    });
   }
 }
 
 class DenoIpcConnection implements NnrpTransportConnection {
-  readonly kind = "ipc" as const;
+  readonly kind = TRANSPORT_KIND;
   #closed = false;
 
   constructor(
@@ -472,7 +609,7 @@ class DenoIpcConnection implements NnrpTransportConnection {
 }
 
 class DenoIpcServer implements NnrpTransportServer {
-  readonly kind = "ipc" as const;
+  readonly kind = TRANSPORT_KIND;
   #closed = false;
 
   constructor(
@@ -496,17 +633,51 @@ class DenoIpcServer implements NnrpTransportServer {
     return new DenoIpcConnection(this.library, decodeHandle(output, HANDLE_KIND_CONNECTION), this.endpoint);
   }
 
-  async [SERVER_ROLE_ADOPT](serverId: bigint, generation: number): Promise<DenoServerRole> {
+  async [SERVER_ROLE_ADOPT](
+    serverId: bigint,
+    generation: number,
+    options: InternalServerRoleOptions,
+  ): Promise<DenoServerRole> {
     if (this.#closed) throw transportError("NNRP_IPC_LISTENER_CLOSED", "IPC listener is closed.");
     const output = bytes(HANDLE_SIZE);
-    const request = bytes(40);
+    const request = bytes(144);
     const view = dataView(request);
     view.setBigUint64(0, serverId, true);
     view.setUint32(8, generation, true);
     writeHandle(view, 16, this.handle);
-    assertStatus(await this.library.symbols.nnrp_server_bind(request, output), "server role adoption");
+    const profiles = u16Bytes(options.supportedProfiles);
+    const cacheObjects = u32Bytes(options.supportedCacheObjects);
+    writeBufferView(view, 40, profiles);
+    view.setBigUint64(48, BigInt(options.supportedProfiles.length), true);
+    writeBufferView(view, 56, cacheObjects);
+    view.setBigUint64(64, BigInt(options.supportedCacheObjects.length), true);
+    view.setBigUint64(72, options.maxCacheObjects, true);
+    view.setUint32(80, options.maxCacheObjectBytes, true);
+    view.setUint32(84, options.resumeTokenBytes, true);
+    view.setUint16(88, options.maxInFlightOperations, true);
+    view.setUint16(90, options.grantedOperationCredit, true);
+    view.setUint32(92, options.leaseTtlMs, true);
+    view.setUint32(96, options.resumeWindowMs, true);
+    const schemaRegistry = createDenoSchemaRegistry(this.library, options.schemaDescriptors);
+    writeHandle(view, 104, schemaRegistry);
+    let policyCallback: InstanceType<DenoRuntime["UnsafeCallback"]> | undefined;
+    try {
+      policyCallback = registerDenoServerPolicy(this.library, options.evaluateSession);
+      if (policyCallback !== undefined) {
+        view.setBigUint64(136, denoRuntime().UnsafePointer.value(policyCallback.pointer), true);
+      }
+      assertStatus(await this.library.symbols.nnrp_server_bind(request, output), "server role adoption");
+    } catch (error) {
+      policyCallback?.close();
+      throw error;
+    } finally {
+      assertStatus(
+        this.library.symbols.nnrp_schema_registry_release(packHandle(schemaRegistry)),
+        "schema registry release",
+      );
+    }
     this.#closed = true;
-    return new DenoServerRole(this.library, decodeHandle(output));
+    return new DenoServerRole(this.library, decodeHandle(output), policyCallback);
   }
 
   close(): void {
@@ -521,25 +692,34 @@ class DenoClientRoleConnection {
 
   constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
 
-  async openSession(
-    requestedSessionId: number,
-    generation: number,
-    profileId: number,
-    schemaId: number,
-    schemaVersion: number,
-  ): Promise<DenoClientRoleSession> {
+  async openSession(options: InternalClientSessionOpenOptions): Promise<DenoClientRoleSession> {
     this.#requireOpen();
     const output = bytes(HANDLE_SIZE);
-    const request = packSessionOpenRequest(
-      this.handle,
-      requestedSessionId,
-      generation,
-      profileId,
-      schemaId,
-      schemaVersion,
-    );
+    const cacheHints = u32Bytes(options.cacheHints);
+    const request = packSessionOpenRequest(this.handle, options, cacheHints);
     assertStatus(await this.library.symbols.nnrp_client_open_session(request, output), "client session open");
-    return new DenoClientRoleSession(this.library, decodeHandle(output));
+    const handle = decodeHandle(output);
+    return new DenoClientRoleSession(this.library, handle, readDenoSessionId(this.library, handle));
+  }
+
+  async resumeSession(
+    options: InternalClientSessionOpenOptions,
+    recoveryTicket: Uint8Array,
+  ): Promise<DenoClientRoleSession> {
+    this.#requireOpen();
+    const ticket = recoveryTicket.slice() as Uint8Array<ArrayBuffer>;
+    const cacheHints = u32Bytes(options.cacheHints);
+    const request = bytes(104);
+    request.set(packSessionOpenRequest(this.handle, options, cacheHints));
+    writeBufferView(dataView(request), 88, ticket);
+    const output = bytes(HANDLE_SIZE);
+    const outcome = bytes(8);
+    assertStatus(
+      await this.library.symbols.nnrp_client_resume_session(request, output, outcome),
+      "client session resume",
+    );
+    const handle = decodeHandle(output);
+    return new DenoClientRoleSession(this.library, handle, readDenoSessionId(this.library, handle));
   }
 
   async close(): Promise<void> {
@@ -559,7 +739,11 @@ class DenoClientRoleConnection {
 class DenoClientRoleSession {
   #closed = false;
 
-  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+  constructor(
+    readonly library: DenoTransportLibrary,
+    readonly handle: FfiHandle,
+    readonly sessionId: number,
+  ) {}
 
   async submit(
     operationId: bigint,
@@ -601,6 +785,26 @@ class DenoClientRoleSession {
     );
   }
 
+  recoveryTicket(): Uint8Array | undefined {
+    this.#requireOpen();
+    const ownerOutput = bytes(HANDLE_SIZE);
+    const ticketOutput = bytes(BUFFER_VIEW_SIZE);
+    const status = this.library.symbols.nnrp_client_session_recovery_ticket(
+      packHandle(this.handle),
+      ownerOutput,
+      ticketOutput,
+    );
+    if (statusCode(status) === 4) return undefined;
+    assertStatus(status, "client recovery ticket snapshot");
+    const owner = decodeHandle(ownerOutput, HANDLE_KIND_BUFFER);
+    try {
+      const view = dataView(ticketOutput);
+      return copyNativeBytes(view.getBigUint64(0, true), view.getBigUint64(8, true));
+    } finally {
+      assertStatus(this.library.symbols.nnrp_buffer_release(packHandle(owner)), "client recovery ticket release");
+    }
+  }
+
   async close(): Promise<void> {
     if (this.#closed) return;
     assertStatus(await this.library.symbols.nnrp_client_close(packHandle(this.handle)), "client session close");
@@ -612,11 +816,116 @@ class DenoClientRoleSession {
   }
 }
 
+function createDenoSchemaRegistry(
+  library: DenoTransportLibrary,
+  descriptors: readonly NnrpSchemaDescriptorHeader[],
+): FfiHandle {
+  const output = bytes(HANDLE_SIZE);
+  assertStatus(library.symbols.nnrp_schema_registry_create(output), "schema registry create");
+  const registry = decodeHandle(output);
+  try {
+    for (const descriptor of descriptors) {
+      const action = bytes(4);
+      assertStatus(
+        library.symbols.nnrp_schema_registry_install(
+          packHandle(registry),
+          packSchemaDescriptor(descriptor),
+          action,
+        ),
+        "schema registry install",
+      );
+    }
+    return registry;
+  } catch (error) {
+    assertStatus(library.symbols.nnrp_schema_registry_release(packHandle(registry)), "schema registry release");
+    throw error;
+  }
+}
+
+function packSchemaDescriptor(descriptor: NnrpSchemaDescriptorHeader): Uint8Array<ArrayBuffer> {
+  const packed = bytes(32);
+  const view = dataView(packed);
+  view.setUint32(0, descriptor.schemaId, true);
+  view.setUint32(4, descriptor.schemaVersion, true);
+  view.setUint16(8, descriptor.profileId, true);
+  view.setUint16(10, descriptor.schemaFlags, true);
+  view.setUint8(12, descriptor.minVersionMajor);
+  view.setUint8(13, descriptor.maxVersionMajor);
+  view.setUint32(16, descriptor.bodyBytes, true);
+  view.setUint16(20, descriptor.dependencyCount, true);
+  view.setUint16(22, descriptor.defaultStreamSemantics, true);
+  view.setBigUint64(24, descriptor.schemaHash, true);
+  return packed;
+}
+
+function registerDenoServerPolicy(
+  library: DenoTransportLibrary,
+  evaluateSession: InternalServerRoleOptions["evaluateSession"],
+): InstanceType<DenoRuntime["UnsafeCallback"]> | undefined {
+  if (evaluateSession === undefined) return undefined;
+  return new (denoRuntime().UnsafeCallback)(SERVER_POLICY_CALLBACK_DEFINITION, (_userData, requestId, metadata) => {
+    const metadataView = dataView(metadata);
+    let evaluation: Promise<InternalServerPolicyDecision>;
+    try {
+      evaluation = evaluateSession(
+        decodeSessionOpenMetadata(
+          copyNativeBytes(metadataView.getBigUint64(0, true), metadataView.getBigUint64(8, true)),
+        ),
+      );
+    } catch (error) {
+      evaluation = Promise.reject(error);
+    }
+    void evaluation.then(
+      (decision) => completeDenoServerPolicy(library, requestId, decision),
+      (error) =>
+        completeDenoServerPolicy(library, requestId, {
+          accepted: false,
+          sessionErrorCode: 0x0001_0007,
+          diagnostic: error instanceof Error ? error.message : "Application policy evaluation failed.",
+        }),
+    );
+    return 0;
+  });
+}
+
+function completeDenoServerPolicy(
+  library: DenoTransportLibrary,
+  requestId: bigint,
+  decision: InternalServerPolicyDecision,
+): void {
+  const diagnostic = new TextEncoder().encode(decision.diagnostic ?? "") as Uint8Array<ArrayBuffer>;
+  const request = bytes(32);
+  const view = dataView(request);
+  view.setBigUint64(0, requestId, true);
+  view.setUint8(8, decision.accepted ? 1 : 0);
+  view.setUint32(12, decision.sessionErrorCode, true);
+  writeBufferView(view, 16, diagnostic);
+  assertStatus(library.symbols.nnrp_server_policy_complete(request), "server policy completion");
+}
+
+function u16Bytes(values: readonly number[]): Uint8Array<ArrayBuffer> {
+  const packed = bytes(values.length * 2);
+  const view = dataView(packed);
+  values.forEach((value, index) => view.setUint16(index * 2, value, true));
+  return packed;
+}
+
+function u32Bytes(values: readonly number[]): Uint8Array<ArrayBuffer> {
+  const packed = bytes(values.length * 4);
+  const view = dataView(packed);
+  values.forEach((value, index) => view.setUint32(index * 4, value, true));
+  return packed;
+}
+
 class DenoServerRole {
   #closed = false;
   readonly #accepts = new Set<FfiHandle>();
 
-  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+  constructor(
+    readonly library: DenoTransportLibrary,
+    readonly handle: FfiHandle,
+    readonly policyCallback: InstanceType<DenoRuntime["UnsafeCallback"]> | undefined,
+  ) {}
 
   async accept(sessionHandleId: bigint, generation: number, timeoutMillis: number): Promise<DenoServerRoleSession> {
     this.#requireOpen();
@@ -648,7 +957,8 @@ class DenoServerRole {
         "server session accept claim",
       );
       this.#accepts.delete(accept);
-      return new DenoServerRoleSession(this.library, decodeHandle(output));
+      const handle = decodeHandle(output);
+      return new DenoServerRoleSession(this.library, handle, readDenoSessionId(this.library, handle));
     } finally {
       if (this.#accepts.delete(accept)) {
         assertStatus(
@@ -669,7 +979,11 @@ class DenoServerRole {
       );
     }
     this.#accepts.clear();
-    assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
+    try {
+      assertStatus(await this.library.symbols.nnrp_connection_close(packHandle(this.handle)), "server close");
+    } finally {
+      this.policyCallback?.close();
+    }
   }
 
   #requireOpen(): void {
@@ -703,7 +1017,11 @@ function packServerAcceptWaitRequest(accept: FfiHandle, timeoutMillis: number): 
 class DenoServerRoleSession {
   #closed = false;
 
-  constructor(readonly library: DenoTransportLibrary, readonly handle: FfiHandle) {}
+  constructor(
+    readonly library: DenoTransportLibrary,
+    readonly handle: FfiHandle,
+    readonly sessionId: number,
+  ) {}
 
   async poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]> {
     this.#requireOpen();
@@ -742,20 +1060,26 @@ class DenoServerRoleSession {
 
 function packSessionOpenRequest(
   connection: FfiHandle,
-  requestedSessionId: number,
-  generation: number,
-  profileId: number,
-  schemaId: number,
-  schemaVersion: number,
+  options: InternalClientSessionOpenOptions,
+  cacheHints: Uint8Array<ArrayBuffer>,
 ): Uint8Array<ArrayBuffer> {
-  const request = bytes(48);
+  const request = bytes(88);
   const view = dataView(request);
   writeHandle(view, 0, connection);
-  view.setUint32(24, requestedSessionId, true);
-  view.setUint32(28, generation, true);
-  view.setUint16(32, profileId, true);
-  view.setUint32(36, schemaId, true);
-  view.setUint32(40, schemaVersion, true);
+  view.setUint32(24, options.requestedSessionId, true);
+  view.setBigUint64(32, options.sessionHandleId, true);
+  view.setUint32(40, options.generation, true);
+  view.setUint16(44, options.profileId, true);
+  view.setUint8(46, options.priorityClass);
+  view.setUint8(47, options.allowResume ? 1 : 0);
+  view.setUint32(48, options.schemaId, true);
+  view.setUint32(52, options.schemaVersion, true);
+  view.setUint32(56, options.defaultDeadlineMillis, true);
+  view.setUint16(60, options.maxInFlightOperations, true);
+  view.setUint32(64, options.leaseTtlHintMillis, true);
+  view.setUint32(68, options.resumeTokenBytes, true);
+  writeBufferView(view, 72, cacheHints);
+  view.setBigUint64(80, BigInt(options.cacheHints.length), true);
   return request;
 }
 
@@ -851,12 +1175,16 @@ async function readListenerEndpoint(library: DenoTransportLibrary, listener: Ffi
   }
 }
 
-function packOpenRequest(options: NnrpTransportEndpoint, endpoint: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+function packOpenRequest(
+  options: NnrpTransportEndpoint,
+  endpoint: Uint8Array<ArrayBuffer>,
+  config: FfiHandle,
+): Uint8Array<ArrayBuffer> {
   const request = bytes(64);
   const view = dataView(request);
-  view.setUint32(0, TRANSPORT_ID_IPC, true);
+  view.setUint32(0, TRANSPORT_ID, true);
   writeBufferView(view, 8, endpoint);
-  writeHandle(view, 24, invalidHandle());
+  writeHandle(view, 24, config);
   view.setBigUint64(48, boundedU64("maxPacketBytes", options.maxPacketBytes ?? 0n), true);
   view.setUint32(56, boundedU32("timeoutMillis", options.timeoutMillis ?? 0), true);
   return request;
@@ -865,9 +1193,10 @@ function packOpenRequest(options: NnrpTransportEndpoint, endpoint: Uint8Array<Ar
 function packProbeRequest(
   options: NnrpTransportProbeOptions,
   endpoint: Uint8Array<ArrayBuffer>,
+  config: FfiHandle,
 ): Uint8Array<ArrayBuffer> {
   const request = bytes(72);
-  request.set(packOpenRequest(options, endpoint), 0);
+  request.set(packOpenRequest(options, endpoint, config), 0);
   const view = dataView(request);
   view.setUint32(64, boundedU32("sampleCount", options.sampleCount ?? 0), true);
   view.setUint32(68, boundedU32("payloadBytes", options.payloadBytes ?? 0), true);
@@ -881,13 +1210,23 @@ function endpointBytes(endpoint: string | URL, operation: string): Uint8Array<Ar
 }
 
 function nativeEndpoint(endpoint: string | URL): string {
-  return String(endpoint).trim();
+  const value = String(endpoint).trim();
+  return value.length > 0 && !value.includes("://") && DEFAULT_ENDPOINT_SCHEME !== undefined
+    ? `${DEFAULT_ENDPOINT_SCHEME}://${value}`
+    : value;
 }
 
-function assertNoSecurity(options: NnrpTransportEndpoint): void {
+async function withTransportSecurityConfig<T>(
+  options: NnrpTransportEndpoint,
+  operation: (config: FfiHandle) => Promise<T>,
+): Promise<T> {
   if (options.security !== undefined) {
-    throw transportError("NNRP_IPC_SECURITY_INVALID", "IPC endpoints do not accept transport security configuration.");
+    throw transportError(
+      "NNRP_SECURITY_INVALID",
+      `${TRANSPORT_LABEL} endpoints do not accept transport security configuration.`,
+    );
   }
+  return await operation(invalidHandle());
 }
 
 function normalizePackets(packets: Uint8Array | readonly Uint8Array[]): readonly Uint8Array<ArrayBuffer>[] {
@@ -988,13 +1327,13 @@ function writePointer(view: DataView, offset: number, payload: Uint8Array<ArrayB
 
 function assertStatus(status: Uint8Array, operation: string): void {
   if (status.byteLength < STATUS_SIZE) {
-    throw transportError("NNRP_IPC_FFI_STATUS_INVALID", `${operation} returned a short status.`);
+    throw transportError("NNRP_FFI_STATUS_INVALID", `${operation} returned a short status.`);
   }
   const view = dataView(status);
   const code = view.getUint32(0, true);
   if (code !== 0) {
     throw transportError(
-      "NNRP_IPC_FFI_STATUS_ERROR",
+      "NNRP_FFI_STATUS_ERROR",
       `${operation} failed with status=${code}, family=${view.getUint32(4, true)}, protocol=${
         view.getUint32(8, true)
       }, detail=${view.getUint32(12, true)}.`,
@@ -1007,27 +1346,37 @@ function statusCode(status: Uint8Array): number {
   return status.byteLength < STATUS_SIZE ? -1 : dataView(status).getUint32(0, true);
 }
 
+function readDenoSessionId(library: DenoTransportLibrary, session: FfiHandle): number {
+  const output = bytes(4);
+  assertStatus(library.symbols.nnrp_session_id(packHandle(session), output), "negotiated session id");
+  return dataView(output).getUint32(0, true);
+}
+
 function validateManifest(value: unknown, os: string, arch: string): string {
-  if (typeof value !== "object" || value === null) throw new Error("IPC native artifact manifest is not an object.");
-  const manifest = value as Record<string, unknown>;
-  if (manifest.package !== "nnrp-ffi-transport-ipc" || manifest.transport_scope !== "ipc") {
-    throw new Error("IPC package contains an artifact for another transport scope.");
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`${TRANSPORT_LABEL} native artifact manifest is not an object.`);
   }
-  if (manifest.abi_version !== ABI_VERSION) throw new Error(`IPC artifact requires ABI ${ABI_VERSION}.`);
+  const manifest = value as Record<string, unknown>;
+  if (manifest.package !== PACKAGE_NAME || manifest.transport_scope !== TRANSPORT_SCOPE) {
+    throw new Error(`${TRANSPORT_LABEL} package contains an artifact for another transport scope.`);
+  }
+  if (manifest.abi_version !== ABI_VERSION) throw new Error(`${TRANSPORT_LABEL} artifact requires ABI ${ABI_VERSION}.`);
   if (manifest.os !== os || manifest.arch !== arch || manifest.library_kind !== "dynamic") {
-    throw new Error(`IPC artifact does not match ${os}/${arch} dynamic loading.`);
+    throw new Error(`${TRANSPORT_LABEL} artifact does not match ${os}/${arch} dynamic loading.`);
   }
   if (typeof manifest.library !== "string" || !/^[A-Za-z0-9_.-]+$/u.test(manifest.library)) {
-    throw new Error("IPC artifact manifest has an invalid library name.");
+    throw new Error(`${TRANSPORT_LABEL} artifact manifest has an invalid library name.`);
   }
   if (typeof manifest.source_archive_sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(manifest.source_archive_sha256)) {
-    throw new Error("IPC artifact manifest has invalid checksum metadata.");
+    throw new Error(`${TRANSPORT_LABEL} artifact manifest has invalid checksum metadata.`);
   }
   const exports = Array.isArray(manifest.exports) ? manifest.exports : [];
   const missing = Object.keys(DENO_TRANSPORT_SYMBOLS)
     .filter((name) => name !== "nnrp_buffer_release")
     .filter((name) => !exports.includes(name));
-  if (missing.length > 0) throw new Error(`IPC artifact is missing transport exports: ${missing.join(", ")}.`);
+  if (missing.length > 0) {
+    throw new Error(`${TRANSPORT_LABEL} artifact is missing transport exports: ${missing.join(", ")}.`);
+  }
   return manifest.library;
 }
 
@@ -1038,10 +1387,10 @@ function nativePlatform(
   const os = osValue === "darwin" ? "macos" : osValue;
   const arch = archValue === "arm64" ? "aarch64" : archValue;
   if (!(["windows", "macos", "linux"] as const).includes(os as "windows" | "macos" | "linux")) {
-    throw new Error(`IPC Deno FFI does not support ${osValue}.`);
+    throw new Error(`${TRANSPORT_LABEL} Deno FFI does not support ${osValue}.`);
   }
   if (!(["x86_64", "x86", "aarch64", "armv7"] as const).includes(arch as "x86_64" | "x86" | "aarch64" | "armv7")) {
-    throw new Error(`IPC Deno FFI does not support ${archValue}.`);
+    throw new Error(`${TRANSPORT_LABEL} Deno FFI does not support ${archValue}.`);
   }
   return { tag: `${os}-${arch}`, os, arch };
 }
@@ -1049,7 +1398,7 @@ function nativePlatform(
 function denoRuntime(): DenoRuntime {
   const runtime = (globalThis as typeof globalThis & { readonly Deno?: DenoRuntime }).Deno;
   if (runtime === undefined || typeof runtime.dlopen !== "function") {
-    throw new Error("IPC packaged native loading requires Deno FFI or an explicit managed binding.");
+    throw new Error(`${TRANSPORT_LABEL} packaged native loading requires Deno FFI or an explicit managed binding.`);
   }
   return runtime;
 }
@@ -1078,5 +1427,11 @@ function dataView(source: Uint8Array): DataView {
 }
 
 function transportError(code: string, message: string, retryable = false): NnrpTransportError {
-  return new NnrpTransportError({ code, message, source: "transport", retryable, transport: "ipc" });
+  return new NnrpTransportError({
+    code,
+    message,
+    source: "transport",
+    retryable,
+    transport: TRANSPORT_KIND,
+  });
 }

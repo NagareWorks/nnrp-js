@@ -10,10 +10,9 @@ const runtime = await openBrowserRuntime({
 
 const client = runtime.connect({
   endpoint: "wss://nnrp.example.test/session",
-  sessionDefaults: { inputProfile: "token", metadata: { app: "nnrp-browser-client-example" } },
 });
 
-const session = client.openSession();
+const session = await client.openSession();
 
 try {
   const result = await session.submit(createTokenSubmitRequest({

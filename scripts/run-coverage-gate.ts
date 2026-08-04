@@ -9,9 +9,13 @@ const excludedSources = new Set([
   "packages/browser-client/wasm/nnrp_wasm.js",
   "packages/native-client/src/index.ts",
   "packages/native-server/src/index.ts",
+  "packages/transport-ipc/src/native-node.ts",
   "packages/transport-ipc/src/native.ts",
+  "packages/transport-quic/src/native-node.ts",
   "packages/transport-quic/src/native.ts",
+  "packages/transport-tcp/src/native-node.ts",
   "packages/transport-tcp/src/native.ts",
+  "packages/transport-websocket/src/native-node.ts",
   "packages/transport-websocket/src/native.ts",
   "scripts/run-host-route-target.ts",
 ]);

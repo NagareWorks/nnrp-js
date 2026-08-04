@@ -23,7 +23,7 @@ import { createSuccessResult } from "./runtime-event-fixtures.ts";
 
 const RESULT_SCHEMA_URL =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/benchmark-results.schema.json";
-const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.21";
+const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22";
 const DEFAULT_DURATION_SECONDS = 3;
 const DEFAULT_WARMUP_ITERATIONS = 100;
 const DEFAULT_PAYLOAD_BYTES = 1024;
@@ -320,7 +320,7 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     endpoint: "nnrp://localhost/benchmark-browser",
     providerRoutes: { websocket: { endpoint: providerEndpoint } },
   });
-  const session = client.openSession({ sessionId: "benchmark-browser", inputProfile: "token" });
+  const session = await client.openSession();
   const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
   const serverSessionPromise = accepting;
   const bootstrap = session.submit(tokenSubmit(1n, 1, payload));
@@ -374,7 +374,7 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
     transports: [provider],
     transportPolicy: policy,
   });
-  const clientSession = client.openSession({ sessionId: `benchmark-${transport}`, inputProfile: "token" });
+  const clientSession = await client.openSession();
   const payload = new Uint8Array(1);
   const bootstrap = clientSession.submit(tokenSubmit(1n, 1, payload));
   const serverSession = await accepting;

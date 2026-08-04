@@ -49,7 +49,7 @@ async function run(): Promise<void> {
   });
   await postReady(readyEndpoint);
   let client: ReturnType<typeof runtime.connect> | undefined;
-  let session: ReturnType<ReturnType<typeof runtime.connect>["openSession"]> | undefined;
+  let session: Awaited<ReturnType<ReturnType<typeof runtime.connect>["openSession"]>> | undefined;
   try {
     ({ client, session } = await connectAndSubmit(runtime, providerEndpoint));
     observe("received", "REQUEST", { operation_id: "301", frame_id: 301 });
@@ -124,13 +124,14 @@ async function connectAndSubmit(
       providerRoutes: { websocket: { endpoint: providerEndpoint } },
       transportPolicy: "force-websocket",
     });
-    const session = client.openSession({ sessionId: `wire-browser-${attempt}`, inputProfile: "token" });
+    let session: Awaited<ReturnType<typeof client.openSession>> | undefined;
     try {
+      session = await client.openSession();
       await session.submitNoWait(tokenSubmit(301n, 301, REQUEST_BODY));
       return { client, session };
     } catch (error) {
       lastError = error;
-      await session.close().catch(() => undefined);
+      await session?.close().catch(() => undefined);
       await client.close().catch(() => undefined);
       await delay(CONNECT_RETRY_MILLIS);
     }

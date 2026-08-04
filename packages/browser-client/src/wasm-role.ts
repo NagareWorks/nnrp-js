@@ -6,6 +6,7 @@ import {
   type NnrpRuntimeEvent,
   type NnrpRuntimeFrameHeader,
   type NnrpSessionPatchRequest,
+  NnrpSessionRecoveryTicket,
   type NnrpSubmitHeaderContext,
   type NnrpTransportConnection,
 } from "@nnrp/core";
@@ -25,6 +26,12 @@ export interface BrowserRoleConfig {
   readonly defaultDeadlineMs: number;
   readonly maxInFlightOperations: number;
   readonly leaseTtlHintMs: number;
+  readonly allowResume: boolean;
+  readonly resumeTokenBytes: number;
+  readonly cacheHints: readonly number[];
+}
+
+export interface BrowserConnectionConfig {
   readonly maxPacketBytes: number;
 }
 
@@ -55,7 +62,17 @@ interface BrowserClientRoleBinding {
   ): Promise<number>;
   sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
   patchSession(metadata: Uint8Array): Promise<Uint8Array>;
+  recoveryTicket(): Uint8Array | undefined;
   awaitEvent(): Promise<BrowserRoleEventPacket>;
+  ingestPackets(packets: Uint8Array | readonly Uint8Array[]): void;
+  failReceive(detail: string): void;
+  close(): Promise<void>;
+  free?(): void;
+}
+
+interface BrowserClientConnectionBinding {
+  openSession(configJson: string): Promise<BrowserClientRoleBinding>;
+  resumeSession(recoveryTicket: Uint8Array, configJson: string): Promise<BrowserClientRoleBinding>;
   ingestPackets(packets: Uint8Array | readonly Uint8Array[]): void;
   failReceive(detail: string): void;
   close(): Promise<void>;
@@ -65,12 +82,12 @@ interface BrowserClientRoleBinding {
 export interface BrowserWasmModule {
   readonly nnrp_wasm_protocol_major: () => number;
   readonly nnrp_wasm_wire_format: () => number;
-  readonly openBrowserClientRole: (
+  readonly openBrowserClientConnection: (
     send: (packet: Uint8Array) => void | Promise<void>,
     receive: () => Uint8Array | readonly Uint8Array[] | Promise<Uint8Array | readonly Uint8Array[]>,
     close: () => void | Promise<void>,
     configJson: string,
-  ) => Promise<BrowserClientRoleBinding>;
+  ) => Promise<BrowserClientConnectionBinding>;
   readonly default: (
     moduleOrPath?:
       | {
@@ -87,7 +104,14 @@ export interface BrowserWasmRole {
   submitNoWait(frameId: number, header: NnrpSubmitHeaderContext, payload: Uint8Array): Promise<bigint>;
   sendRuntimeFrame(messageType: NnrpMessageType, frameId: number, payload: Uint8Array): Promise<void>;
   patchSession(request: NnrpSessionPatchRequest, activeProfile: NnrpInputProfile | undefined): Promise<BrowserPatchAck>;
-  awaitEvent(sessionId: string): Promise<NnrpRuntimeEvent>;
+  awaitEvent(): Promise<NnrpRuntimeEvent>;
+  recoveryTicket(): NnrpSessionRecoveryTicket | undefined;
+  close(): Promise<void>;
+}
+
+export interface BrowserWasmConnection {
+  openSession(config: BrowserRoleConfig): Promise<BrowserWasmRole>;
+  resumeSession(ticket: NnrpSessionRecoveryTicket, config: BrowserRoleConfig): Promise<BrowserWasmRole>;
   close(): Promise<void>;
 }
 
@@ -117,7 +141,7 @@ export async function loadBrowserWasmModule(
   }
   const binding = imported as Partial<BrowserWasmModule>;
   if (
-    typeof binding.default !== "function" || typeof binding.openBrowserClientRole !== "function" ||
+    typeof binding.default !== "function" || typeof binding.openBrowserClientConnection !== "function" ||
     typeof binding.nnrp_wasm_protocol_major !== "function" || typeof binding.nnrp_wasm_wire_format !== "function"
   ) {
     throw new NnrpWasmBindingUnavailableError({
@@ -141,23 +165,23 @@ export async function loadBrowserWasmModule(
   return binding as BrowserWasmModule;
 }
 
-export async function openBrowserWasmRole(
+export async function openBrowserWasmConnection(
   wasm: BrowserWasmModule,
   connection: NnrpTransportConnection,
-  config: BrowserRoleConfig,
-): Promise<BrowserWasmRole> {
-  let binding: BrowserClientRoleBinding;
-  let callbackError: unknown;
+  config: BrowserConnectionConfig,
+): Promise<BrowserWasmConnection> {
+  let binding: BrowserClientConnectionBinding;
+  let carrierError: unknown;
   let closed = false;
-  const resetCallbackError = () => callbackError = undefined;
-  resetCallbackError();
+  let receivePump: Promise<void> | undefined;
+  const roles = new Set<BrowserWasmRole>();
   try {
-    binding = await wasm.openBrowserClientRole(
+    binding = await wasm.openBrowserClientConnection(
       async (packet) => {
         try {
           await connection.send(packet);
         } catch (error) {
-          callbackError = error;
+          carrierError ??= error;
           throw error;
         }
       },
@@ -165,7 +189,7 @@ export async function openBrowserWasmRole(
         try {
           return await connection.receive({ maxPackets: 16 });
         } catch (error) {
-          callbackError = error;
+          carrierError ??= error;
           throw error;
         }
       },
@@ -173,7 +197,7 @@ export async function openBrowserWasmRole(
         try {
           await connection.close();
         } catch (error) {
-          callbackError = error;
+          carrierError ??= error;
           throw error;
         }
       },
@@ -185,16 +209,74 @@ export async function openBrowserWasmRole(
     } catch {
       // Preserve the role-open or carrier callback failure that caused cleanup.
     }
-    throw callbackError ?? error;
+    throw carrierError ?? error;
   }
-  const receivePump = pumpBrowserCarrierReceives(binding, connection, () => closed, (error) => {
-    callbackError = error;
-  });
+
+  const ensureReceivePump = () => {
+    receivePump ??= pumpBrowserCarrierReceives(binding, connection, () => closed, (error) => {
+      carrierError ??= error;
+    });
+  };
+  const openRole = async (operation: () => Promise<BrowserClientRoleBinding>): Promise<BrowserWasmRole> => {
+    if (closed) throw new Error("browser WASM connection is closed");
+    let roleBinding: BrowserClientRoleBinding;
+    try {
+      roleBinding = await operation();
+    } catch (error) {
+      throw carrierError ?? error;
+    }
+    ensureReceivePump();
+    const role = wrapBrowserWasmRole(roleBinding, () => carrierError, () => roles.delete(role));
+    roles.add(role);
+    return role;
+  };
+
   return {
-    sessionId: binding.sessionId,
+    openSession: async (roleConfig) => await openRole(() => binding.openSession(JSON.stringify(roleConfig))),
+    resumeSession: async (ticket, roleConfig) =>
+      await openRole(() => binding.resumeSession(ticket.toBytes(), JSON.stringify(roleConfig))),
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      let closeError: unknown;
+      for (const role of [...roles]) {
+        try {
+          await role.close();
+        } catch (error) {
+          closeError ??= carrierError ?? error;
+        }
+      }
+      roles.clear();
+      try {
+        await binding.close();
+      } catch (error) {
+        closeError ??= carrierError ?? error;
+      } finally {
+        try {
+          await connection.close();
+        } catch (error) {
+          closeError ??= error;
+        }
+        if (receivePump !== undefined) await receivePump;
+        binding.free?.();
+      }
+      if (closeError !== undefined) throw closeError;
+    },
+  };
+}
+
+function wrapBrowserWasmRole(
+  binding: BrowserClientRoleBinding,
+  carrierError: () => unknown,
+  release: () => void,
+): BrowserWasmRole {
+  let closed = false;
+  const sessionId = assertNegotiatedBrowserSessionId(binding.sessionId);
+  return {
+    sessionId,
     submitNoWait: async (frameId, header, payload) =>
       BigInt(
-        await withCallbackError(
+        await withCarrierError(
           () =>
             binding.submitNoWait(
               frameId,
@@ -204,64 +286,62 @@ export async function openBrowserWasmRole(
               header.traceId,
               payload,
             ),
-          () => callbackError,
-          resetCallbackError,
+          carrierError,
         ),
       ),
     sendRuntimeFrame: async (messageType, frameId, payload) => {
-      await withCallbackError(
+      await withCarrierError(
         () => binding.sendRuntimeFrame(messageType, frameId, payload),
-        () => callbackError,
-        resetCallbackError,
+        carrierError,
       );
     },
     patchSession: async (request, activeProfile) => {
       const metadata = encodeSessionPatch(request, activeProfile);
       return decodeSessionPatchAck(
-        await withCallbackError(
+        await withCarrierError(
           () => binding.patchSession(metadata),
-          () => callbackError,
-          resetCallbackError,
+          carrierError,
         ),
         request,
       );
     },
-    awaitEvent: async (sessionId) => {
-      const packet = await withCallbackError(
+    awaitEvent: async () => {
+      const packet = await withCarrierError(
         () => binding.awaitEvent(),
-        () => callbackError,
-        resetCallbackError,
+        carrierError,
       );
       try {
-        return decodeBrowserRoleEvent(packet, sessionId);
+        return decodeBrowserRoleEvent(packet);
       } finally {
         packet.free?.();
       }
     },
+    recoveryTicket: () => {
+      const encoded = binding.recoveryTicket();
+      return encoded === undefined ? undefined : NnrpSessionRecoveryTicket.fromBytes(encoded);
+    },
     close: async () => {
       if (closed) return;
       closed = true;
-      let closeError: unknown;
       try {
-        await withCallbackError(() => binding.close(), () => callbackError, resetCallbackError);
-      } catch (error) {
-        closeError = error;
+        await withCarrierError(() => binding.close(), carrierError);
       } finally {
-        try {
-          await connection.close();
-        } catch (error) {
-          closeError ??= error;
-        }
-        await receivePump;
+        release();
         binding.free?.();
       }
-      if (closeError !== undefined) throw closeError;
     },
   };
 }
 
+export function assertNegotiatedBrowserSessionId(sessionId: number): number {
+  if (!Number.isInteger(sessionId) || sessionId <= 0 || sessionId > 0xffff_ffff) {
+    throw new RangeError("negotiated sessionId must be a non-zero u32");
+  }
+  return sessionId;
+}
+
 async function pumpBrowserCarrierReceives(
-  binding: BrowserClientRoleBinding,
+  binding: BrowserClientConnectionBinding,
   connection: NnrpTransportConnection,
   closed: () => boolean,
   recordError: (error: unknown) => void,
@@ -283,16 +363,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function withCallbackError<T>(
+async function withCarrierError<T>(
   operation: () => Promise<T>,
-  callbackError: () => unknown,
-  resetCallbackError: () => void,
+  carrierError: () => unknown,
 ): Promise<T> {
-  resetCallbackError();
   try {
     return await operation();
   } catch (error) {
-    throw callbackError() ?? error;
+    throw carrierError() ?? error;
   }
 }
 
@@ -392,7 +470,7 @@ function decodeSessionPatchAck(bytes: Uint8Array, request: NnrpSessionPatchReque
   };
 }
 
-function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket, _sessionId: string): NnrpRuntimeEvent {
+function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket): NnrpRuntimeEvent {
   const header: NnrpRuntimeFrameHeader = {
     versionMajor: packet.versionMajor as 1,
     wireFormat: packet.wireFormat as 0,

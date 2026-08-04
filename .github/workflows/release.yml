@@ -32,7 +32,7 @@ on:
       rust_artifact_version:
         description: nnrp-rs release version that provides the Linux native benchmark artifact.
         required: true
-        default: 1.0.0-preview.4.21
+        default: 1.0.0-preview.4.22
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -69,13 +69,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-rs
-          ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.21' }}
+          ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.22' }}
           path: .rust-benchmark
       - name: Checkout conformance suite
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-conformance
-          ref: b1836bcf372ac4fbd2a5f106cd09f6a628a4c647
+          ref: 0072970d1212a650fa8a1be83b7b2a61c817f799
           path: .conformance
       - name: Resolve version
         id: version
@@ -127,7 +127,7 @@ jobs:
       - name: Verify release gates
         env:
           GH_TOKEN: ${{ github.token }}
-          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.21' }}
+          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.22' }}
         run: deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run
       - name: Run suite-owned Preview4 adapter conformance
         uses: ./.conformance/.github/actions/run-conformance

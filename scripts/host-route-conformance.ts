@@ -127,6 +127,12 @@ export interface HostRouteFixture {
 export interface HostRouteScenario {
   readonly id: string;
   readonly host_route: HostRouteFixture;
+  readonly steps?: readonly HostRouteStep[];
+}
+
+export interface HostRouteStep {
+  readonly action: string;
+  readonly timeout_ms?: number;
 }
 
 export interface HostRouteCandidateEvidence {
@@ -230,10 +236,17 @@ export function validateHostRouteScenario(value: unknown): HostRouteScenario {
   ) {
     throw new Error("Host-route fixture repeats a transport or provider id.");
   }
+  const steps = validateSteps(scenario.steps);
   return {
     id,
     host_route: { role, platform, application_endpoint: applicationEndpoint, routes },
+    ...(steps === undefined ? {} : { steps }),
   };
+}
+
+export function hostRouteTimeoutMillis(scenario: HostRouteScenario, fallbackMillis: number): number {
+  const declared = scenario.steps?.flatMap((step) => step.timeout_ms === undefined ? [] : [step.timeout_ms]) ?? [];
+  return declared.length === 0 ? fallbackMillis : Math.max(...declared);
 }
 
 export function createClientRouteEvidence(
@@ -381,6 +394,22 @@ function validateRoute(value: unknown, index: number): HostProviderRoute {
       injected_failures: failures as HostProviderRoute["injected_failures"],
     }),
   };
+}
+
+function validateSteps(value: unknown): readonly HostRouteStep[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) throw new Error("scenario.steps must be a non-empty array.");
+  return value.map((step, index) => {
+    const entry = record(step, `scenario.steps[${index}]`);
+    const timeout = entry.timeout_ms;
+    if (timeout !== undefined && (!Number.isSafeInteger(timeout) || (timeout as number) <= 0)) {
+      throw new Error(`scenario.steps[${index}].timeout_ms must be a positive safe integer.`);
+    }
+    return {
+      action: requiredString(entry, "action"),
+      ...(timeout === undefined ? {} : { timeout_ms: timeout as number }),
+    };
+  });
 }
 
 function serverCandidate(route: HostProviderRoute): HostRouteCandidateEvidence {

@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpClientProviderRoutes, type NnrpDiagnostic, type NnrpEventPollOptions, type NnrpInputProfile, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionFlowControlOptions, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidateReadiness, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, type NnrpCacheObjectKind, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpClientProviderRoutes, type NnrpDiagnostic, type NnrpEventPollOptions, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, NnrpSessionPriorityClass, NnrpSessionRecoveryTicket, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidateReadiness, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -52,12 +52,18 @@ export interface NnrpNativeFfiBinding {
     awaitEvents?(request: NnrpNativeEventBatchRequest): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
     close?(): void | Promise<void>;
 }
-export interface NnrpSessionOptions extends NnrpSessionFlowControlOptions {
-    readonly sessionId?: string;
-    readonly inputProfile?: NnrpInputProfile;
-    readonly targetCadence?: number;
-    readonly qualityTier?: number;
-    readonly metadata?: Readonly<Record<string, string>>;
+export interface NnrpSessionOptions {
+    readonly requestedSessionId?: number;
+    readonly profileId?: number;
+    readonly schemaId?: number;
+    readonly schemaVersion?: number;
+    readonly priorityClass?: NnrpSessionPriorityClass;
+    readonly defaultDeadlineMillis?: number;
+    readonly maxInFlightOperations?: number;
+    readonly leaseTtlHintMillis?: number;
+    readonly allowResume?: boolean;
+    readonly resumeTokenBytes?: number;
+    readonly cacheHints?: readonly NnrpCacheObjectKind[];
 }
 export interface NnrpNativeClientOptions {
     readonly endpoint: string | URL;
@@ -125,20 +131,22 @@ export declare class NnrpClient {
     get endpoint(): string;
     get transportPolicy(): NnrpTransportPolicy;
     get runtime(): NnrpBackendRuntime;
-    openSession(options?: NnrpSessionOptions): NnrpClientSession;
-    nextSessionEvent(sessionId: string, options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
+    openSession(options?: NnrpSessionOptions): Promise<NnrpClientSession>;
+    resumeSession(ticket: NnrpSessionRecoveryTicket, options?: NnrpSessionOptions): Promise<NnrpClientSession>;
+    nextSessionEvent(sessionId: number, options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
     close(): Promise<void>;
     get closed(): boolean;
 }
 export interface NnrpClientSessionState {
     readonly client: NnrpClient;
-    options: NnrpSessionOptions;
+    readonly options: NnrpSessionOptions;
+    readonly sessionId: number;
 }
 export declare class NnrpClientSession {
     #private;
     constructor(state: NnrpClientSessionState);
     get options(): NnrpSessionOptions;
-    get sessionId(): string;
+    get sessionId(): number;
     submit(request: NnrpSubmitRequest, options?: NnrpSubmitOptions): Promise<NnrpResult>;
     submitNoWait(request: NnrpSubmitRequest, options?: NnrpSubmitOptions): Promise<bigint>;
     cancel(metadata: ControlRequestMetadata, diagnostic?: Uint8Array): Promise<void>;
@@ -169,6 +177,7 @@ export declare class NnrpClientSession {
     migrate(request: NnrpSessionMigrationRequest): Promise<void>;
     patch(request: NnrpSessionPatchRequest): Promise<NnrpSessionPatchResult>;
     events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
+    recoveryTicket(): NnrpSessionRecoveryTicket | undefined;
     close(): Promise<void>;
     get closed(): boolean;
 }

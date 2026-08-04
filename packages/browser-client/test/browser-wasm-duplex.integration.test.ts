@@ -12,7 +12,7 @@ import {
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { assertRuntimeMetadata } from "../../../scripts/runtime-event-fixtures.ts";
-import { loadBrowserWasmModule, openBrowserWasmRole } from "../src/wasm-role.ts";
+import { loadBrowserWasmModule, openBrowserWasmConnection } from "../src/wasm-role.ts";
 
 Deno.test({
   name: "package-owned browser WASM role remains full duplex while awaiting an event",
@@ -60,17 +60,20 @@ Deno.test({
       "",
       module,
     );
+    const wasmConnection = await openBrowserWasmConnection(wasm, connection, { maxPacketBytes: 67_108_864 });
     const role = await within(
-      openBrowserWasmRole(wasm, connection, {
+      wasmConnection.openSession({
         requestedSessionId: 1,
         profileId: 2,
         schemaId: 0x0000_1001,
         schemaVersion: 3,
         priorityClass: 1,
-        defaultDeadlineMs: 30_000,
+        defaultDeadlineMs: 500,
         maxInFlightOperations: 4,
-        leaseTtlHintMs: 0,
-        maxPacketBytes: 67_108_864,
+        leaseTtlHintMs: 30_000,
+        allowResume: false,
+        resumeTokenBytes: 0,
+        cacheHints: [],
       }),
       "WASM role handshake did not complete",
     );
@@ -78,7 +81,7 @@ Deno.test({
 
     let failure: unknown;
     try {
-      const pendingEvent = role.awaitEvent("browser-wasm-duplex").catch((error) => error);
+      const pendingEvent = role.awaitEvent().catch((error) => error);
       const metadata = {
         traceId: 1n,
         spanId: 2n,
@@ -117,7 +120,7 @@ Deno.test({
         (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
         NnrpMessageType.FrameSubmit,
       );
-      const pendingAfterSubmit = role.awaitEvent("browser-wasm-duplex").catch((error) => error);
+      const pendingAfterSubmit = role.awaitEvent().catch((error) => error);
       await within(
         role.sendRuntimeFrame(
           NnrpMessageType.Cancel,
@@ -154,16 +157,17 @@ Deno.test({
           );
           await serverSession.close();
           await within(clientClosing, "WASM role close did not complete");
+          await wasmConnection.close();
         } catch (error) {
           failure = error;
         }
       } else {
-        await connection.close();
         try {
           await within(role.close(), "WASM role close did not complete");
         } catch {
           // Preserve the failure that forced transport cleanup.
         }
+        await wasmConnection.close().catch(() => undefined);
       }
       if (failure !== undefined) await serverSession.close();
       await server.close();

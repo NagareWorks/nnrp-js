@@ -41,7 +41,7 @@ export interface NormalizedBrowserArtifactManifest extends Record<string, unknow
 export const BROWSER_WASM_REQUIRED_EXPORTS = [
   "nnrp_wasm_protocol_major",
   "nnrp_wasm_wire_format",
-  "openBrowserClientRole",
+  "openBrowserClientConnection",
   "selectTransportWithProbeJson",
   "summarizeProviderProbeJson",
   "encodeWebSocketBinaryFrameJson",
@@ -112,8 +112,8 @@ export function normalizeNativeArtifactManifest(
   ) {
     throw new Error(`${source.archive}: transport_slots must contain only ${transport}`);
   }
-  if (value.abi_version !== "4.3.0") {
-    throw new Error(`${source.archive}: expected Rust ABI 4.3.0`);
+  if (value.abi_version !== "4.4.0") {
+    throw new Error(`${source.archive}: expected Rust ABI 4.4.0`);
   }
   if (typeof value.package !== "string" || value.package !== `nnrp-ffi-transport-${transport}`) {
     throw new Error(`${source.archive}: package does not match ${transport} transport scope`);

@@ -254,7 +254,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
   });
   const accepting = server.accept();
   let client: Awaited<ReturnType<typeof openNativeClient>> | undefined;
-  let clientSession: ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]> | undefined;
+  let clientSession: Awaited<ReturnType<Awaited<ReturnType<typeof openNativeClient>>["openSession"]>> | undefined;
   let serverSession: Awaited<ReturnType<typeof server.accept>> | undefined;
 
   try {
@@ -274,9 +274,15 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       timeoutMillis,
       `${options.provider.kind} client connect`,
     );
-    clientSession = client.openSession({ inputProfile: "token" });
+    clientSession = await client.openSession();
     await clientSession.submitNoWait(tokenSubmit(1n, 1, new TextEncoder().encode("ping")));
     serverSession = await withTimeout(accepting, timeoutMillis, `${options.provider.kind} server accept`);
+    if (clientSession.sessionId === 0 || clientSession.sessionId !== serverSession.sessionId) {
+      throw new Error(
+        `${options.provider.kind}: negotiated session identity mismatch ` +
+          `(client=${clientSession.sessionId}, server=${serverSession.sessionId})`,
+      );
+    }
     const submit = await withTimeout(
       serverSession.receive({ timeoutMillis }),
       timeoutMillis,
@@ -310,7 +316,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       objectKind: RuntimeObjectKind.Tensor,
       producerRole: RuntimeRole.Client,
       consumerRole: RuntimeRole.Server,
-      sessionId: 1,
+      sessionId: clientSession.sessionId,
       byteSize: 4n,
       computeCostUnits: 1,
       memoryLocationHint: MemoryLocationHint.HostMemory,

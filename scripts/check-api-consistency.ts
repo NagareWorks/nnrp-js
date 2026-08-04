@@ -62,9 +62,9 @@ async function checkFrozenMachineContract(): Promise<void> {
     return;
   }
 
-  if (contract.contract !== "nnrp-1-preview4-sdk-api" || contract.contractVersion !== 8) {
+  if (contract.contract !== "nnrp-1-preview4-sdk-api" || contract.contractVersion !== 9) {
     failures.push(
-      `expected nnrp-1-preview4-sdk-api contract version 8, received ${contract.contract}@${contract.contractVersion}`,
+      `expected nnrp-1-preview4-sdk-api contract version 9, received ${contract.contract}@${contract.contractVersion}`,
     );
     return;
   }
@@ -79,6 +79,21 @@ async function checkFrozenMachineContract(): Promise<void> {
   checkProjection(contract, "operationLifecycleEvent", "@nnrp/core.NnrpOperationLifecycleEvent");
   checkProjection(contract, "terminalEvent", "@nnrp/core.NnrpTerminalEvent");
   checkProjection(contract, "result", "@nnrp/core.NnrpResult");
+  checkProjection(contract, "sessionRecoveryTicket", "@nnrp/core.NnrpSessionRecoveryTicket");
+  checkProjection(contract, "sessionRecoveryTicketEncode", "NnrpSessionRecoveryTicket.toBytes");
+  checkProjection(contract, "sessionRecoveryTicketDecode", "NnrpSessionRecoveryTicket.fromBytes");
+
+  for (
+    const requiredSurface of [
+      "export class NnrpSessionRecoveryTicket",
+      "public toBytes(): Uint8Array",
+      "public static fromBytes(encoded: Uint8Array): NnrpSessionRecoveryTicket",
+    ]
+  ) {
+    if (!coreSource.includes(requiredSurface)) {
+      failures.push(`@nnrp/core is missing frozen recovery-ticket surface: ${requiredSurface}`);
+    }
+  }
 
   checkInterfaceFields(
     coreSource,
@@ -147,6 +162,292 @@ async function checkFrozenMachineContract(): Promise<void> {
   }
   checkMethodSignature(nativeServerSource, "receive", "Promise<NnrpRuntimeEvent>");
   checkMethodSignature(nativeServerSource, "sendResult", "Promise<void>", "result: NnrpResult");
+  checkV9OptionAndRoleSurfaces(contract, nativeClientSource, browserClientSource, nativeServerSource);
+  checkNegotiatedSessionIdentity(nativeClientSource, browserClientSource, nativeServerSource);
+  checkBrowserNegotiatedSessionIdentity(await Deno.readTextFile("packages/browser-client/src/wasm-role.ts"));
+  await checkProviderSessionIdentityAbi();
+}
+
+function checkBrowserNegotiatedSessionIdentity(browserWasmRoleSource: string): void {
+  for (
+    const required of [
+      "assertNegotiatedBrowserSessionId(binding.sessionId)",
+      'throw new RangeError("negotiated sessionId must be a non-zero u32")',
+    ]
+  ) {
+    if (!browserWasmRoleSource.includes(required)) {
+      failures.push(`@nnrp/browser-client must validate provider-reported session identity: ${required}`);
+    }
+  }
+}
+
+function checkV9OptionAndRoleSurfaces(
+  contract: FrozenSdkContract,
+  nativeClientSource: string,
+  browserClientSource: string,
+  nativeServerSource: string,
+): void {
+  for (
+    const [key, projection] of [
+      ["clientBootstrapOptions", "@nnrp/native-client.NnrpNativeClientOptions"],
+      ["clientSessionOptions", "@nnrp/native-client.NnrpSessionOptions"],
+      ["serverBootstrapOptions", "@nnrp/native-server.NnrpListenOptions"],
+      ["serverSessionOptions", "@nnrp/native-server.NnrpServerSessionOptions"],
+      ["serverAcceptOptions", "@nnrp/native-server.NnrpServerAcceptOptions"],
+      ["serverSessionPolicy", "@nnrp/native-server.NnrpServerSessionPolicy"],
+    ] as const
+  ) {
+    checkProjection(contract, key, projection);
+  }
+
+  const clientSessionFields = [
+    "requestedSessionId",
+    "profileId",
+    "schemaId",
+    "schemaVersion",
+    "priorityClass",
+    "defaultDeadlineMillis",
+    "maxInFlightOperations",
+    "leaseTtlHintMillis",
+    "allowResume",
+    "resumeTokenBytes",
+    "cacheHints",
+  ] as const;
+  const clientSessionTypes = {
+    requestedSessionId: "number",
+    profileId: "number",
+    schemaId: "number",
+    schemaVersion: "number",
+    priorityClass: "NnrpSessionPriorityClass",
+    defaultDeadlineMillis: "number",
+    maxInFlightOperations: "number",
+    leaseTtlHintMillis: "number",
+    allowResume: "boolean",
+    resumeTokenBytes: "number",
+    cacheHints: "readonly NnrpCacheObjectKind[]",
+  } as const;
+  checkInterfaceFields(nativeClientSource, "NnrpSessionOptions", clientSessionFields, clientSessionTypes);
+  checkInterfaceFields(browserClientSource, "NnrpBrowserSessionOptions", clientSessionFields, clientSessionTypes);
+
+  checkInterfaceFields(
+    nativeClientSource,
+    "NnrpNativeClientOptions",
+    ["endpoint", "providerRoutes", "transports", "transportPolicy", "sessionDefaults", "ffi"],
+    {
+      endpoint: "string | URL",
+      providerRoutes: "NnrpClientProviderRoutes",
+      transports: "readonly NnrpNativeTransportProvider[]",
+      transportPolicy: "NnrpTransportPolicy",
+      sessionDefaults: "NnrpSessionOptions",
+      ffi: "NnrpNativeFfiBinding",
+    },
+  );
+  checkInterfaceFields(
+    nativeServerSource,
+    "NnrpListenOptions",
+    ["endpoint", "providerRoutes", "transports", "transportPolicy", "sessionDefaults"],
+    {
+      endpoint: "string | URL",
+      providerRoutes: "NnrpServerProviderRoutes",
+      transports: "readonly NnrpNativeTransportProvider[]",
+      transportPolicy: "NnrpTransportPolicy",
+      sessionDefaults: "NnrpServerSessionOptions",
+    },
+  );
+  checkInterfaceFields(
+    nativeServerSource,
+    "NnrpServerSessionOptions",
+    contractFields(contract, "ServerSessionOptions"),
+    {
+      supportedProfiles: "readonly number[]",
+      supportedCacheObjects: "readonly number[]",
+      maxCacheObjects: "bigint",
+      maxCacheObjectBytes: "number",
+      schemaRegistry: "NnrpSchemaRegistry",
+      resumeTokenBytes: "number",
+      maxInFlightOperations: "number",
+      grantedOperationCredit: "number",
+      leaseTtlMs: "number",
+      resumeWindowMs: "number",
+      applicationPolicy: "NnrpServerSessionPolicy",
+    },
+  );
+  checkInterfaceFields(
+    nativeServerSource,
+    "NnrpServerAcceptOptions",
+    ["timeoutMs"],
+    { timeoutMs: "number" },
+  );
+  checkInterfaceFields(
+    nativeServerSource,
+    "NnrpServerSessionPolicyDecision",
+    contractFields(contract, "ServerSessionPolicyDecision"),
+    { accepted: "boolean", sessionErrorCode: "number", diagnostic: "string" },
+  );
+
+  checkClassMethodSignature(
+    nativeClientSource,
+    "NnrpClient",
+    "openSession",
+    "Promise<NnrpClientSession>",
+    "options: NnrpSessionOptions",
+  );
+  checkClassMethodSignature(
+    nativeClientSource,
+    "NnrpClient",
+    "resumeSession",
+    "Promise<NnrpClientSession>",
+    "ticket: NnrpSessionRecoveryTicket",
+  );
+  checkClassMethodSignature(
+    nativeClientSource,
+    "NnrpClientSession",
+    "recoveryTicket",
+    "NnrpSessionRecoveryTicket | undefined",
+  );
+  checkClassMethodSignature(
+    browserClientSource,
+    "NnrpBrowserClient",
+    "openSession",
+    "Promise<NnrpBrowserClientSession>",
+    "options: NnrpBrowserSessionOptions",
+  );
+  checkClassMethodSignature(
+    browserClientSource,
+    "NnrpBrowserClient",
+    "resumeSession",
+    "Promise<NnrpBrowserClientSession>",
+    "ticket: NnrpSessionRecoveryTicket",
+  );
+  checkClassMethodSignature(
+    browserClientSource,
+    "NnrpBrowserClientSession",
+    "recoveryTicket",
+    "NnrpSessionRecoveryTicket | undefined",
+  );
+  checkClassMethodSignature(
+    nativeServerSource,
+    "NnrpServer",
+    "accept",
+    "Promise<NnrpServerSession>",
+    "options: NnrpServerAcceptOptions",
+  );
+  checkInterfaceMethodSignature(
+    nativeServerSource,
+    "NnrpServerSessionPolicy",
+    "evaluate",
+    "Promise<NnrpServerSessionPolicyDecision>",
+    "open: NnrpSessionOpenMetadata",
+  );
+
+  checkRequiredSourceFragments("native client session defaults", nativeClientSource, [
+    "requestedSessionId: options.requestedSessionId ?? 0",
+    "profileId: options.profileId ?? NNRP_STANDARD_PROFILE_TOKEN",
+    "schemaId: options.schemaId ?? NNRP_TOKEN_DELTA_SCHEMA_ID",
+    "schemaVersion: options.schemaVersion ?? NNRP_TOKEN_DELTA_SCHEMA_VERSION",
+    "priorityClass: options.priorityClass ?? NnrpSessionPriorityClass.Balanced",
+    "defaultDeadlineMillis: options.defaultDeadlineMillis ?? 500",
+    "maxInFlightOperations: options.maxInFlightOperations ?? 4",
+    "leaseTtlHintMillis: options.leaseTtlHintMillis ?? 30_000",
+    "allowResume: options.allowResume ?? false",
+    "resumeTokenBytes: options.resumeTokenBytes ?? 0",
+    "cacheHints: Object.freeze([...(options.cacheHints ?? [])])",
+  ]);
+  checkRequiredSourceFragments("browser client session defaults", browserClientSource, [
+    "requestedSessionId: 0",
+    "profileId: NNRP_STANDARD_PROFILE_TOKEN",
+    "schemaId: NNRP_TOKEN_DELTA_SCHEMA_ID",
+    "schemaVersion: NNRP_TOKEN_DELTA_SCHEMA_VERSION",
+    "priorityClass: NnrpSessionPriorityClass.Balanced",
+    "defaultDeadlineMillis: 500",
+    "maxInFlightOperations: 4",
+    "leaseTtlHintMillis: 30_000",
+    "allowResume: false",
+    "resumeTokenBytes: 0",
+    "cacheHints: Object.freeze([])",
+  ]);
+  checkRequiredSourceFragments("browser session open metadata validation", browserClientSource, [
+    "resumeTokenBytes: merged.resumeTokenBytes",
+  ]);
+  checkRequiredSourceFragments("native server session defaults", nativeServerSource, [
+    "options.supportedProfiles ?? [NnrpStandardProfile.Token]",
+    "options.supportedCacheObjects ?? []",
+    "options.maxCacheObjects ?? 0n",
+    "options.maxCacheObjectBytes ?? 0",
+    "options.resumeTokenBytes ?? 24",
+    "options.maxInFlightOperations ?? 4",
+    "options.grantedOperationCredit ?? 2",
+    "options.leaseTtlMs ?? 30_000",
+    "options.resumeWindowMs ?? 120_000",
+    "options.applicationPolicy ?? ACCEPT_VALID_SERVER_SESSIONS",
+    "options.timeoutMs ?? 0",
+  ]);
+}
+
+function checkNegotiatedSessionIdentity(
+  nativeClientSource: string,
+  browserClientSource: string,
+  nativeServerSource: string,
+): void {
+  for (
+    const [label, source] of [
+      ["@nnrp/native-client NnrpClientSession", nativeClientSource],
+      ["@nnrp/native-server NnrpServerSession", nativeServerSource],
+    ] as const
+  ) {
+    if (!source.includes("public get sessionId(): number")) {
+      failures.push(`${label} must expose the negotiated non-zero u32 sessionId`);
+    }
+  }
+  for (
+    const staleSurface of [
+      "readonly sessionId: string",
+      "readonly sessionId?: string",
+      "native-server-session-",
+    ]
+  ) {
+    if (nativeServerSource.includes(staleSurface)) {
+      failures.push(`@nnrp/native-server still contains stale session identity surface: ${staleSurface}`);
+    }
+  }
+  if (!nativeClientSource.includes("sessionId: assertNegotiatedSessionId(resolved.sessionId)")) {
+    failures.push("@nnrp/native-client must use the provider-reported negotiated sessionId");
+  }
+  if (!nativeClientSource.includes("assertNegotiatedSessionId(registration.sessionId)")) {
+    failures.push("@nnrp/native-client must validate every public session registration identity");
+  }
+  if (!nativeClientSource.includes("assertNegotiatedSessionId(sessionId);")) {
+    failures.push("@nnrp/native-client must reject the reserved zero sessionId when polling events");
+  }
+  if (!nativeServerSource.includes("const sessionId = nativeSession.sessionId;")) {
+    failures.push("@nnrp/native-server must use the provider-reported negotiated sessionId");
+  }
+  for (
+    const [label, source] of [
+      ["@nnrp/native-client", nativeClientSource],
+      ["@nnrp/browser-client", browserClientSource],
+    ] as const
+  ) {
+    for (const required of ["requestedSessionId: ticket.sessionId", "allowResume: true"]) {
+      if (!source.includes(required)) {
+        failures.push(`${label} resumeSession must bind recovery identity: ${required}`);
+      }
+    }
+  }
+}
+
+async function checkProviderSessionIdentityAbi(): Promise<void> {
+  for (const transport of ["tcp", "quic", "ipc", "websocket"]) {
+    for (const host of ["native.ts", "native-node.ts"]) {
+      const path = `packages/transport-${transport}/src/${host}`;
+      const source = await Deno.readTextFile(path);
+      for (const required of ["nnrp_session_id", "negotiated session id", "readonly sessionId: number"]) {
+        if (!source.includes(required)) {
+          failures.push(`${path} is missing negotiated session identity ABI surface: ${required}`);
+        }
+      }
+    }
+  }
 }
 
 function checkProjection(contract: FrozenSdkContract, key: string, expected: string): void {
@@ -277,11 +578,60 @@ function checkMethodSignature(
   }
 }
 
+function checkInterfaceMethodSignature(
+  source: string,
+  interfaceName: string,
+  methodName: string,
+  expectedReturn: string,
+  requiredParameter: string,
+): void {
+  const declaration = interfaceDeclaration(source, interfaceName);
+  if (declaration === undefined) return;
+  const match = new RegExp(`${methodName}\\s*\\(([^)]*)\\)\\s*:\\s*([^;]+);`, "s").exec(declaration);
+  if (match === null) {
+    failures.push(`${interfaceName}.${methodName}() is missing from its frozen surface`);
+    return;
+  }
+  if (normalizeType(match[2]!) !== normalizeType(expectedReturn)) {
+    failures.push(
+      `${interfaceName}.${methodName}() must return ${expectedReturn}, received ${match[2]!.trim()}`,
+    );
+  }
+  if (!normalizeType(match[1]!).includes(normalizeType(requiredParameter))) {
+    failures.push(`${interfaceName}.${methodName}() must accept ${requiredParameter}`);
+  }
+}
+
+function checkClassMethodSignature(
+  source: string,
+  className: string,
+  methodName: string,
+  expectedReturn: string,
+  requiredParameter?: string,
+): void {
+  const declaration = classDeclaration(source, className);
+  if (declaration === undefined) return;
+  checkMethodSignature(declaration, methodName, expectedReturn, requiredParameter);
+}
+
+function checkRequiredSourceFragments(label: string, source: string, requiredFragments: readonly string[]): void {
+  for (const fragment of requiredFragments) {
+    if (!source.includes(fragment)) failures.push(`${label} is missing frozen value: ${fragment}`);
+  }
+}
+
 function interfaceDeclaration(source: string, interfaceName: string): string | undefined {
-  const marker = `export interface ${interfaceName} {`;
+  return bracedDeclaration(source, `export interface ${interfaceName} {`, interfaceName);
+}
+
+function classDeclaration(source: string, className: string): string | undefined {
+  return bracedDeclaration(source, `export class ${className} {`, className);
+}
+
+function bracedDeclaration(source: string, marker: string, declarationName: string): string | undefined {
   const start = source.indexOf(marker);
   if (start < 0) {
-    failures.push(`@nnrp/core is missing ${interfaceName}`);
+    failures.push(`frozen JavaScript surface is missing ${declarationName}`);
     return undefined;
   }
   const open = source.indexOf("{", start);
@@ -291,7 +641,7 @@ function interfaceDeclaration(source: string, interfaceName: string): string | u
     if (source[index] === "}") depth -= 1;
     if (depth === 0) return source.slice(open + 1, index);
   }
-  failures.push(`${interfaceName} declaration is unterminated`);
+  failures.push(`${declarationName} declaration is unterminated`);
   return undefined;
 }
 

@@ -34,21 +34,17 @@ Deno.test({
   sanitizeResources: false,
   fn: async () => {
     const nativeProvider = createWebSocketTransportProvider();
-    const reservation = await nativeProvider.listen({ endpoint: "ws://127.0.0.1:0" });
-    const providerEndpoint = reservation.endpoint;
-    await reservation.close();
-
     const serverRuntime = await openBackendRuntime({
       transports: [nativeProvider],
       transportPolicy: "force-websocket",
     });
     const server = serverRuntime.listen({
       endpoint: "nnrp://127.0.0.1/browser-role",
-      providerRoutes: { websocket: { endpoint: providerEndpoint } },
+      providerRoutes: { websocket: { endpoint: "ws://127.0.0.1:0" } },
       transportPolicy: "force-websocket",
     });
     const accepting = server.accept();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const providerEndpoint = await waitForBoundProviderEndpoint(server, "websocket");
 
     const wasmBytes = await Deno.readFile(new URL("../wasm/nnrp_wasm_bg.wasm", import.meta.url));
     const sentMessageTypes: number[] = [];
@@ -85,12 +81,20 @@ Deno.test({
       endpoint: "nnrp://127.0.0.1/browser-role",
       providerRoutes: { websocket: { endpoint: providerEndpoint } },
     });
-    const session = client.openSession({ sessionId: "browser-role-e2e", inputProfile: "token" });
+    const session = await within(
+      client.openSession({
+        requestedSessionId: 1,
+        profileId: 2,
+        schemaId: 0x1001,
+        schemaVersion: 3,
+      }),
+      "browser session open",
+    );
 
     try {
       const submit = session.submit(tokenSubmit(11n, 7, new Uint8Array([1, 2, 3])));
       void submit.catch(() => undefined);
-      const serverSession = await accepting;
+      const serverSession = await within(accepting, "server session accept");
       const event = await serverSession.receive({ timeoutMillis: 5_000 });
       assertEquals(eventLabel(event), "submit");
       if (event.metadata.type !== "frame_submit" || event.tail.type !== "body") {
@@ -584,6 +588,33 @@ Deno.test({
     }
   },
 });
+
+async function waitForBoundProviderEndpoint(
+  server: { readonly boundProviderEndpoints: Readonly<Record<string, string>> },
+  providerKind: string,
+): Promise<string> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const endpoint = server.boundProviderEndpoints[providerKind];
+    if (endpoint !== undefined) return endpoint;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`provider ${providerKind} did not bind within 5000ms`);
+}
+
+async function within<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after 10000ms`)), 10_000);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 async function closeForTest(close: () => void | Promise<void>): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;

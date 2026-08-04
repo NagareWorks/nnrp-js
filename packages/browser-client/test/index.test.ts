@@ -1,9 +1,10 @@
 import {
   createCapabilityManifest,
+  NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES,
+  NnrpCacheObjectKind,
   NnrpCapabilityError,
-  NnrpProtocolError,
-  NnrpRecoveryError,
-  NnrpTimeoutError,
+  NnrpSessionPriorityClass,
+  NnrpSessionRecoveryTicket,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
@@ -69,7 +70,7 @@ Deno.test("@nnrp/browser-client resolves and validates browser artifact manifest
   assertEquals(artifact.requiredExports, [
     "nnrp_wasm_protocol_major",
     "nnrp_wasm_wire_format",
-    "openBrowserClientRole",
+    "openBrowserClientConnection",
     "selectTransportWithProbeJson",
     "summarizeProviderProbeJson",
   ]);
@@ -101,48 +102,39 @@ Deno.test("@nnrp/browser-client preserves explicit module and provider ownership
   assertEquals(binding.transportProviders, [provider]);
 });
 
-Deno.test("@nnrp/browser-client exposes the frozen runtime, client, and session lifecycle", async () => {
-  const runtime = await browserRuntime();
+Deno.test("@nnrp/browser-client exposes frozen v9 session defaults and eager open failures", async () => {
+  let connectCalls = 0;
+  const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const version = await runtime.protocolVersion();
   assertEquals(version, { protocolMajor: 1, wireFormat: 0, version: "1.0.0" });
 
   const client = runtime.connect({
     endpoint: "nnrps://example.test/render",
     providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
-    sessionDefaults: { inputProfile: "token", initialCredits: 3, metadata: { app: "browser" } },
+    sessionDefaults: {
+      profileId: 2,
+      schemaId: 0x1001,
+      schemaVersion: 3,
+      priorityClass: NnrpSessionPriorityClass.Balanced,
+      maxInFlightOperations: 3,
+      cacheHints: [NnrpCacheObjectKind.PromptSegment],
+    },
   });
-  const session = client.openSession({ sessionId: "session-a", metadata: { request: "one" } });
 
   assertEquals(client.endpoint, "nnrps://example.test/render");
-  assertEquals(session.options.inputProfile, "token");
-  assertEquals(session.options.initialCredits, 3);
-  assertEquals(session.options.metadata, { app: "browser", request: "one" });
-  assertThrows(() => client.openSession({ sessionId: "session-a" }), NnrpProtocolError, "already open");
-
-  const patched = await session.patch({
-    initialCredits: 5,
-    submitCapacityPolicy: "await",
-    metadata: { phase: "warm" },
-  });
-  assertEquals(patched.accepted, true);
-  assertEquals(patched.metadata, { ackStatus: "local-only" });
-  assertEquals(session.options.initialCredits, 5);
-  assertEquals(session.options.submitCapacityPolicy, "await");
-  assertEquals(session.options.metadata, { app: "browser", request: "one", phase: "warm" });
-
-  const migration = await assertRejects(
+  const openFailure = await assertRejects(
     () =>
-      session.migrate({
-        recoveryToken: { token: "resume-token" },
-        targetEndpoint: "nnrp://example.test/next",
+      client.openSession({
+        requestedSessionId: 7,
+        defaultDeadlineMillis: 750,
+        allowResume: true,
+        resumeTokenBytes: 64,
       }),
-    NnrpRecoveryError,
+    Error,
+    "unit test provider must not open a carrier",
   );
-  assertEquals(migration.diagnostic.code, "NNRP_RECOVERY_UNSUPPORTED");
-
-  await session.close();
-  assertEquals(session.closed, true);
-  assertRejects(() => client.nextSessionEvent("session-a"), NnrpCapabilityError, "not open");
+  assertEquals(openFailure.message, "unit test provider must not open a carrier");
+  assertEquals(connectCalls, 1);
   await client.close();
   await runtime.close();
   assertEquals(runtime.closed, true);
@@ -285,40 +277,65 @@ Deno.test("@nnrp/browser-client selects its installed compatible browser provide
   await runtime.close();
 });
 
-Deno.test("@nnrp/browser-client rejects pre-aborted event polling before opening a carrier", async () => {
+Deno.test("@nnrp/browser-client validates v9 session options before opening a carrier", async () => {
   let connectCalls = 0;
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
-  const session = runtime.connect({
-    endpoint: "nnrps://example.test/render",
-    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
-  }).openSession();
-  const controller = new AbortController();
-  controller.abort("caller-stop");
-
-  const error = await assertRejects(
-    () => session.nextEvent({ signal: controller.signal }),
-    NnrpTimeoutError,
-  );
-  assertEquals(error.diagnostic.code, "NNRP_EVENT_POLL_CANCELLED");
-  assertEquals(error.diagnostic.cause, "caller-stop");
-  assertEquals(connectCalls, 0);
-  await session.close();
-  await runtime.close();
-});
-
-Deno.test("@nnrp/browser-client releases a session when role open and close fail", async () => {
-  const runtime = await browserRuntime();
   const client = runtime.connect({
     endpoint: "nnrps://example.test/render",
     providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
   });
-  const session = client.openSession({ sessionId: "reusable-session" });
 
-  await assertRejects(() => session.nextEvent(), Error, "unit test provider must not open a carrier");
-  await assertRejects(() => session.close(), Error, "unit test provider must not open a carrier");
+  await assertRejects(
+    () => client.openSession({ requestedSessionId: 0x1_0000_0000 }),
+    RangeError,
+    "requestedSessionId",
+  );
+  await assertRejects(
+    () =>
+      client.openSession({
+        cacheHints: [NnrpCacheObjectKind.PromptSegment, NnrpCacheObjectKind.PromptSegment],
+      }),
+    RangeError,
+    "duplicate",
+  );
+  assertEquals(connectCalls, 0);
+  await client.close();
+  await runtime.close();
+});
 
-  const replacement = client.openSession({ sessionId: "reusable-session" });
-  await replacement.close();
+Deno.test("@nnrp/browser-client retries connection bootstrap after an eager open failure", async () => {
+  let connectCalls = 0;
+  const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
+  const client = runtime.connect({
+    endpoint: "nnrps://example.test/render",
+    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+  });
+  await assertRejects(() => client.openSession({ requestedSessionId: 9 }), Error, "unit test provider");
+  await assertRejects(() => client.openSession({ requestedSessionId: 9 }), Error, "unit test provider");
+  assertEquals(connectCalls, 2);
+  await client.close();
+  await runtime.close();
+});
+
+Deno.test("@nnrp/browser-client binds resumed session identity to the recovery ticket", async () => {
+  let connectCalls = 0;
+  const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
+  const client = runtime.connect({
+    endpoint: "nnrps://example.test/render",
+    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+  });
+  const ticket = recoveryTicket(23);
+
+  await assertRejects(
+    () =>
+      client.resumeSession(ticket, {
+        requestedSessionId: 0x1_0000_0000,
+        allowResume: false,
+      }),
+    Error,
+    "unit test provider must not open a carrier",
+  );
+  assertEquals(connectCalls, 1);
   await client.close();
   await runtime.close();
 });
@@ -376,9 +393,23 @@ function wasmManifest(): NnrpWasmArtifactManifest {
     exports: [
       "nnrp_wasm_protocol_major",
       "nnrp_wasm_wire_format",
-      "openBrowserClientRole",
+      "openBrowserClientConnection",
       "selectTransportWithProbeJson",
       "summarizeProviderProbeJson",
     ],
   };
+}
+
+function recoveryTicket(sessionId: number): NnrpSessionRecoveryTicket {
+  const encoded = new Uint8Array(NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES + 4);
+  encoded.set([0x4e, 0x52, 0x54, 0x4b]);
+  const view = new DataView(encoded.buffer);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint32(8, sessionId, true);
+  view.setUint32(12, 4, true);
+  view.setUint32(16, 120_000, true);
+  view.setBigUint64(20, 1n, true);
+  encoded.set([1, 2, 3, 4], NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES);
+  return NnrpSessionRecoveryTicket.fromBytes(encoded);
 }
