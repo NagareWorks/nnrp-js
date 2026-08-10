@@ -37,6 +37,9 @@
 ## Event Consumption
 
 - [x] Extend `nextEvent()` and `events()` with the complete Preview4 event union.
+  - [x] Return the frozen `NnrpClientEvent` tagged union from native and browser clients.
+  - [x] Preserve Rust headerless operation lifecycle notifications as the `lifecycle` variant.
+  - [x] Preserve wire events as the `runtime` variant without flattening either representation.
   - [x] Preserve operation-local ordering.
   - [x] Preserve backpressure and credit updates.
   - [x] Preserve progress and partial-result sequence values.
@@ -46,6 +49,7 @@
 
 - [x] Native-client tests cover every public control method and failure path.
 - [x] Browser-client tests cover every public control method and failure path.
+- [x] Native and browser role tests cover runtime and headerless lifecycle receive variants.
 - [x] AbortSignal tests cover pre-dispatch, in-flight, terminal, and listener-cleanup cases.
 - [x] Type tests prove native and browser client session method parity.
 - [x] Public API snapshots `scripts/public-api/native-client.d.ts` and `scripts/public-api/browser-client.d.ts` match

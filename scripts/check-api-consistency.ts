@@ -62,9 +62,9 @@ async function checkFrozenMachineContract(): Promise<void> {
     return;
   }
 
-  if (contract.contract !== "nnrp-1-preview4-sdk-api" || contract.contractVersion !== 9) {
+  if (contract.contract !== "nnrp-1-preview4-sdk-api" || contract.contractVersion !== 13) {
     failures.push(
-      `expected nnrp-1-preview4-sdk-api contract version 9, received ${contract.contract}@${contract.contractVersion}`,
+      `expected nnrp-1-preview4-sdk-api contract version 13, received ${contract.contract}@${contract.contractVersion}`,
     );
     return;
   }
@@ -76,6 +76,7 @@ async function checkFrozenMachineContract(): Promise<void> {
 
   checkProjection(contract, "runtimeFrameHeader", "@nnrp/core.NnrpRuntimeFrameHeader");
   checkProjection(contract, "runtimeEvent", "@nnrp/core.NnrpRuntimeEvent");
+  checkProjection(contract, "clientEvent", "@nnrp/core.NnrpClientEvent");
   checkProjection(contract, "operationLifecycleEvent", "@nnrp/core.NnrpOperationLifecycleEvent");
   checkProjection(contract, "terminalEvent", "@nnrp/core.NnrpTerminalEvent");
   checkProjection(contract, "result", "@nnrp/core.NnrpResult");
@@ -132,6 +133,12 @@ async function checkFrozenMachineContract(): Promise<void> {
 
   checkTaggedUnion(
     coreSource,
+    "NnrpClientEvent",
+    contractVariants(contract, "ClientEvent"),
+    { runtime: "NnrpRuntimeEvent", lifecycle: "NnrpOperationLifecycleEvent" },
+  );
+  checkTaggedUnion(
+    coreSource,
     "NnrpTerminalEvent",
     contractVariants(contract, "TerminalEvent"),
     { runtime: "NnrpRuntimeEvent", lifecycle: "NnrpOperationLifecycleEvent" },
@@ -158,7 +165,7 @@ async function checkFrozenMachineContract(): Promise<void> {
   for (const source of [nativeClientSource, browserClientSource]) {
     checkMethodSignature(source, "submit", "Promise<NnrpResult>");
     checkMethodSignature(source, "nextResult", "Promise<NnrpResult>");
-    checkMethodSignature(source, "nextEvent", "Promise<NnrpRuntimeEvent>");
+    checkMethodSignature(source, "nextEvent", "Promise<NnrpClientEvent>");
   }
   checkMethodSignature(nativeServerSource, "receive", "Promise<NnrpRuntimeEvent>");
   checkMethodSignature(nativeServerSource, "sendResult", "Promise<void>", "result: NnrpResult");

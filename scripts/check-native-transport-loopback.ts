@@ -14,6 +14,7 @@ import {
   MemoryLocationHint,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  type NnrpClientEvent,
   NnrpMessageType,
   type NnrpRuntimeEvent,
   NnrpTransportClientSecurity,
@@ -370,10 +371,13 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       bodyBytes: 2,
       flags: 0,
     }, new Uint8Array([0xd1, 0xd2]));
-    const partial = await withTimeout(
-      clientSession.nextEvent({ timeoutMillis }),
-      timeoutMillis,
-      `${options.provider.kind} client partial result`,
+    const partial = expectRuntimeClientEvent(
+      await withTimeout(
+        clientSession.nextEvent({ timeoutMillis }),
+        timeoutMillis,
+        `${options.provider.kind} client partial result`,
+      ),
+      options.provider.kind,
     );
     assertEventType(partial, NnrpMessageType.PartialResult, options.provider.kind);
     if (
@@ -439,6 +443,13 @@ function assertEventType(
   if (event.header.messageType !== expected) {
     throw new Error(`${providerKind}: expected ${expected}, got ${event.header.messageType}`);
   }
+}
+
+function expectRuntimeClientEvent(event: NnrpClientEvent, providerKind: string): NnrpRuntimeEvent {
+  if (event.type !== "runtime") {
+    throw new Error(`${providerKind}: expected runtime event, got lifecycle ${event.event.state}`);
+  }
+  return event.event;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMillis: number, label: string): Promise<T> {

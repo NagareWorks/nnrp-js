@@ -7,6 +7,7 @@ import {
   MemoryLocationHint,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  type NnrpClientEvent,
   NnrpMessageType,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
@@ -694,8 +695,10 @@ async function receiveEventTypes(session: NnrpBrowserClientSession, count: numbe
   return types;
 }
 
-function eventLabel(event: NnrpRuntimeEvent): string {
-  switch (event.header.messageType) {
+function eventLabel(event: NnrpClientEvent | NnrpRuntimeEvent): string {
+  if (!("header" in event) && event.type === "lifecycle") return `lifecycle-${event.event.state}`;
+  const runtimeEvent = "header" in event ? event : event.event;
+  switch (runtimeEvent.header.messageType) {
     case NnrpMessageType.SessionClose:
       return "close";
     case NnrpMessageType.FrameSubmit:
@@ -757,7 +760,7 @@ function eventLabel(event: NnrpRuntimeEvent): string {
     case NnrpMessageType.CacheInvalidate:
       return "cache-invalidate";
     default:
-      return `message-${event.header.messageType}`;
+      return `message-${runtimeEvent.header.messageType}`;
   }
 }
 

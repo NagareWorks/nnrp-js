@@ -113,7 +113,9 @@ Deno.test("browser WASM connection owns one carrier while roles own session stat
   });
 
   const result = await role.awaitEvent();
-  assertEquals(result.header, {
+  assertEquals(result.type, "runtime");
+  if (result.type !== "runtime") throw new Error("expected runtime event");
+  assertEquals(result.event.header, {
     versionMajor: 1,
     wireFormat: 0,
     messageType: NnrpMessageType.ResultPush,
@@ -124,8 +126,8 @@ Deno.test("browser WASM connection owns one carrier while roles own session stat
     routeId: 0,
     traceId: 0n,
   });
-  assertEquals(result.metadata.type, "result_push");
-  assertEquals(result.tail, { type: "body", body: new Uint8Array([9, 8]) });
+  assertEquals(result.event.metadata.type, "result_push");
+  assertEquals(result.event.tail, { type: "body", body: new Uint8Array([9, 8]) });
   await role.close();
   await role.close();
   assertEquals(log, ["binding-close", "binding-free"]);
@@ -170,6 +172,30 @@ Deno.test("browser WASM connection deterministically closes every active role", 
   ]);
 });
 
+Deno.test("browser WASM role preserves headerless lifecycle events", async () => {
+  const wasm = testWasmModule({
+    open: () => ({
+      sessionId: 1,
+      submitNoWait: () => Promise.resolve(41),
+      sendRuntimeFrame: () => Promise.resolve(),
+      patchSession: () => Promise.resolve(patchAck()),
+      recoveryTicket: () => undefined,
+      awaitEvent: () => Promise.resolve(lifecyclePacket()),
+      close: () => Promise.resolve(),
+    }),
+  });
+  const connection = await openBrowserWasmConnection(wasm, testConnection({}), connectionConfig());
+  const role = await connection.openSession(roleConfig());
+
+  assertEquals(await role.awaitEvent(), {
+    type: "lifecycle",
+    event: { operationId: 41n, state: "cancelled" },
+  });
+
+  await role.close();
+  await connection.close();
+});
+
 Deno.test("browser WASM role sends while an event receive is pending", async () => {
   const sent: Uint8Array[] = [];
   let resolveEvent!: (packet: BrowserRoleEventPacket) => void;
@@ -195,7 +221,10 @@ Deno.test("browser WASM role sends while an event receive is pending", async () 
   assertEquals(sent, [new Uint8Array([NnrpMessageType.Cancel, 9, 4])]);
 
   resolveEvent(resultPacket());
-  assertEquals((await event).header.messageType, NnrpMessageType.ResultPush);
+  const received = await event;
+  assertEquals(received.type, "runtime");
+  if (received.type !== "runtime") throw new Error("expected runtime event");
+  assertEquals(received.event.header.messageType, NnrpMessageType.ResultPush);
   await role.close();
   await wasmConnection.close();
 });
@@ -382,6 +411,9 @@ function resultPacket(): BrowserRoleEventPacket {
     payloadFrameCount: 0,
   });
   return {
+    eventKind: 13,
+    headerPresent: 1,
+    relatedOperationId: 0n,
     versionMajor: 1,
     wireFormat: 0,
     messageType: NnrpMessageType.ResultPush,
@@ -393,5 +425,25 @@ function resultPacket(): BrowserRoleEventPacket {
     traceId: 0n,
     metadata: payload,
     body: new Uint8Array([9, 8]),
+  };
+}
+
+function lifecyclePacket(): BrowserRoleEventPacket {
+  return {
+    eventKind: 14,
+    headerPresent: 0,
+    relatedOperationId: 41n,
+    operationState: 5,
+    versionMajor: 0,
+    wireFormat: 0,
+    messageType: 0,
+    flags: 0,
+    sessionId: 0,
+    frameId: 0,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+    metadata: new Uint8Array(),
+    body: new Uint8Array(),
   };
 }

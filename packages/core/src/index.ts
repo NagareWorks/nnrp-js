@@ -1662,6 +1662,10 @@ export interface NnrpOperationLifecycleEvent {
   readonly state: NnrpOperationState;
 }
 
+export type NnrpClientEvent =
+  | { readonly type: "runtime"; readonly event: NnrpRuntimeEvent }
+  | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };
+
 export type NnrpTerminalEvent =
   | { readonly type: "runtime"; readonly event: NnrpRuntimeEvent }
   | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };

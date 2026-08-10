@@ -247,6 +247,12 @@ async function verifyNativeTransportLoopbacks() {
           "(client=" + clientSession.sessionId + ", server=" + serverSession.sessionId + ")",
       );
     }
+    async function nextRuntimeClientEvent() {
+      while (true) {
+        const event = await clientSession.nextEvent({ timeoutMillis: 5_000 });
+        if (event.type === "runtime") return event.event;
+      }
+    }
     for (let exchange = 1; exchange <= 2; exchange += 1) {
       await clientSession.submitNoWait(createTokenSubmitRequest({
         identity: {
@@ -300,7 +306,7 @@ async function verifyNativeTransportLoopbacks() {
         createNnrpResultFromRuntimeEvent(submitEvent.metadata.value.operationId, resultEvent),
       );
       await new Promise((resolve) => setTimeout(resolve, 20));
-      const partialEvent = await clientSession.nextEvent({ timeoutMillis: 5_000 });
+      const partialEvent = await nextRuntimeClientEvent();
       if (
         partialEvent.header.messageType !== NnrpMessageType.PartialResult ||
         partialEvent.metadata.type !== "partial_result" || partialEvent.tail.type !== "body" ||

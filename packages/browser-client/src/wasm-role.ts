@@ -1,9 +1,11 @@
 import {
   decodeNnrpRuntimeEvent,
+  type NnrpClientEvent,
   type NnrpDiagnostic,
   type NnrpInputProfile,
   NnrpMessageType,
-  type NnrpRuntimeEvent,
+  type NnrpOperationState,
+  NnrpProtocolError,
   type NnrpRuntimeFrameHeader,
   type NnrpSessionPatchRequest,
   NnrpSessionRecoveryTicket,
@@ -36,6 +38,10 @@ export interface BrowserConnectionConfig {
 }
 
 export interface BrowserRoleEventPacket {
+  readonly eventKind: number;
+  readonly headerPresent: number;
+  readonly relatedOperationId: bigint;
+  readonly operationState?: number;
   readonly versionMajor: number;
   readonly wireFormat: number;
   readonly messageType: number;
@@ -104,7 +110,7 @@ export interface BrowserWasmRole {
   submitNoWait(frameId: number, header: NnrpSubmitHeaderContext, payload: Uint8Array): Promise<bigint>;
   sendRuntimeFrame(messageType: NnrpMessageType, frameId: number, payload: Uint8Array): Promise<void>;
   patchSession(request: NnrpSessionPatchRequest, activeProfile: NnrpInputProfile | undefined): Promise<BrowserPatchAck>;
-  awaitEvent(): Promise<NnrpRuntimeEvent>;
+  awaitEvent(): Promise<NnrpClientEvent>;
   recoveryTicket(): NnrpSessionRecoveryTicket | undefined;
   close(): Promise<void>;
 }
@@ -470,7 +476,27 @@ function decodeSessionPatchAck(bytes: Uint8Array, request: NnrpSessionPatchReque
   };
 }
 
-function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket): NnrpRuntimeEvent {
+function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket): NnrpClientEvent {
+  if (packet.headerPresent === 0) {
+    if (
+      packet.eventKind !== 14 || packet.relatedOperationId === 0n || packet.operationState === undefined ||
+      packet.metadata.byteLength !== 0 || packet.body.byteLength !== 0
+    ) {
+      throw new NnrpProtocolError({
+        code: "NNRP_WASM_LIFECYCLE_EVENT_INVALID",
+        message: `Browser role emitted invalid headerless event kind ${packet.eventKind}.`,
+        source: "wasm",
+        retryable: false,
+      });
+    }
+    return {
+      type: "lifecycle",
+      event: {
+        operationId: packet.relatedOperationId,
+        state: decodeBrowserOperationState(packet.operationState),
+      },
+    };
+  }
   const header: NnrpRuntimeFrameHeader = {
     versionMajor: packet.versionMajor as 1,
     wireFormat: packet.wireFormat as 0,
@@ -482,7 +508,30 @@ function decodeBrowserRoleEvent(packet: BrowserRoleEventPacket): NnrpRuntimeEven
     routeId: packet.routeId,
     traceId: packet.traceId,
   };
-  return decodeNnrpRuntimeEvent(header, concatBytes(packet.metadata, packet.body));
+  return { type: "runtime", event: decodeNnrpRuntimeEvent(header, concatBytes(packet.metadata, packet.body)) };
+}
+
+function decodeBrowserOperationState(value: number): NnrpOperationState {
+  const states = [
+    "accepted",
+    "running",
+    "partial",
+    "waiting-tool",
+    "superseded",
+    "cancelled",
+    "failed",
+    "completed",
+  ] as const satisfies readonly NnrpOperationState[];
+  const state = states[value];
+  if (state === undefined) {
+    throw new NnrpProtocolError({
+      code: "NNRP_WASM_OPERATION_STATE_INVALID",
+      message: `Browser role emitted unknown operation lifecycle state ${value}.`,
+      source: "wasm",
+      retryable: false,
+    });
+  }
+  return state;
 }
 
 function concatBytes(first: Uint8Array, second: Uint8Array): Uint8Array {
