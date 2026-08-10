@@ -6,13 +6,15 @@ import {
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpMessageType,
+  type NnrpOperationLifecycleEvent,
+  type NnrpRuntimeEvent,
   type NnrpTransportConnection,
   RuntimeRole,
 } from "@nnrp/core";
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { assertRuntimeMetadata } from "../../../scripts/runtime-event-fixtures.ts";
-import { loadBrowserWasmModule, openBrowserWasmConnection } from "../src/wasm-role.ts";
+import { type BrowserWasmRole, loadBrowserWasmModule, openBrowserWasmConnection } from "../src/wasm-role.ts";
 
 Deno.test({
   name: "package-owned browser WASM role remains full duplex while awaiting an event",
@@ -81,7 +83,8 @@ Deno.test({
 
     let failure: unknown;
     try {
-      const pendingEvent = role.awaitEvent().catch((error) => error);
+      const lifecycleEvents: NnrpOperationLifecycleEvent[] = [];
+      const pendingEvent = awaitRuntimeEvent(role, lifecycleEvents).catch((error) => error);
       const metadata = {
         traceId: 1n,
         spanId: 2n,
@@ -120,7 +123,7 @@ Deno.test({
         (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
         NnrpMessageType.FrameSubmit,
       );
-      const pendingAfterSubmit = role.awaitEvent().catch((error) => error);
+      const pendingAfterSubmit = awaitRuntimeEvent(role, lifecycleEvents).catch((error) => error);
       await within(
         role.sendRuntimeFrame(
           NnrpMessageType.Cancel,
@@ -176,6 +179,17 @@ Deno.test({
     if (failure !== undefined) throw failure;
   },
 });
+
+async function awaitRuntimeEvent(
+  role: BrowserWasmRole,
+  lifecycleEvents: NnrpOperationLifecycleEvent[],
+): Promise<NnrpRuntimeEvent> {
+  while (true) {
+    const event = await role.awaitEvent();
+    if (event.type === "runtime") return event.event;
+    lifecycleEvents.push(event.event);
+  }
+}
 
 function frameSubmitPayload(operationId: bigint, body: Uint8Array): Uint8Array {
   return encodeSubmitPayload(createTokenSubmitRequest({

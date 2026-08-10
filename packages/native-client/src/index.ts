@@ -6,6 +6,7 @@ import {
   type CapabilityMetadata,
   type ControlRequestMetadata,
   createCapabilityManifest,
+  createNnrpResultFromLifecycle,
   createNnrpResultFromRuntimeEvent,
   createTransportCandidates,
   createTransportSelectionSummary,
@@ -23,12 +24,15 @@ import {
   type NnrpCapability,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
+  type NnrpClientEvent,
   type NnrpClientProviderRoutes,
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
   NnrpFlowScopeKind,
   NnrpMessageType,
   type NnrpNormalizedSubmitRequest,
+  type NnrpOperationLifecycleEvent,
+  type NnrpOperationState,
   NnrpProtocolError,
   NnrpRecoveryError,
   type NnrpResult,
@@ -276,11 +280,12 @@ const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
 const CLIENT_ROLE_ADOPT = Symbol.for("nnrp.internal.native.client-role-adopt.v1");
 const NATIVE_ROLE_IDS = Symbol.for("nnrp.internal.native.role-handle-ids.v1");
 const EVENT_KIND_RESULT_PUSHED = 6;
+const EVENT_KIND_OPERATION_LIFECYCLE = 14;
 
 const clientRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (sessionId: string) => Promise<void>>();
 const clientRoutedEventReaders = new WeakMap<
   NnrpClient,
-  (routingKey: string, options?: NnrpEventPollOptions) => Promise<NnrpRuntimeEvent>
+  (routingKey: string, options?: NnrpEventPollOptions) => Promise<NnrpClientEvent>
 >();
 const clientSessionStateReleasers = new WeakMap<
   NnrpClient,
@@ -307,7 +312,6 @@ const clientRoleRecoveryTicketReaders = new WeakMap<
   NnrpBackendRuntime,
   (routingKey: string) => Uint8Array | undefined
 >();
-const runtimeEventSessionIds = new WeakMap<NnrpRuntimeEvent, string>();
 const runtimeEventOperationIds = new WeakMap<NnrpRuntimeEvent, bigint>();
 const runtimeSessionRoutingKeys = new WeakMap<NnrpSessionOptions, string>();
 
@@ -439,6 +443,11 @@ export interface NnrpNativeEventBatchRequest {
   readonly timeoutMillis?: number;
 }
 
+export interface NnrpNativeClientEventBatchItem {
+  readonly sessionId: number;
+  readonly event: NnrpClientEvent;
+}
+
 export interface NnrpNativeFfiBinding {
   readonly mode?: "native-addon" | "node-ffi" | "deno-ffi" | "nano-ffi" | "test";
   runtimeCapabilities?(): NnrpNativeRuntimeCapabilities | Promise<NnrpNativeRuntimeCapabilities>;
@@ -453,7 +462,7 @@ export interface NnrpNativeFfiBinding {
   ): NnrpSessionPatchResult | void | Promise<NnrpSessionPatchResult | void>;
   awaitEvents?(
     request: NnrpNativeEventBatchRequest,
-  ): readonly NnrpRuntimeEvent[] | Promise<readonly NnrpRuntimeEvent[]>;
+  ): readonly NnrpNativeClientEventBatchItem[] | Promise<readonly NnrpNativeClientEventBatchItem[]>;
   close?(): void | Promise<void>;
 }
 
@@ -643,21 +652,24 @@ class NnrpBackendRuntime {
     );
     while (true) {
       const events = await session.poll(Math.max(validated.maxEvents ?? 1, 1), 1);
-      const result = events.find((event) =>
-        event.kind === EVENT_KIND_RESULT_PUSHED && event.relatedOperationId === validated.submit.operationId
-      );
-      if (result !== undefined) {
-        if (result.relatedFrameId !== validated.submit.frameId) {
+      for (const candidate of events) {
+        if (candidate.relatedOperationId !== validated.submit.operationId) continue;
+        if (candidate.relatedFrameId !== 0 && candidate.relatedFrameId !== validated.submit.frameId) {
           throw new NnrpProtocolError({
             code: "NNRP_OPERATION_FRAME_MISMATCH",
             message:
-              `Operation ${validated.submit.operationId} is bound to frame ${validated.submit.frameId}, but the native result referenced frame ${result.relatedFrameId}.`,
+              `Operation ${validated.submit.operationId} is bound to frame ${validated.submit.frameId}, but the native result referenced frame ${candidate.relatedFrameId}.`,
             source: "native",
             retryable: false,
           });
         }
-        const decoded = decodeClientRoleEvent(result, runtimeSessionRoutingKeys.get(validated.sessionOptions));
-        return createNnrpResultFromRuntimeEvent(validated.submit.operationId, decoded);
+        const decoded = decodeClientRoleEvent(candidate);
+        if (decoded.type === "runtime" && candidate.kind === EVENT_KIND_RESULT_PUSHED) {
+          return createNnrpResultFromRuntimeEvent(validated.submit.operationId, decoded.event);
+        }
+        if (decoded.type === "lifecycle" && isTerminalOperationState(decoded.event.state)) {
+          return createNnrpResultFromLifecycle(decoded.event);
+        }
       }
     }
   }
@@ -708,21 +720,24 @@ class NnrpBackendRuntime {
     };
   }
 
-  public async awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpRuntimeEvent[]> {
+  public async awaitEvents(request: NnrpNativeEventBatchRequest): Promise<readonly NnrpNativeClientEventBatchItem[]> {
     this.#ensureOpen();
     const awaitEvents = this.#binding.ffi?.awaitEvents;
     if (awaitEvents !== undefined) {
       return await awaitEvents(request);
     }
-    const events: NnrpRuntimeEvent[] = [];
-    for (const [sessionId, pendingSession] of this.#roleSessions) {
+    const events: NnrpNativeClientEventBatchItem[] = [];
+    for (const pendingSession of this.#roleSessions.values()) {
       if (events.length >= request.maxEvents) break;
       const session = await pendingSession;
       const polled = await session.poll(
         request.maxEvents - events.length,
         request.timeoutMillis ?? 0,
       );
-      events.push(...polled.map((event) => decodeClientRoleEvent(event, sessionId)));
+      events.push(...polled.map((event) => ({
+        sessionId: session.sessionId,
+        event: decodeClientRoleEvent(event),
+      })));
     }
     return events;
   }
@@ -1180,11 +1195,21 @@ function resolvedRouteEndpoint(resolution: ResolvedClientProviderRoute): string 
   });
 }
 
-function decodeClientRoleEvent(event: InternalRoleEvent, sessionId?: string): NnrpRuntimeEvent {
+function decodeClientRoleEvent(event: InternalRoleEvent): NnrpClientEvent {
   if (!event.headerPresent) {
+    if (
+      event.kind === EVENT_KIND_OPERATION_LIFECYCLE && event.relatedOperationId !== 0n &&
+      event.payload.byteLength === 1
+    ) {
+      const lifecycle: NnrpOperationLifecycleEvent = {
+        operationId: event.relatedOperationId,
+        state: decodeOperationState(event.payload[0]!),
+      };
+      return { type: "lifecycle", event: lifecycle };
+    }
     throw new NnrpProtocolError({
       code: "NNRP_NATIVE_LIFECYCLE_EVENT_UNEXPECTED",
-      message: `Native client role emitted headerless lifecycle event kind ${event.kind} on the wire event pump.`,
+      message: `Native client role emitted invalid headerless event kind ${event.kind} on the role event pump.`,
       source: "native",
       retryable: false,
     });
@@ -1201,9 +1226,35 @@ function decodeClientRoleEvent(event: InternalRoleEvent, sessionId?: string): Nn
     traceId: event.traceId,
   };
   const decoded = decodeNnrpRuntimeEvent(header, event.payload);
-  if (sessionId !== undefined) runtimeEventSessionIds.set(decoded, sessionId);
   if (event.relatedOperationId !== 0n) runtimeEventOperationIds.set(decoded, event.relatedOperationId);
-  return decoded;
+  return { type: "runtime", event: decoded };
+}
+
+function decodeOperationState(value: number): NnrpOperationState {
+  const states = [
+    "accepted",
+    "running",
+    "partial",
+    "waiting-tool",
+    "superseded",
+    "cancelled",
+    "failed",
+    "completed",
+  ] as const satisfies readonly NnrpOperationState[];
+  const state = states[value];
+  if (state === undefined) {
+    throw new NnrpProtocolError({
+      code: "NNRP_NATIVE_OPERATION_STATE_INVALID",
+      message: `Native role emitted unknown operation lifecycle state ${value}.`,
+      source: "native",
+      retryable: false,
+    });
+  }
+  return state;
+}
+
+function isTerminalOperationState(state: NnrpOperationState): boolean {
+  return state === "superseded" || state === "cancelled" || state === "failed" || state === "completed";
 }
 
 export interface NnrpClientState {
@@ -1216,7 +1267,7 @@ export interface NnrpClientState {
 
 export class NnrpClient {
   readonly #state: NnrpClientState;
-  readonly #eventQueues = new Map<string, NnrpRuntimeEvent[]>();
+  readonly #eventQueues = new Map<string, NnrpClientEvent[]>();
   readonly #routingKeyByWireSessionId = new Map<number, string>();
   #closed = false;
 
@@ -1260,6 +1311,7 @@ export class NnrpClient {
       options: normalized,
       sessionId,
     });
+    this.#routingKeyByWireSessionId.set(sessionId, registration.routingKey);
     clientSessionRoutingKeys.set(session, registration.routingKey);
     return session;
   }
@@ -1287,11 +1339,12 @@ export class NnrpClient {
       options: normalized,
       sessionId,
     });
+    this.#routingKeyByWireSessionId.set(sessionId, registration.routingKey);
     clientSessionRoutingKeys.set(session, registration.routingKey);
     return session;
   }
 
-  public async nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public async nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     assertNegotiatedSessionId(sessionId);
     return await this.#nextRoutedEvent(
       this.#routingKeyByWireSessionId.get(sessionId) ?? `wire-${sessionId}`,
@@ -1302,7 +1355,7 @@ export class NnrpClient {
   async #nextRoutedEvent(
     routingKey: string,
     options: NnrpEventPollOptions = {},
-  ): Promise<NnrpRuntimeEvent> {
+  ): Promise<NnrpClientEvent> {
     this.#ensureOpen();
     validateEventPollOptions(options);
 
@@ -1328,12 +1381,25 @@ export class NnrpClient {
       }
 
       for (const candidate of events) {
-        const candidateRoutingKey = eventSessionId(candidate) ?? `wire-${candidate.header.sessionId}`;
-        this.#routingKeyByWireSessionId.set(candidate.header.sessionId, candidateRoutingKey);
+        const candidateSessionId = assertNegotiatedSessionId(candidate.sessionId);
+        if (candidate.event.type === "runtime" && candidate.event.event.header.sessionId !== candidateSessionId) {
+          throw new NnrpProtocolError({
+            code: "NNRP_NATIVE_EVENT_SESSION_MISMATCH",
+            message:
+              `Native event batch item declared session ${candidateSessionId}, but its wire header declared session ${candidate.event.event.header.sessionId}.`,
+            source: "native",
+            retryable: false,
+          });
+        }
+        const candidateRoutingKey = this.#routingKeyByWireSessionId.get(candidateSessionId) ??
+          `wire-${candidateSessionId}`;
         const queue = this.#eventQueues.get(candidateRoutingKey) ?? [];
-        queue.push(candidate);
+        queue.push(candidate.event);
         this.#eventQueues.set(candidateRoutingKey, queue);
-        if (candidate.header.sessionId !== 0 && routingKey === `wire-${candidate.header.sessionId}`) {
+        if (
+          candidate.event.type === "runtime" && candidate.event.event.header.sessionId !== 0 &&
+          routingKey === `wire-${candidate.event.event.header.sessionId}`
+        ) {
           this.#eventQueues.set(routingKey, queue);
         }
       }
@@ -1619,7 +1685,7 @@ export class NnrpClientSession {
     }
   }
 
-  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -1636,11 +1702,16 @@ export class NnrpClientSession {
       const nextEvent = clientRoutedEventReaders.get(this.#state.client);
       if (routingKey === undefined || nextEvent === undefined) throw bindingNotConnectedError("nextEvent");
       const event = await nextEvent(routingKey, pollOptions);
-      await this.#releaseForTerminalControl(event);
-      if (this.#shouldSuppressCancelledPayload(event)) {
-        continue;
+      if (event.type === "runtime") {
+        await this.#releaseForTerminalControl(event.event);
+        if (this.#shouldSuppressCancelledPayload(event.event)) {
+          continue;
+        }
+        this.completeEvent(event.event);
+      } else if (isTerminalOperationState(event.event.state)) {
+        const frameId = this.#frameForOperation(event.event.operationId);
+        if (frameId !== undefined) this.#finishTerminalFrame(frameId);
       }
-      this.completeEvent(event);
       return event;
     }
   }
@@ -1648,17 +1719,21 @@ export class NnrpClientSession {
   public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
     while (true) {
       const event = await this.nextEvent(options);
-      if (isRuntimeTerminalEvent(event)) {
-        const operationId = runtimeEventOperationIds.get(event) ?? terminalOperationId(event);
+      if (event.type === "lifecycle") {
+        if (isTerminalOperationState(event.event.state)) return createNnrpResultFromLifecycle(event.event);
+        continue;
+      }
+      if (isRuntimeTerminalEvent(event.event)) {
+        const operationId = runtimeEventOperationIds.get(event.event) ?? terminalOperationId(event.event);
         if (operationId === undefined) {
           throw new NnrpProtocolError({
             code: "NNRP_TERMINAL_OPERATION_UNKNOWN",
-            message: `Terminal frame ${event.header.frameId} has no associated operation id.`,
+            message: `Terminal frame ${event.event.header.frameId} has no associated operation id.`,
             source: "native",
             retryable: false,
           });
         }
-        return createNnrpResultFromRuntimeEvent(operationId, event);
+        return createNnrpResultFromRuntimeEvent(operationId, event.event);
       }
     }
   }
@@ -1699,7 +1774,7 @@ export class NnrpClientSession {
     return result;
   }
 
-  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
+  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpClientEvent> {
     while (!this.closed) {
       yield await this.nextEvent(options);
     }
@@ -1972,6 +2047,13 @@ export class NnrpClientSession {
 
     this.#terminalFrames.add(frameId);
     this.#finishFrame(frameId);
+  }
+
+  #frameForOperation(operationId: bigint): number | undefined {
+    for (const [frameId, candidate] of this.#operationByFrame) {
+      if (candidate === operationId) return frameId;
+    }
+    return undefined;
   }
 
   #allocateControlSequence(): bigint {
@@ -2247,10 +2329,6 @@ function assertNegotiatedSessionId(sessionId: number): number {
     throw new RangeError("negotiated sessionId must be a non-zero u32");
   }
   return sessionId;
-}
-
-function eventSessionId(event: NnrpRuntimeEvent): string | undefined {
-  return runtimeEventSessionIds.get(event);
 }
 
 function isRuntimeTerminalEvent(event: NnrpRuntimeEvent): boolean {

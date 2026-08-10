@@ -3,6 +3,7 @@ import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  type NnrpClientEvent,
   NnrpMessageType,
   type NnrpRuntimeEvent,
   type NnrpTransportClientSecurity,
@@ -412,10 +413,14 @@ async function connectWithRetry(options: Parameters<typeof handleProgressClient>
 }
 
 function expectMessage(
-  event: NnrpRuntimeEvent,
+  candidate: NnrpClientEvent | NnrpRuntimeEvent,
   messageType: NnrpMessageType,
   label: string,
 ): NnrpRuntimeEvent {
+  if (!("header" in candidate) && candidate.type !== "runtime") {
+    throw new Error(`wire target expected ${label}, got lifecycle ${candidate.event.state}`);
+  }
+  const event = "header" in candidate ? candidate : candidate.event;
   if (event.header.messageType !== messageType) {
     throw new Error(`wire target expected ${label}, got message ${event.header.messageType}`);
   }

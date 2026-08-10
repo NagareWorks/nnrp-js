@@ -2,11 +2,12 @@
 
 ## Receive Path
 
-- [x] Extend `NnrpServerSession.receive(options?)` to return the complete Preview4 event union.
-  - [x] Decode incoming cancellation and scheduling controls.
-  - [x] Decode capability, route, execution, and trace controls.
-  - [x] Decode object and cache frames.
-  - [x] Preserve operation-local order and owned tail bytes.
+- [ ] Extend `NnrpServerSession.receive(options?)` to return the frozen `NnrpServerEvent` tagged union.
+  - [ ] Return `submit` with an owning `NnrpServerOperation` for `FRAME_SUBMIT`.
+  - [ ] Return `runtime` for non-submit wire events.
+  - [ ] Return `lifecycle` for headerless operation lifecycle notifications.
+  - [ ] Preserve operation-local order and owned tail bytes across all variants.
+  - [ ] Keep skipped non-submit and lifecycle events queued when `receiveSubmit()` selects the next operation.
 
 ## Incremental Result and Flow Methods
 
@@ -68,8 +69,9 @@
 
 ## Acceptance Evidence
 
-- [x] Server tests cover every receive and send method plus multi-listener ordering, rollback, and ownership.
+- [ ] Server tests cover every receive variant, operation reply method, multi-listener ordering, rollback, and
+      ownership.
 - [x] State-machine tests cover partial, terminal, duplicate-terminal, and post-terminal behavior.
 - [x] Direction tests reject client-only messages from server send helpers.
-- [x] Public API snapshot `scripts/public-api/native-server.d.ts` matches the frozen JavaScript server page in
+- [ ] Public API snapshot `scripts/public-api/native-server.d.ts` matches the frozen JavaScript server page in
       `nnrp-doc`.

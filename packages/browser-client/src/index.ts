@@ -6,6 +6,7 @@ import {
   type CapabilityMetadata,
   type ControlRequestMetadata,
   createBrowserWasmManifest,
+  createNnrpResultFromLifecycle,
   createNnrpResultFromRuntimeEvent,
   createTransportCandidates,
   createTransportSelectionSummary,
@@ -23,12 +24,14 @@ import {
   NnrpCacheObjectKind,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
+  type NnrpClientEvent,
   type NnrpClientProviderRoutes,
   type NnrpEventPollOptions,
   NnrpFlowScopeKind,
   type NnrpInputProfile,
   NnrpMessageType,
   type NnrpNormalizedSubmitRequest,
+  type NnrpOperationState,
   NnrpProtocolError,
   NnrpRecoveryError,
   type NnrpResult,
@@ -608,7 +611,7 @@ export class NnrpBrowserClient {
     return session;
   }
 
-  public nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     this.#ensureOpen();
     validateEventPollOptions(options);
     const session = this.#sessions.get(sessionId);
@@ -684,7 +687,7 @@ export interface NnrpBrowserClientSessionState {
 }
 
 interface BrowserEventWaiter {
-  readonly resolve: (event: NnrpRuntimeEvent) => void;
+  readonly resolve: (event: NnrpClientEvent) => void;
   readonly reject: (error: unknown) => void;
 }
 
@@ -706,7 +709,7 @@ export class NnrpBrowserClientSession {
   readonly #cancelledOperations = new Set<bigint>();
   readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
-  readonly #eventQueue: NnrpRuntimeEvent[] = [];
+  readonly #eventQueue: NnrpClientEvent[] = [];
   readonly #eventWaiters: BrowserEventWaiter[] = [];
   readonly #resultWaiters = new Map<number, BrowserResultWaiter>();
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
@@ -949,7 +952,7 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -957,24 +960,33 @@ export class NnrpBrowserClientSession {
       throw error;
     }
     const event = await this.#readNextEvent(options);
-    await this.#releaseForTerminalControl(event);
+    if (event.type === "runtime") {
+      await this.#releaseForTerminalControl(event.event);
+    } else if (isTerminalOperationState(event.event.state)) {
+      const frameId = this.#frameForOperation(event.event.operationId);
+      if (frameId !== undefined) this.#finishTerminalFrame(frameId);
+    }
     return event;
   }
 
   public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
     while (true) {
       const event = await this.nextEvent(options);
-      if (isRuntimeTerminalEvent(event)) {
-        const operationId = browserRuntimeEventOperationIds.get(event) ?? terminalOperationId(event);
+      if (event.type === "lifecycle") {
+        if (isTerminalOperationState(event.event.state)) return createNnrpResultFromLifecycle(event.event);
+        continue;
+      }
+      if (isRuntimeTerminalEvent(event.event)) {
+        const operationId = browserRuntimeEventOperationIds.get(event.event) ?? terminalOperationId(event.event);
         if (operationId === undefined) {
           throw new NnrpProtocolError({
             code: "NNRP_TERMINAL_OPERATION_UNKNOWN",
-            message: `Terminal frame ${event.header.frameId} has no associated operation id.`,
+            message: `Terminal frame ${event.event.header.frameId} has no associated operation id.`,
             source: "wasm",
             retryable: false,
           });
         }
-        return createNnrpResultFromRuntimeEvent(operationId, event);
+        return createNnrpResultFromRuntimeEvent(operationId, event.event);
       }
     }
   }
@@ -1026,7 +1038,7 @@ export class NnrpBrowserClientSession {
     };
   }
 
-  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
+  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpClientEvent> {
     while (!this.closed) {
       yield await this.nextEvent(options);
     }
@@ -1065,7 +1077,7 @@ export class NnrpBrowserClientSession {
     return this.#closed || this.#state.client.closed;
   }
 
-  #readNextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  #readNextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -1077,7 +1089,7 @@ export class NnrpBrowserClientSession {
     if (queued !== undefined) return Promise.resolve(queued);
 
     let waiter: BrowserEventWaiter;
-    const pending = new Promise<NnrpRuntimeEvent>((resolve, reject) => {
+    const pending = new Promise<NnrpClientEvent>((resolve, reject) => {
       waiter = { resolve, reject };
       this.#eventWaiters.push(waiter);
     });
@@ -1458,10 +1470,10 @@ export class NnrpBrowserClientSession {
       const role = this.#role();
       while (!this.#closed && (this.#eventWaiters.length > 0 || this.#resultWaiters.size > 0)) {
         const event = await role.awaitEvent();
-        if (this.#shouldSuppressCancelledPayload(event)) continue;
-        if (isRuntimeTerminalEvent(event)) {
-          const frameId = event.header.frameId;
-          const operationId = terminalOperationId(event, this.#operationByFrame.get(frameId));
+        if (event.type === "runtime" && this.#shouldSuppressCancelledPayload(event.event)) continue;
+        if (event.type === "runtime" && isRuntimeTerminalEvent(event.event)) {
+          const frameId = event.event.header.frameId;
+          const operationId = terminalOperationId(event.event, this.#operationByFrame.get(frameId));
           const waiter = this.#resultWaiters.get(frameId);
           if (waiter !== undefined) {
             if (operationId === undefined) {
@@ -1472,14 +1484,26 @@ export class NnrpBrowserClientSession {
                 retryable: false,
               });
             }
-            browserRuntimeEventOperationIds.set(event, operationId);
+            browserRuntimeEventOperationIds.set(event.event, operationId);
             this.#resultWaiters.delete(frameId);
-            this.completeEvent(event);
-            waiter.resolve(createNnrpResultFromRuntimeEvent(operationId, event));
+            this.completeEvent(event.event);
+            waiter.resolve(createNnrpResultFromRuntimeEvent(operationId, event.event));
             continue;
           }
         }
-        this.completeEvent(event);
+        if (event.type === "lifecycle" && isTerminalOperationState(event.event.state)) {
+          const frameId = this.#frameForOperation(event.event.operationId);
+          const waiter = frameId === undefined ? undefined : this.#resultWaiters.get(frameId);
+          if (frameId !== undefined) {
+            this.#finishTerminalFrame(frameId);
+          }
+          if (frameId !== undefined && waiter !== undefined) {
+            this.#resultWaiters.delete(frameId);
+            waiter.resolve(createNnrpResultFromLifecycle(event.event));
+            continue;
+          }
+        }
+        if (event.type === "runtime") this.completeEvent(event.event);
         const waiter = this.#eventWaiters.shift();
         if (waiter === undefined) this.#eventQueue.push(event);
         else waiter.resolve(event);
@@ -1491,12 +1515,19 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  #takeQueuedEvent(): NnrpRuntimeEvent | undefined {
+  #takeQueuedEvent(): NnrpClientEvent | undefined {
     while (this.#eventQueue.length > 0) {
       const event = this.#eventQueue.shift()!;
-      if (this.#shouldSuppressCancelledPayload(event)) continue;
-      this.completeEvent(event);
+      if (event.type === "runtime" && this.#shouldSuppressCancelledPayload(event.event)) continue;
+      if (event.type === "runtime") this.completeEvent(event.event);
       return event;
+    }
+    return undefined;
+  }
+
+  #frameForOperation(operationId: bigint): number | undefined {
+    for (const [frameId, candidate] of this.#operationByFrame) {
+      if (candidate === operationId) return frameId;
     }
     return undefined;
   }
@@ -1875,6 +1906,10 @@ function isRuntimeTerminalEvent(event: NnrpRuntimeEvent): boolean {
   return event.header.messageType === NnrpMessageType.ResultPush ||
     event.header.messageType === NnrpMessageType.ResultDrop ||
     event.header.messageType === NnrpMessageType.ResultDropReason;
+}
+
+function isTerminalOperationState(state: NnrpOperationState): boolean {
+  return state === "superseded" || state === "cancelled" || state === "failed" || state === "completed";
 }
 
 function terminalOperationId(event: NnrpRuntimeEvent, frameOperationId?: bigint): bigint | undefined {

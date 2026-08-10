@@ -5,9 +5,6 @@ const prohibitedTerms = [
 
 const removedPublicApiPatterns = [
   { pattern: /\bNnrpRuntimeFrameEvent\b/, label: "removed NnrpRuntimeFrameEvent type" },
-  { pattern: /\bNnrpClientEvent\b/, label: "removed NnrpClientEvent type" },
-  { pattern: /\bNnrpServerEvent\b/, label: "removed NnrpServerEvent type" },
-  { pattern: /\bif\s*\(\s*event\.type\s*===/, label: "removed flat event.type discriminant" },
   { pattern: /\.sendResult\s*\(\s*\{\s*frameId\s*:/, label: "removed flat terminal result shape" },
 ] as const;
 

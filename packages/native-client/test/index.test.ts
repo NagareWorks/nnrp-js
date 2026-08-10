@@ -12,9 +12,11 @@ import {
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpCapabilityError,
+  type NnrpClientEvent,
   NnrpMessageType,
   type NnrpNativeTransportBinding,
   NnrpProtocolError,
+  type NnrpRuntimeEvent,
   NnrpTimeoutError,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
@@ -769,15 +771,160 @@ Deno.test("@nnrp/native-client releases routed event state when a session closes
   });
 
   const firstSession = await client.openSession({ requestedSessionId: 23 });
-  const firstEvent = await client.nextSessionEvent(23);
+  const firstEvent = expectRuntimeClientEvent(await client.nextSessionEvent(23));
   assertEquals(firstEvent.tail, { type: "body", body: new Uint8Array([1]) });
   await firstSession.close();
 
   const replacementSession = await client.openSession({ requestedSessionId: 23 });
-  const replacementEvent = await client.nextSessionEvent(23);
+  const replacementEvent = expectRuntimeClientEvent(await client.nextSessionEvent(23));
   assertEquals(replacementEvent.tail, { type: "body", body: new Uint8Array([3]) });
 
   await replacementSession.close();
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client preserves headerless lifecycle events", async () => {
+  let polled = false;
+  const lifecycleEvent = {
+    kind: 14,
+    headerPresent: false,
+    messageType: 0,
+    versionMajor: 0,
+    wireFormat: 0,
+    headerFlags: 0,
+    wireSessionId: 0,
+    connection: { kind: 1, id: 1n, generation: 1, flags: 0 },
+    session: { kind: 2, id: 12n, generation: 1, flags: 0 },
+    operation: { kind: 4, id: 42n, generation: 1, flags: 0 },
+    relatedOperationId: 42n,
+    relatedFrameId: 7,
+    frameId: 0,
+    viewId: 0,
+    routeId: 0,
+    traceId: 0n,
+    payload: new Uint8Array([5]),
+  };
+  const binding: NnrpNativeTransportBinding = {
+    ...fakeTransportBinding("tcp"),
+    connect: ({ endpoint }) =>
+      Promise.resolve({
+        kind: "tcp",
+        endpoint: String(endpoint),
+        connected: true,
+        send: () => Promise.resolve(),
+        receive: () => Promise.resolve([]),
+        close: () => {},
+        [CLIENT_ROLE_ADOPT]: () =>
+          Promise.resolve({
+            openSession: () =>
+              Promise.resolve({
+                handle: { kind: 2, id: 12n, generation: 1, flags: 0 },
+                sessionId: 12,
+                submit: () => Promise.resolve({ kind: 4, id: 42n, generation: 1, flags: 0 }),
+                poll: () => {
+                  if (polled) return Promise.resolve([]);
+                  polled = true;
+                  return Promise.resolve([lifecycleEvent]);
+                },
+                sendRuntimeFrame: () => Promise.resolve(),
+                close: () => Promise.resolve(),
+              }),
+            close: () => Promise.resolve(),
+          }),
+      } as NnrpTransportConnection),
+  };
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding })],
+    transportPolicy: "force-tcp",
+  });
+  const session = await client.openSession({ requestedSessionId: 12 });
+  assertEquals(await session.submitNoWait(tokenSubmit(42n, 7)), 42n);
+
+  assertEquals(await session.nextEvent(), {
+    type: "lifecycle",
+    event: { operationId: 42n, state: "cancelled" },
+  });
+  assertEquals(session.inFlightFrames(), []);
+  assertEquals(await session.submitNoWait(tokenSubmit(43n, 7)), 43n);
+
+  await session.close();
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client routes FFI lifecycle batches by their explicit session ids", async () => {
+  let polled = false;
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+    ffi: {
+      mode: "test",
+      awaitEvents: () => {
+        if (polled) return [];
+        polled = true;
+        return [
+          {
+            sessionId: 2,
+            event: { type: "lifecycle", event: { operationId: 22n, state: "cancelled" } },
+          },
+          {
+            sessionId: 1,
+            event: { type: "lifecycle", event: { operationId: 11n, state: "completed" } },
+          },
+        ];
+      },
+    },
+  });
+  const first = await client.openSession({ requestedSessionId: 1 });
+  const second = await client.openSession({ requestedSessionId: 2 });
+
+  assertEquals(await first.nextEvent(), {
+    type: "lifecycle",
+    event: { operationId: 11n, state: "completed" },
+  });
+  assertEquals(await second.nextEvent(), {
+    type: "lifecycle",
+    event: { operationId: 22n, state: "cancelled" },
+  });
+
+  await first.close();
+  await second.close();
+  await client.close();
+});
+
+Deno.test("@nnrp/native-client rejects FFI runtime batches with mismatched session ids", async () => {
+  let polled = false;
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+    ffi: {
+      mode: "test",
+      awaitEvents: () => {
+        if (polled) return [];
+        polled = true;
+        return [{
+          sessionId: 2,
+          event: {
+            type: "runtime",
+            event: runtimeControlEvent(NnrpMessageType.Progress, 1, {
+              operationId: 1n,
+              progressSequence: 1n,
+              stageCode: 1,
+              percentX100: 5000,
+              objectId: 0n,
+              bodyBytes: 0,
+            }),
+          },
+        }];
+      },
+    },
+  });
+  const session = await client.openSession({ requestedSessionId: 1 });
+
+  const error = await assertRejects(() => session.nextEvent(), NnrpProtocolError);
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_EVENT_SESSION_MISMATCH");
+
+  await session.close();
   await client.close();
 });
 
@@ -851,7 +998,6 @@ Deno.test("@nnrp/native-client keeps cache references explicit on submit", async
 
 Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop evidence", async () => {
   let polled = false;
-  const sessionId = "cancel-filter";
   const client = await openNativeClient({
     endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
@@ -864,7 +1010,7 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
           return [];
         }
         polled = true;
-        return cancelledOperationEvents(sessionId);
+        return cancelledOperationEvents().map((event) => ({ sessionId: 1, event }));
       },
     },
   });
@@ -881,9 +1027,9 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
   });
 
   const interleaved = [
-    await session.nextEvent(),
-    await session.nextEvent(),
-    await session.nextEvent(),
+    expectRuntimeClientEvent(await session.nextEvent()),
+    expectRuntimeClientEvent(await session.nextEvent()),
+    expectRuntimeClientEvent(await session.nextEvent()),
   ];
   assertEquals(
     interleaved.map((event) =>
@@ -894,8 +1040,8 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
     ["8:1", "9:1", "8:2"],
   );
 
-  assertEquals((await session.nextEvent()).metadata.type, "trace_context");
-  const dropEvidence = await session.nextEvent();
+  assertEquals(expectRuntimeClientEvent(await session.nextEvent()).metadata.type, "trace_context");
+  const dropEvidence = expectRuntimeClientEvent(await session.nextEvent());
   assertEquals(dropEvidence.metadata.type, "result_drop_reason");
   if (dropEvidence.metadata.type === "result_drop_reason") {
     assertEquals(dropEvidence.metadata.value.operationId, 7n);
@@ -1441,7 +1587,7 @@ function fakeTransportBinding(kind: "tcp" | "quic" | "ipc" | "websocket"): NnrpN
   };
 }
 
-function cancelledOperationEvents(_sessionId: string) {
+function cancelledOperationEvents(): NnrpClientEvent[] {
   return [
     runtimeControlEvent(NnrpMessageType.PartialResult, 70, {
       operationId: 7n,
@@ -1492,7 +1638,12 @@ function cancelledOperationEvents(_sessionId: string) {
       flags: 0,
       diagnosticBytes: 1,
     }, new Uint8Array([3])),
-  ];
+  ].map((event) => ({ type: "runtime", event } as const));
+}
+
+function expectRuntimeClientEvent(event: NnrpClientEvent): NnrpRuntimeEvent {
+  if (event.type !== "runtime") throw new Error(`expected runtime event, received ${event.type}`);
+  return event.event;
 }
 
 function runtimeControlEvent(

@@ -1,6 +1,6 @@
-# 10 - SDK Contract V9 Recovery And Multiplexing
+# 10 - SDK Contract V13 Role Events And Multiplexing
 
-This workstream adopts frozen NNRP/1 Preview4 SDK API contract version 9. Public JavaScript APIs remain
+This workstream adopts frozen NNRP/1 Preview4 SDK API contract version 13. Public JavaScript APIs remain
 transport-neutral and never expose native handles, generations, raw recovery tokens, or earlier-preview compatibility
 paths.
 
@@ -8,9 +8,18 @@ paths.
 
 - [x] Add canonical `NnrpSessionRecoveryTicket` with the exact NRTK version 1 encoding and validation rules.
 - [x] Add exact 48-byte `NnrpSessionOpenMetadata` and `NnrpSessionPriorityClass` codec surfaces.
-- [x] Export the frozen v9 core symbols and reject non-canonical ticket or metadata encodings.
-- [x] Upgrade the machine-contract checker from version 8 to version 9.
-- [x] Validate every JavaScript v9 projection, option field, default, role operation, and async semantic.
+- [x] Export the frozen recovery and multiplexing symbols and reject non-canonical ticket or metadata encodings.
+- [x] Upgrade the machine-contract checker to version 13.
+- [x] Validate every JavaScript v13 projection, option field, default, role operation, and async semantic.
+
+## Closed Role Events
+
+- [x] Expose `@nnrp/core.NnrpClientEvent` as the exact runtime/lifecycle tagged union.
+- [x] Return `NnrpClientEvent` from native and browser event polling and async iteration.
+- [x] Decode native and WASM headerless lifecycle packets without synthesizing wire headers.
+- [ ] Expose `@nnrp/native-server.NnrpServerEvent` as the exact submit/runtime/lifecycle tagged union.
+- [ ] Expose owning `@nnrp/native-server.NnrpServerOperation` instances for submit delivery and replies.
+- [ ] Make `receiveSubmit()` selective without dropping skipped runtime or lifecycle events.
 
 ## Native Client
 
@@ -59,5 +68,5 @@ paths.
 - [x] Run suite-owned adapter conformance and native/browser independent-process wire E2E without skips.
 - [x] Run format, lint, typecheck, tests, total and incremental coverage, build, package, and installed-package gates.
 - [x] Inspect every staged npm package and verify only provider packages contain their owned native artifacts.
-- [x] Update README, release notes, examples, and public API snapshots only after implementation matches contract v9.
+- [ ] Update README, release notes, examples, and public API snapshots only after implementation matches contract v13.
 - [x] Pin the audited Rust ABI 4.4 release artifact version to `1.0.0-preview.4.22`.
