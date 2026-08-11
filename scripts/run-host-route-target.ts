@@ -45,6 +45,7 @@ import {
   passedHostRouteResult,
   validateHostRouteScenario,
 } from "./host-route-conformance.ts";
+import { receiveServerRuntimeEvent } from "./server-event-helpers.ts";
 
 type HostTransportProvider = NnrpClientTransportProvider & NnrpServerTransportProvider;
 
@@ -466,9 +467,10 @@ async function runServerCase(
       sessions.push(session);
     }
     await Promise.all(sessions.map(async (session) => {
-      const event = await session.receive({
-        timeoutMillis: hostRouteTimeoutMillis(scenario, SERVER_CLOSE_FALLBACK_MILLISECONDS),
-      });
+      const event = await receiveServerRuntimeEvent(
+        session,
+        hostRouteTimeoutMillis(scenario, SERVER_CLOSE_FALLBACK_MILLISECONDS),
+      );
       if (event.header.messageType !== NnrpMessageType.SessionClose) {
         throw new Error(`Expected peer close, received message ${event.header.messageType}.`);
       }

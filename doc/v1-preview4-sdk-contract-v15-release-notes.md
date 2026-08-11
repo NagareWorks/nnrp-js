@@ -1,7 +1,7 @@
-# Preview4 SDK Contract V9 Release Notes
+# Preview4 SDK Contract V15 Release Notes
 
-This release adopts the frozen NNRP/1 Preview4 SDK API contract version 9 and the Rust ABI 4.4 role boundary. It
-replaces the earlier synchronous session shell with transport-neutral, negotiated client and server sessions.
+This release adopts the frozen NNRP/1 Preview4 SDK API contract version 15 and the Rust ABI 4.4 role boundary. It
+provides transport-neutral negotiated client and server sessions with explicit server-operation ownership.
 
 ## Session Lifecycle
 
@@ -12,6 +12,12 @@ replaces the earlier synchronous session shell with transport-neutral, negotiate
   handles or raw runtime tokens.
 - Native server acceptance is asynchronous, supports multiple sessions, and applies the frozen server policy decision
   contract before a session becomes public.
+- `NnrpServerSession.nextEvent()` returns the closed submit/runtime/lifecycle union, while `receiveSubmit()` selects an
+  operation without discarding skipped events.
+- Every accepted submit carries an `NnrpServerOperation`; progress, partial result, result, and result-drop methods are
+  available only on that operation.
+- Submit cancellation and timeout deterministically reject the local wait, dispatch protocol cancellation only after
+  submit dispatch, and keep the resulting lifecycle event observable through `nextEvent()`.
 
 ## Runtime Boundaries
 
@@ -25,8 +31,8 @@ replaces the earlier synchronous session shell with transport-neutral, negotiate
 ## Compatibility
 
 Preview4 is a breaking preview contract. This release does not provide compatibility aliases or fallback behavior for
-earlier preview APIs. Applications must await session creation and adopt the contract v9 session option and recovery
-types.
+earlier preview APIs. Applications must await session creation and adopt the contract v15 role-event, operation,
+session-option, and recovery types.
 
 ## Validation
 

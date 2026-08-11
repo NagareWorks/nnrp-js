@@ -1210,6 +1210,7 @@ export class NnrpBrowserClientSession {
       }
       triggered = true;
       this.#cancelledOperations.add(operationId);
+      onCancelled?.(error);
       cleanup();
       const cancellation = this.cancel({
         operationId,
@@ -1219,14 +1220,7 @@ export class NnrpBrowserClientSession {
         flags: 0,
         diagnosticBytes: 0,
       });
-      if (onCancelled === undefined) {
-        void cancellation.catch(() => {});
-      } else {
-        void cancellation.then(
-          () => onCancelled(error),
-          (sendError) => onCancelled(sendError),
-        );
-      }
+      void cancellation.catch(() => {});
     };
     const onAbort = () => trigger(1, submitCancelledError("wasm", options.signal));
 

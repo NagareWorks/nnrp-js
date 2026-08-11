@@ -1,6 +1,6 @@
-# 10 - SDK Contract V13 Role Events And Multiplexing
+# 10 - SDK Contract V15 Role Events And Multiplexing
 
-This workstream adopts frozen NNRP/1 Preview4 SDK API contract version 13. Public JavaScript APIs remain
+This workstream adopts frozen NNRP/1 Preview4 SDK API contract version 15. Public JavaScript APIs remain
 transport-neutral and never expose native handles, generations, raw recovery tokens, or earlier-preview compatibility
 paths.
 
@@ -9,17 +9,20 @@ paths.
 - [x] Add canonical `NnrpSessionRecoveryTicket` with the exact NRTK version 1 encoding and validation rules.
 - [x] Add exact 48-byte `NnrpSessionOpenMetadata` and `NnrpSessionPriorityClass` codec surfaces.
 - [x] Export the frozen recovery and multiplexing symbols and reject non-canonical ticket or metadata encodings.
-- [x] Upgrade the machine-contract checker to version 13.
-- [x] Validate every JavaScript v13 projection, option field, default, role operation, and async semantic.
+- [x] Upgrade the machine-contract checker to version 15.
+- [x] Validate every JavaScript v15 projection, option field, default, role operation, and async semantic.
+- [x] Freeze deterministic pre-dispatch cancellation, post-dispatch cancellation, timeout, and lifecycle-race behavior.
 
 ## Closed Role Events
 
 - [x] Expose `@nnrp/core.NnrpClientEvent` as the exact runtime/lifecycle tagged union.
 - [x] Return `NnrpClientEvent` from native and browser event polling and async iteration.
 - [x] Decode native and WASM headerless lifecycle packets without synthesizing wire headers.
-- [ ] Expose `@nnrp/native-server.NnrpServerEvent` as the exact submit/runtime/lifecycle tagged union.
-- [ ] Expose owning `@nnrp/native-server.NnrpServerOperation` instances for submit delivery and replies.
-- [ ] Make `receiveSubmit()` selective without dropping skipped runtime or lifecycle events.
+- [x] Expose `@nnrp/native-server.NnrpServerEvent` as the exact submit/runtime/lifecycle tagged union.
+- [x] Expose owning `@nnrp/native-server.NnrpServerOperation` instances for submit delivery and replies.
+- [x] Make `receiveSubmit()` selective without dropping skipped runtime or lifecycle events.
+- [x] Remove session-owned operation reply methods and reject generic-control bypasses.
+- [x] Preserve the exact native operation handle for progress, partial, result, and result-drop sends.
 
 ## Native Client
 
@@ -57,16 +60,16 @@ paths.
 - [x] Preserve package-owned carrier and role behavior in every transport package.
 - [x] Assert ABI sizes, offsets, symbols, and manifest versions on 32-bit and 64-bit layouts.
 - [x] Keep role-level calls coarse; recovery must not add per-frame FFI crossings.
-- [x] Update the browser-client WASM import/export contract for v9 session open, resume, and recovery tickets.
+- [x] Update the browser-client WASM import/export contract for frozen session open, resume, and recovery tickets.
 
 ## Validation And Release
 
 - [x] Add unit coverage for canonical tickets, option validation, async handshake, resume, policy, and multi-session
       use.
-- [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against audited Rust release `1.0.0-preview.4.22` at merge commit
-      `784a4a354f4e6a73798248f93cf574bd7a5af829`.
+- [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against successful full-matrix Rust workflow artifact run
+      `31442036247` at merge commit `13f72e7a81a54b9eb26ee68e399c2cf84bb5525d`.
 - [x] Run suite-owned adapter conformance and native/browser independent-process wire E2E without skips.
 - [x] Run format, lint, typecheck, tests, total and incremental coverage, build, package, and installed-package gates.
 - [x] Inspect every staged npm package and verify only provider packages contain their owned native artifacts.
-- [ ] Update README, release notes, examples, and public API snapshots only after implementation matches contract v13.
-- [x] Pin the audited Rust ABI 4.4 release artifact version to `1.0.0-preview.4.22`.
+- [x] Update README, release notes, examples, and public API snapshots after implementation matches contract v15.
+- [ ] Pin the audited Rust ABI 4.4 release that contains the server-operation lifetime fix after all SDKs align.

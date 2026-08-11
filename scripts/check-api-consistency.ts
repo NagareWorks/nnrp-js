@@ -11,7 +11,7 @@ import {
 } from "@nnrp/core";
 import { NnrpBrowserClientSession } from "@nnrp/browser-client";
 import { NnrpClientSession } from "@nnrp/native-client";
-import { NnrpServerSession } from "@nnrp/native-server";
+import { NnrpServerOperation, NnrpServerSession } from "@nnrp/native-server";
 
 const failures: string[] = [];
 
@@ -46,8 +46,19 @@ interface FrozenSdkContract {
   readonly semanticEnums: Readonly<Record<string, readonly string[]>>;
   readonly enums: Readonly<Record<string, { readonly values: Readonly<Record<string, number>> }>>;
   readonly types: Readonly<Record<string, FrozenContractType>>;
+  readonly roleSurfaces: {
+    readonly clientSubmitWait: {
+      readonly scopeRule: string;
+      readonly preDispatchCancellationRule: string;
+      readonly postDispatchCancellationRule: string;
+      readonly timeoutRule: string;
+      readonly lifecycleRule: string;
+    };
+  };
   readonly languageProjections: {
-    readonly javascript: Readonly<Record<string, string | readonly string[]>>;
+    readonly javascript: Readonly<
+      Record<string, string | readonly string[] | Readonly<Record<string, string>>>
+    >;
   };
 }
 
@@ -62,9 +73,9 @@ async function checkFrozenMachineContract(): Promise<void> {
     return;
   }
 
-  if (contract.contract !== "nnrp-1-preview4-sdk-api" || contract.contractVersion !== 13) {
+  if (contract.contract !== "nnrp-1-preview4-sdk-api" || contract.contractVersion !== 15) {
     failures.push(
-      `expected nnrp-1-preview4-sdk-api contract version 13, received ${contract.contract}@${contract.contractVersion}`,
+      `expected nnrp-1-preview4-sdk-api contract version 15, received ${contract.contract}@${contract.contractVersion}`,
     );
     return;
   }
@@ -77,12 +88,16 @@ async function checkFrozenMachineContract(): Promise<void> {
   checkProjection(contract, "runtimeFrameHeader", "@nnrp/core.NnrpRuntimeFrameHeader");
   checkProjection(contract, "runtimeEvent", "@nnrp/core.NnrpRuntimeEvent");
   checkProjection(contract, "clientEvent", "@nnrp/core.NnrpClientEvent");
+  checkProjection(contract, "serverEvent", "@nnrp/native-server.NnrpServerEvent");
+  checkProjection(contract, "serverOperation", "@nnrp/native-server.NnrpServerOperation");
+  checkRoleMethodProjection(contract);
   checkProjection(contract, "operationLifecycleEvent", "@nnrp/core.NnrpOperationLifecycleEvent");
   checkProjection(contract, "terminalEvent", "@nnrp/core.NnrpTerminalEvent");
   checkProjection(contract, "result", "@nnrp/core.NnrpResult");
   checkProjection(contract, "sessionRecoveryTicket", "@nnrp/core.NnrpSessionRecoveryTicket");
   checkProjection(contract, "sessionRecoveryTicketEncode", "NnrpSessionRecoveryTicket.toBytes");
   checkProjection(contract, "sessionRecoveryTicketDecode", "NnrpSessionRecoveryTicket.fromBytes");
+  checkClientSubmitWaitContract(contract, nativeClientSource, browserClientSource);
 
   for (
     const requiredSurface of [
@@ -138,6 +153,12 @@ async function checkFrozenMachineContract(): Promise<void> {
     { runtime: "NnrpRuntimeEvent", lifecycle: "NnrpOperationLifecycleEvent" },
   );
   checkTaggedUnion(
+    nativeServerSource,
+    "NnrpServerEvent",
+    contractVariants(contract, "ServerEvent"),
+    { submit: "NnrpServerOperation", runtime: "NnrpRuntimeEvent", lifecycle: "NnrpOperationLifecycleEvent" },
+  );
+  checkTaggedUnion(
     coreSource,
     "NnrpTerminalEvent",
     contractVariants(contract, "TerminalEvent"),
@@ -167,12 +188,46 @@ async function checkFrozenMachineContract(): Promise<void> {
     checkMethodSignature(source, "nextResult", "Promise<NnrpResult>");
     checkMethodSignature(source, "nextEvent", "Promise<NnrpClientEvent>");
   }
-  checkMethodSignature(nativeServerSource, "receive", "Promise<NnrpRuntimeEvent>");
-  checkMethodSignature(nativeServerSource, "sendResult", "Promise<void>", "result: NnrpResult");
+  checkClassMethodSignature(nativeServerSource, "NnrpServerSession", "nextEvent", "Promise<NnrpServerEvent>");
+  checkClassMethodSignature(nativeServerSource, "NnrpServerSession", "receiveSubmit", "Promise<NnrpServerOperation>");
+  checkClassMethodSignature(
+    nativeServerSource,
+    "NnrpServerOperation",
+    "sendResult",
+    "Promise<void>",
+    "metadata: NnrpResultPushMetadata",
+  );
+  checkClassMethodSignature(
+    nativeServerSource,
+    "NnrpServerOperation",
+    "sendResultDrop",
+    "Promise<void>",
+    "metadata: ResultDropReasonMetadata",
+  );
+  checkClassMethodSignature(
+    nativeServerSource,
+    "NnrpServerOperation",
+    "sendProgress",
+    "Promise<void>",
+    "metadata: ProgressMetadata",
+  );
+  checkClassMethodSignature(
+    nativeServerSource,
+    "NnrpServerOperation",
+    "sendPartialResult",
+    "Promise<void>",
+    "metadata: PartialResultMetadata",
+  );
+  checkRequiredSourceFragments("@nnrp/native-server NnrpServerOperation", nativeServerSource, [
+    "public get operationId(): bigint",
+    "public get frameId(): number",
+    "public get submit(): NnrpRuntimeEvent",
+  ]);
   checkV9OptionAndRoleSurfaces(contract, nativeClientSource, browserClientSource, nativeServerSource);
   checkNegotiatedSessionIdentity(nativeClientSource, browserClientSource, nativeServerSource);
   checkBrowserNegotiatedSessionIdentity(await Deno.readTextFile("packages/browser-client/src/wasm-role.ts"));
   await checkProviderSessionIdentityAbi();
+  await checkProviderRoleHandleOwnership();
 }
 
 function checkBrowserNegotiatedSessionIdentity(browserWasmRoleSource: string): void {
@@ -457,10 +512,117 @@ async function checkProviderSessionIdentityAbi(): Promise<void> {
   }
 }
 
+async function checkProviderRoleHandleOwnership(): Promise<void> {
+  for (const transport of ["tcp", "quic", "ipc", "websocket"]) {
+    const denoPath = `packages/transport-${transport}/src/native.ts`;
+    const denoSource = await Deno.readTextFile(denoPath);
+    const denoClient = sourceBetween(denoSource, "class DenoClientRoleSession", "class DenoServerRole");
+    const denoServer = sourceBetween(denoSource, "class DenoServerRoleSession", "function packSessionOpenRequest");
+    checkRequiredSourceFragments(`${denoPath} client role handle ownership`, denoClient, [
+      "async sendRuntimeFrame(messageType: number",
+      "packRuntimeFrameRequest(this.handle, messageType",
+    ]);
+    checkRequiredSourceFragments(`${denoPath} server operation handle ownership`, denoServer, [
+      "async sendRuntimeFrame(handle: FfiHandle",
+      "packRuntimeFrameRequest(handle, messageType",
+    ]);
+
+    const nodePath = `packages/transport-${transport}/src/native-node.ts`;
+    const nodeSource = await Deno.readTextFile(nodePath);
+    const nodeClient = sourceBetween(nodeSource, "class NodeClientRoleSession", "class NodeServerRole");
+    const nodeServer = sourceBetween(nodeSource, "class NodeServerRoleSession", "function requiredHandle");
+    checkRequiredSourceFragments(`${nodePath} client role handle ownership`, nodeClient, [
+      "async sendRuntimeFrame(\n    messageType: number",
+      "handle: this.handle",
+    ]);
+    checkRequiredSourceFragments(`${nodePath} server operation handle ownership`, nodeServer, [
+      "async sendRuntimeFrame(\n    handle: NativeHandle",
+      "handle,\n        message_type: messageType",
+    ]);
+  }
+}
+
+function sourceBetween(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  if (start < 0 || end < 0) {
+    failures.push(`source segment is missing: ${startMarker} -> ${endMarker}`);
+    return "";
+  }
+  return source.slice(start, end);
+}
+
 function checkProjection(contract: FrozenSdkContract, key: string, expected: string): void {
   const actual = contract.languageProjections.javascript[key];
   if (actual !== expected) {
     failures.push(`frozen JavaScript projection ${key} must be ${expected}, received ${String(actual)}`);
+  }
+}
+
+function checkRoleMethodProjection(contract: FrozenSdkContract): void {
+  const actual = contract.languageProjections.javascript.roleMethods;
+  const expected = {
+    "client.open_session": "openSession",
+    "client.resume_session": "resumeSession",
+    "client_session.recovery_ticket": "recoveryTicket",
+    "client_session.next_event": "nextEvent",
+    "server.accept": "accept",
+    "server_session.next_event": "nextEvent",
+    "server_session.receive_submit": "receiveSubmit",
+    "server_operation.send_result": "sendResult",
+    "server_operation.send_result_drop": "sendResultDrop",
+    "server_operation.send_progress": "sendProgress",
+    "server_operation.send_partial_result": "sendPartialResult",
+  } as const;
+  if (actual === null || typeof actual !== "object" || Array.isArray(actual)) {
+    failures.push("frozen JavaScript projection roleMethods must be an object");
+    return;
+  }
+  const roleMethods = actual as Readonly<Record<string, string>>;
+  checkExactMembers("languageProjections.javascript.roleMethods", Object.keys(roleMethods), Object.keys(expected));
+  for (const [roleMethod, method] of Object.entries(expected)) {
+    if (roleMethods[roleMethod] !== method) {
+      failures.push(
+        `frozen JavaScript role method ${roleMethod} must be ${method}, received ${roleMethods[roleMethod]}`,
+      );
+    }
+  }
+}
+
+function checkClientSubmitWaitContract(
+  contract: FrozenSdkContract,
+  nativeClientSource: string,
+  browserClientSource: string,
+): void {
+  const submitWait = contract.roleSurfaces.clientSubmitWait;
+  const requiredRules = [
+    ["scopeRule", submitWait.scopeRule, "cancellable or time-bounded submit-and-wait"],
+    ["preDispatchCancellationRule", submitWait.preDispatchCancellationRule, "emits no submit or cancellation frame"],
+    ["postDispatchCancellationRule", submitWait.postDispatchCancellationRule, "sends CANCEL"],
+    ["timeoutRule", submitWait.timeoutRule, "sends DEADLINE before dispatch"],
+    ["timeoutRule", submitWait.timeoutRule, "sends CANCEL"],
+    ["lifecycleRule", submitWait.lifecycleRule, "remains observable through the client event pump"],
+    ["lifecycleRule", submitWait.lifecycleRule, "must not race the same submit wait"],
+  ] as const;
+  for (const [rule, value, requiredText] of requiredRules) {
+    if (!value.includes(requiredText)) {
+      failures.push(`roleSurfaces.clientSubmitWait.${rule} must include: ${requiredText}`);
+    }
+  }
+
+  for (
+    const [label, source] of [
+      ["@nnrp/native-client", nativeClientSource],
+      ["@nnrp/browser-client", browserClientSource],
+    ] as const
+  ) {
+    checkRequiredSourceFragments(`${label} submit-wait cancellation`, source, [
+      'code: "NNRP_SUBMIT_CANCELLED"',
+      'code: "NNRP_SUBMIT_TIMEOUT"',
+      "this.#cancelledOperations.add(operationId)",
+      "onCancelled?.(error)",
+      "sourceRole: RuntimeRole.Client",
+    ]);
   }
 }
 
@@ -541,7 +703,7 @@ function checkTaggedUnion(
   const variants = new Map<string, string | null>();
   for (
     const match of declaration.matchAll(
-      /\|\s*\{\s*readonly type:\s*"([^"]+)"(?:;\s*readonly (?:value|event):\s*([^;}]+))?/g,
+      /\|\s*\{\s*readonly type:\s*"([^"]+)"(?:;\s*readonly (?:value|event|operation):\s*([^;}]+))?/g,
     )
   ) {
     variants.set(match[1]!, match[2] === undefined ? null : normalizeType(match[2]));
@@ -727,12 +889,11 @@ function checkSessionMethodParity(): void {
 }
 
 function checkServerControlSurface(): void {
-  const methods = [
-    "sendProgress",
-    "sendPartialResult",
+  const sessionMethods = [
+    "nextEvent",
+    "receiveSubmit",
     "sendBackpressure",
     "sendCreditUpdate",
-    "sendResultDropReason",
     "sendTraceContext",
     "sendRecoverableError",
     "sendRetryAfter",
@@ -746,9 +907,19 @@ function checkServerControlSurface(): void {
     "reportCacheMiss",
     "invalidateCache",
   ];
-  for (const method of methods) {
+  for (const method of sessionMethods) {
     if (typeof NnrpServerSession.prototype[method as keyof NnrpServerSession] !== "function") {
       failures.push(`@nnrp/native-server NnrpServerSession is missing ${method}()`);
+    }
+  }
+  for (const removed of ["receive", "sendResult", "sendResultDropReason", "sendProgress", "sendPartialResult"]) {
+    if (removed in NnrpServerSession.prototype) {
+      failures.push(`@nnrp/native-server NnrpServerSession must not expose operation-owned ${removed}()`);
+    }
+  }
+  for (const method of ["sendResult", "sendResultDrop", "sendProgress", "sendPartialResult"]) {
+    if (typeof NnrpServerOperation.prototype[method as keyof NnrpServerOperation] !== "function") {
+      failures.push(`@nnrp/native-server NnrpServerOperation is missing ${method}()`);
     }
   }
 }

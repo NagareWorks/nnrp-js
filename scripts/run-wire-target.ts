@@ -5,6 +5,7 @@ import {
   NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpClientEvent,
   NnrpMessageType,
+  type NnrpOperationState,
   type NnrpRuntimeEvent,
   type NnrpTransportClientSecurity,
   type NnrpTransportServerSecurity,
@@ -27,7 +28,8 @@ import { createServer as createTcpServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import { QUIC_TEST_CERTIFICATE_DER, QUIC_TEST_PRIVATE_KEY_PKCS8_DER } from "./fixtures/quic-test-identity.ts";
 import { createWireConformanceTargetManifest } from "./wire-target-manifest.ts";
-import { assertRuntimeMetadata, assertRuntimeTail, createSuccessResult } from "./runtime-event-fixtures.ts";
+import { assertRuntimeMetadata, assertRuntimeTail, createSuccessResultReply } from "./runtime-event-fixtures.ts";
+import { receiveServerLifecycleEvent, receiveServerRuntimeEvent } from "./server-event-helpers.ts";
 
 const SUITE_VERSION = "0.1.0";
 const TIMEOUT_MILLIS = 5_000;
@@ -205,16 +207,15 @@ async function startServer(
 }
 
 async function handleCancel(session: NnrpServerSession): Promise<void> {
-  const submit = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
-    NnrpMessageType.FrameSubmit,
-    "FRAME_SUBMIT",
-  );
+  const operation = await session.receiveSubmit({ timeoutMillis: TIMEOUT_MILLIS });
+  const submit = expectMessage(operation.submit, NnrpMessageType.FrameSubmit, "FRAME_SUBMIT");
   assertRuntimeMetadata(submit, "frame_submit");
-  const cancel = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+  const cancel = await receiveOperationRuntimeAndLifecycle(
+    session,
     NnrpMessageType.Cancel,
     "CANCEL",
+    submit.metadata.value.operationId,
+    "cancelled",
   );
   assertRuntimeMetadata(cancel, "control_request");
   if (cancel.metadata.value.operationId !== submit.metadata.value.operationId) {
@@ -228,7 +229,7 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
     flags: 0,
     bodyBytes: TRACE_BODY.byteLength,
   }, TRACE_BODY);
-  await session.sendResultDropReason({
+  await operation.sendResultDrop({
     operationId: submit.metadata.value.operationId,
     resultSequence: 1n,
     dropReasonCode: 1,
@@ -237,7 +238,7 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
     diagnosticBytes: 0,
   });
   expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.SessionClose,
     "SESSION_CLOSE",
   );
@@ -245,20 +246,17 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
 }
 
 async function handlePriority(session: NnrpServerSession): Promise<void> {
-  const submit = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
-    NnrpMessageType.FrameSubmit,
-    "FRAME_SUBMIT",
-  );
+  const operation = await session.receiveSubmit({ timeoutMillis: TIMEOUT_MILLIS });
+  const submit = expectMessage(operation.submit, NnrpMessageType.FrameSubmit, "FRAME_SUBMIT");
   assertRuntimeMetadata(submit, "frame_submit");
   const priority = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.PriorityUpdate,
     "PRIORITY_UPDATE",
   );
   assertRuntimeMetadata(priority, "scheduling");
   const expiry = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.ExpireAt,
     "EXPIRE_AT",
   );
@@ -270,7 +268,7 @@ async function handlePriority(session: NnrpServerSession): Promise<void> {
   ) {
     throw new Error("priority/deadline wire case metadata did not match its submitted operation");
   }
-  await session.sendResultDropReason({
+  await operation.sendResultDrop({
     operationId: submit.metadata.value.operationId,
     resultSequence: 1n,
     dropReasonCode: 1,
@@ -278,8 +276,14 @@ async function handlePriority(session: NnrpServerSession): Promise<void> {
     flags: 0,
     diagnosticBytes: 0,
   });
+  await receiveServerLifecycleEvent(
+    session,
+    TIMEOUT_MILLIS,
+    submit.metadata.value.operationId,
+    "superseded",
+  );
   expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.SessionClose,
     "SESSION_CLOSE",
   );
@@ -287,26 +291,23 @@ async function handlePriority(session: NnrpServerSession): Promise<void> {
 }
 
 async function handleCache(session: NnrpServerSession): Promise<void> {
-  const submit = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
-    NnrpMessageType.FrameSubmit,
-    "FRAME_SUBMIT",
-  );
+  const operation = await session.receiveSubmit({ timeoutMillis: TIMEOUT_MILLIS });
+  const submit = expectMessage(operation.submit, NnrpMessageType.FrameSubmit, "FRAME_SUBMIT");
   assertRuntimeMetadata(submit, "frame_submit");
   const capability = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.CapabilityNegotiation,
     "CAPABILITY_NEGOTIATION",
   );
   assertRuntimeMetadata(capability, "capability");
   const route = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.RouteHint,
     "ROUTE_HINT",
   );
   assertRuntimeMetadata(route, "route_hint");
   const cache = expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.CacheReference,
     "CACHE_REFERENCE",
   );
@@ -322,11 +323,16 @@ async function handleCache(session: NnrpServerSession): Promise<void> {
     profileId: 0x0002,
     diagnosticBytes: 0,
   });
-  await session.sendResult(
-    createSuccessResult(submit.metadata.value.operationId, submit.header.frameId, RESPONSE_BODY),
+  const result = createSuccessResultReply(RESPONSE_BODY);
+  await operation.sendResult(result.metadata, result.body);
+  await receiveServerLifecycleEvent(
+    session,
+    TIMEOUT_MILLIS,
+    submit.metadata.value.operationId,
+    "completed",
   );
   expectMessage(
-    await session.receive({ timeoutMillis: TIMEOUT_MILLIS }),
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.SessionClose,
     "SESSION_CLOSE",
   );
@@ -425,6 +431,37 @@ function expectMessage(
     throw new Error(`wire target expected ${label}, got message ${event.header.messageType}`);
   }
   return event;
+}
+
+async function receiveOperationRuntimeAndLifecycle(
+  session: NnrpServerSession,
+  messageType: NnrpMessageType,
+  label: string,
+  operationId: bigint,
+  state: NnrpOperationState,
+): Promise<NnrpRuntimeEvent> {
+  let runtime: NnrpRuntimeEvent | undefined;
+  let lifecycleObserved = false;
+  for (let index = 0; index < 2; index += 1) {
+    const event = await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS });
+    if (event.type === "runtime") {
+      runtime = expectMessage(event.event, messageType, label);
+      continue;
+    }
+    if (event.type === "submit") {
+      throw new Error(`wire target expected ${label} and ${state} lifecycle, got another submit`);
+    }
+    if (event.event.operationId !== operationId || event.event.state !== state) {
+      throw new Error(
+        `wire target expected ${state} lifecycle for ${operationId}, got ${event.event.state} for ${event.event.operationId}`,
+      );
+    }
+    lifecycleObserved = true;
+  }
+  if (runtime === undefined || !lifecycleObserved) {
+    throw new Error(`wire target did not observe both ${label} and ${state} lifecycle`);
+  }
+  return runtime;
 }
 
 async function writeManifest(

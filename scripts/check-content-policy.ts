@@ -6,6 +6,8 @@ const prohibitedTerms = [
 const removedPublicApiPatterns = [
   { pattern: /\bNnrpRuntimeFrameEvent\b/, label: "removed NnrpRuntimeFrameEvent type" },
   { pattern: /\.sendResult\s*\(\s*\{\s*frameId\s*:/, label: "removed flat terminal result shape" },
+  { pattern: /\bNnrpServerSession\.receive\b/, label: "removed server session receive method" },
+  { pattern: /\.sendResultDropReason\s*\(/, label: "removed server session result-drop method" },
 ] as const;
 
 const currentPublicApiRoots = [

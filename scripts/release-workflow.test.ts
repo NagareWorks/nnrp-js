@@ -8,7 +8,7 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "0072970d1212a650fa8a1be83b7b2a61c817f799";
+const CONFORMANCE_REVISION = "a1edf8e60f28af081c006d9d36d2ab8cab177f89";
 
 Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
   assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.22/g)?.length ?? 0) >= 3, true);
@@ -23,10 +23,10 @@ Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
 });
 
 Deno.test("CI consumes an immutable successful Rust workflow artifact without weakening release inputs", () => {
-  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "30862254352"');
+  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "31442036247"');
   assertStringIncludes(
     ciWorkflow,
-    "NNRP_JS_RUST_ARTIFACT_COMMIT: 784a4a354f4e6a73798248f93cf574bd7a5af829",
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: 13f72e7a81a54b9eb26ee68e399c2cf84bb5525d",
   );
   assertStringIncludes(artifactPreparation, "run.headSha !== expectedCommit");
   assertStringIncludes(artifactPreparation, 'run.status !== "completed" || run.conclusion !== "success"');

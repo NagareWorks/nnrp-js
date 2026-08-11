@@ -165,10 +165,7 @@ async function verifyNativeTransportLoopbacks() {
       { openNativeClient },
       { openBackendRuntime },
       {
-        createNnrpResultFromRuntimeEvent,
         createTokenSubmitRequest,
-        decodeNnrpRuntimeEvent,
-        encodeResultPushPayload,
         NNRP_DEFAULT_SUBMIT_HEADER,
         NNRP_DEFAULT_SUBMIT_POLICY,
         NnrpMessageType,
@@ -263,7 +260,8 @@ async function verifyNativeTransportLoopbacks() {
         policy: NNRP_DEFAULT_SUBMIT_POLICY,
         chunks: [{ payload: new Uint8Array([exchange]) }],
       }));
-      const submitEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+      const operation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+      const submitEvent = operation.submit;
       if (
         submitEvent.header.messageType !== NnrpMessageType.FrameSubmit ||
         submitEvent.header.frameId !== exchange ||
@@ -272,7 +270,7 @@ async function verifyNativeTransportLoopbacks() {
       ) {
         throw new Error("Node role smoke did not observe submit " + exchange);
       }
-      await serverSession.sendPartialResult({
+      await operation.sendPartialResult({
         operationId: submitEvent.metadata.value.operationId,
         resultSequence: 1n,
         objectId: 0n,
@@ -280,10 +278,7 @@ async function verifyNativeTransportLoopbacks() {
         bodyBytes: 1,
         flags: 0,
       }, new Uint8Array([exchange + 10]));
-      const resultEvent = decodeNnrpRuntimeEvent({
-        ...submitEvent.header,
-        messageType: NnrpMessageType.ResultPush,
-      }, encodeResultPushPayload({
+      await operation.sendResult({
         statusCode: 0,
         resultFlags: 0,
         sectionCount: 0,
@@ -301,10 +296,7 @@ async function verifyNativeTransportLoopbacks() {
         droppedTileCount: 0,
         payloadKindBitmap: 0,
         payloadFrameCount: 0,
-      }, new Uint8Array([exchange + 20])));
-      await serverSession.sendResult(
-        createNnrpResultFromRuntimeEvent(submitEvent.metadata.value.operationId, resultEvent),
-      );
+      }, new Uint8Array([exchange + 20]));
       await new Promise((resolve) => setTimeout(resolve, 20));
       const partialEvent = await nextRuntimeClientEvent();
       if (
@@ -322,10 +314,17 @@ async function verifyNativeTransportLoopbacks() {
       ) {
         throw new Error("Node role smoke did not observe result " + exchange);
       }
+      const lifecycle = await serverSession.nextEvent({ timeoutMillis: 5_000 });
+      if (
+        lifecycle.type !== "lifecycle" || lifecycle.event.operationId !== BigInt(exchange) ||
+        lifecycle.event.state !== "completed"
+      ) {
+        throw new Error("Node role smoke did not observe completed lifecycle " + exchange);
+      }
     }
     const clientClosing = clientSession.close();
-    const closeEvent = await serverSession.receive({ timeoutMillis: 5_000 });
-    if (closeEvent.header.messageType !== NnrpMessageType.SessionClose) {
+    const closeEvent = await serverSession.nextEvent({ timeoutMillis: 5_000 });
+    if (closeEvent.type !== "runtime" || closeEvent.event.header.messageType !== NnrpMessageType.SessionClose) {
       throw new Error("Node role smoke did not observe the client close");
     }
     await serverSession.close();

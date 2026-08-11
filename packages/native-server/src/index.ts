@@ -18,8 +18,10 @@ import {
   type NnrpDiagnostic,
   type NnrpEventPollOptions,
   NnrpMessageType,
+  type NnrpOperationLifecycleEvent,
+  type NnrpOperationState,
   NnrpProtocolError,
-  type NnrpResult,
+  type NnrpResultPushMetadata,
   type NnrpRuntimeEvent,
   type NnrpRuntimeFrameHeader,
   type NnrpSchemaDescriptorHeader,
@@ -263,6 +265,7 @@ const REQUIRED_RUNTIME_FEATURES = RUNTIME_FEATURE_PROTOCOL_CORE |
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
 const NATIVE_ROLE_IDS = Symbol.for("nnrp.internal.native.role-handle-ids.v1");
 const EVENT_KIND_SUBMIT_ACCEPTED = 5;
+const EVENT_KIND_OPERATION_LIFECYCLE = 14;
 
 const serverRoleSessionClosers = new WeakMap<NnrpBackendRuntime, (routingKey: string) => Promise<void>>();
 const serverAcceptors = new WeakMap<
@@ -276,15 +279,28 @@ const serverBoundProviderEndpoints = new WeakMap<
 >();
 const serverRoleEventReceivers = new WeakMap<
   NnrpBackendRuntime,
-  (routingKey: string, request: NnrpNativeServerReceiveRequest) => Promise<NnrpRuntimeEvent>
+  (routingKey: string, request: NnrpNativeServerReceiveRequest) => Promise<InternalDecodedServerRoleEvent>
 >();
 const serverRoleFrameSenders = new WeakMap<
   NnrpBackendRuntime,
   (routingKey: string, request: NnrpNativeRuntimeFrameSendRequest) => Promise<void>
 >();
-const serverRoleResultSenders = new WeakMap<
+const serverOperationFrameSenders = new WeakMap<
   NnrpBackendRuntime,
-  (routingKey: string, result: NnrpResult) => Promise<void>
+  (
+    routingKey: string,
+    operation: InternalNativeHandle,
+    request: NnrpNativeRuntimeFrameSendRequest,
+  ) => Promise<void>
+>();
+const serverOperationResultSenders = new WeakMap<
+  NnrpBackendRuntime,
+  (
+    routingKey: string,
+    operation: InternalNativeHandle,
+    metadata: NnrpResultPushMetadata,
+    body: Uint8Array,
+  ) => Promise<void>
 >();
 
 interface InternalNativeHandle {
@@ -314,12 +330,25 @@ interface InternalRoleEvent {
   readonly payload: Uint8Array;
 }
 
+type InternalDecodedServerRoleEvent =
+  | {
+    readonly type: "runtime";
+    readonly event: NnrpRuntimeEvent;
+    readonly operation?: InternalNativeHandle;
+  }
+  | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };
+
 interface InternalServerRoleSession {
   readonly handle: InternalNativeHandle;
   readonly sessionId: number;
   poll(maxEvents: number, timeoutMillis: number): Promise<readonly InternalRoleEvent[]>;
   sendResult(operation: InternalNativeHandle, payload: Uint8Array): Promise<void>;
-  sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void>;
+  sendRuntimeFrame(
+    handle: InternalNativeHandle,
+    messageType: number,
+    frameId: number,
+    payload: Uint8Array,
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -717,7 +746,6 @@ export class NnrpBackendRuntime {
   #closed = false;
   readonly #roleServers = new Map<object, Promise<InternalServerRole>>();
   readonly #roleSessions = new Map<string, InternalServerRoleSession>();
-  readonly #roleOperations = new Map<string, Map<number, InternalNativeHandle>>();
 
   public constructor(
     binding: NnrpNativeRuntimeBinding,
@@ -730,7 +758,14 @@ export class NnrpBackendRuntime {
     serverRoleSessionClosers.set(this, (routingKey) => this.#closeRoleSession(routingKey));
     serverRoleEventReceivers.set(this, (routingKey, request) => this.#receiveServerEvent(routingKey, request));
     serverRoleFrameSenders.set(this, (routingKey, request) => this.#sendRuntimeFrame(routingKey, request));
-    serverRoleResultSenders.set(this, (routingKey, result) => this.#sendServerResult(routingKey, result));
+    serverOperationFrameSenders.set(
+      this,
+      (routingKey, operation, request) => this.#sendOperationRuntimeFrame(routingKey, operation, request),
+    );
+    serverOperationResultSenders.set(
+      this,
+      (routingKey, operation, metadata, body) => this.#sendOperationResult(routingKey, operation, metadata, body),
+    );
   }
 
   public get manifest(): NnrpCapabilityManifest {
@@ -753,7 +788,18 @@ export class NnrpBackendRuntime {
     }
     const session = this.#roleSessions.get(routingKey);
     if (session === undefined) return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
-    return session.sendRuntimeFrame(request.messageType, request.frameId, request.payload);
+    return session.sendRuntimeFrame(session.handle, request.messageType, request.frameId, request.payload);
+  }
+
+  #sendOperationRuntimeFrame(
+    routingKey: string,
+    operation: InternalNativeHandle,
+    request: NnrpNativeRuntimeFrameSendRequest,
+  ): Promise<void> {
+    this.#ensureOpen();
+    const session = this.#roleSessions.get(routingKey);
+    if (session === undefined) return Promise.reject(bindingNotConnectedError("sendOperationRuntimeFrame"));
+    return session.sendRuntimeFrame(operation, request.messageType, request.frameId, request.payload);
   }
 
   async #acceptServerSession(
@@ -792,45 +838,32 @@ export class NnrpBackendRuntime {
   async #receiveServerEvent(
     routingKey: string,
     request: NnrpNativeServerReceiveRequest,
-  ): Promise<NnrpRuntimeEvent> {
+  ): Promise<InternalDecodedServerRoleEvent> {
     this.#ensureOpen();
     const receive = this.#binding.ffi?.receive;
     if (receive !== undefined) {
-      return await receive(request);
+      const event = await receive(request);
+      return { type: "runtime", event };
     }
     const session = this.#roleSessions.get(routingKey);
-    if (session === undefined) throw bindingNotConnectedError("receive");
+    if (session === undefined) throw bindingNotConnectedError("nextEvent");
     const events = await session.poll(1, request.timeoutMillis ?? 0);
     const event = events[0];
     if (event === undefined) throw eventPollTimeoutError("native");
-    const decoded = decodeServerRoleEvent(event);
-    if (event.kind === EVENT_KIND_SUBMIT_ACCEPTED) {
-      let operations = this.#roleOperations.get(routingKey);
-      if (operations === undefined) {
-        operations = new Map();
-        this.#roleOperations.set(routingKey, operations);
-      }
-      operations.set(event.frameId, event.operation);
-    }
-    return decoded;
+    return decodeServerRoleEvent(event);
   }
 
-  #sendServerResult(routingKey: string, result: NnrpResult): Promise<void> {
+  #sendOperationResult(
+    routingKey: string,
+    operation: InternalNativeHandle,
+    metadata: NnrpResultPushMetadata,
+    body: Uint8Array,
+  ): Promise<void> {
     const session = this.#roleSessions.get(routingKey);
-    const terminalEvent = successfulRuntimeResultEvent(result);
-    const frameId = terminalEvent.header.frameId;
-    const operations = this.#roleOperations.get(routingKey);
-    const operation = operations?.get(frameId);
-    if (session === undefined || operations === undefined || operation === undefined) {
+    if (session === undefined) {
       return Promise.reject(bindingNotConnectedError("sendResult"));
     }
-    return session.sendResult(
-      operation,
-      encodeResultPushPayload(terminalEvent.metadata.value, terminalEvent.tail.body),
-    ).then(() => {
-      operations.delete(frameId);
-      if (operations.size === 0) this.#roleOperations.delete(routingKey);
-    });
+    return session.sendResult(operation, encodeResultPushPayload(metadata, body));
   }
 
   public listen(options: NnrpListenOptions): NnrpServer {
@@ -936,7 +969,6 @@ export class NnrpBackendRuntime {
     const session = this.#roleSessions.get(routingKey);
     if (session === undefined) return;
     this.#roleSessions.delete(routingKey);
-    this.#roleOperations.delete(routingKey);
     await session.close();
   }
 
@@ -1336,11 +1368,23 @@ function copyServerProviderRoutes(
   return copy;
 }
 
-function decodeServerRoleEvent(event: InternalRoleEvent): NnrpRuntimeEvent {
+function decodeServerRoleEvent(event: InternalRoleEvent): InternalDecodedServerRoleEvent {
   if (!event.headerPresent) {
+    if (
+      event.kind === EVENT_KIND_OPERATION_LIFECYCLE && event.relatedOperationId !== 0n &&
+      event.payload.byteLength === 1
+    ) {
+      return {
+        type: "lifecycle",
+        event: {
+          operationId: event.relatedOperationId,
+          state: decodeOperationState(event.payload[0]!),
+        },
+      };
+    }
     throw new NnrpProtocolError({
       code: "NNRP_NATIVE_LIFECYCLE_EVENT_UNEXPECTED",
-      message: `Native server role emitted headerless lifecycle event kind ${event.kind} on the wire event pump.`,
+      message: `Native server role emitted invalid headerless event kind ${event.kind} on the role event pump.`,
       source: "native",
       retryable: false,
     });
@@ -1356,26 +1400,42 @@ function decodeServerRoleEvent(event: InternalRoleEvent): NnrpRuntimeEvent {
     routeId: event.routeId,
     traceId: event.traceId,
   };
-  return decodeNnrpRuntimeEvent(header, event.payload);
+  const decoded = decodeNnrpRuntimeEvent(header, event.payload);
+  if (decoded.header.messageType === NnrpMessageType.FrameSubmit) {
+    if (event.kind !== EVENT_KIND_SUBMIT_ACCEPTED) {
+      throw new NnrpProtocolError({
+        code: "NNRP_NATIVE_SUBMIT_EVENT_KIND_INVALID",
+        message: `Native server role emitted FRAME_SUBMIT with event kind ${event.kind}.`,
+        source: "native",
+        retryable: false,
+      });
+    }
+    return { type: "runtime", event: decoded, operation: event.operation };
+  }
+  return { type: "runtime", event: decoded };
 }
 
-function successfulRuntimeResultEvent(result: NnrpResult): NnrpRuntimeEvent & {
-  readonly metadata: { readonly type: "result_push"; readonly value: import("@nnrp/core").NnrpResultPushMetadata };
-  readonly tail: { readonly type: "body"; readonly body: Uint8Array };
-} {
-  if (
-    result.terminalState !== "success" || result.event.type !== "runtime" ||
-    result.event.event.header.messageType !== NnrpMessageType.ResultPush ||
-    result.event.event.metadata.type !== "result_push" || result.event.event.tail.type !== "body"
-  ) {
+function decodeOperationState(value: number): NnrpOperationState {
+  const states = [
+    "accepted",
+    "running",
+    "partial",
+    "waiting-tool",
+    "superseded",
+    "cancelled",
+    "failed",
+    "completed",
+  ] as const satisfies readonly NnrpOperationState[];
+  const state = states[value];
+  if (state === undefined) {
     throw new NnrpProtocolError({
-      code: "NNRP_SERVER_RESULT_INVALID",
-      message: "sendResult requires successful RESULT_PUSH runtime evidence with a body tail.",
-      source: "protocol",
+      code: "NNRP_NATIVE_OPERATION_STATE_INVALID",
+      message: `Native role emitted unknown operation lifecycle state ${value}.`,
+      source: "native",
       retryable: false,
     });
   }
-  return result.event.event as ReturnType<typeof successfulRuntimeResultEvent>;
+  return state;
 }
 
 export interface NnrpServerState {
@@ -1465,6 +1525,144 @@ export class NnrpServer {
   }
 }
 
+interface NnrpServerOperationState {
+  readonly runtime: NnrpBackendRuntime;
+  readonly routingKey: string;
+  readonly sessionId: number;
+  readonly handle: InternalNativeHandle;
+  readonly operationId: bigint;
+  readonly frameId: number;
+  readonly submit: NnrpRuntimeEvent;
+  readonly sessionClosed: () => boolean;
+}
+
+let createServerOperation: (state: NnrpServerOperationState) => NnrpServerOperation;
+
+export type NnrpServerEvent =
+  | { readonly type: "submit"; readonly operation: NnrpServerOperation }
+  | { readonly type: "runtime"; readonly event: NnrpRuntimeEvent }
+  | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };
+
+export class NnrpServerOperation {
+  readonly #state: NnrpServerOperationState;
+  #terminal = false;
+
+  private constructor(state: NnrpServerOperationState) {
+    this.#state = state;
+  }
+
+  static {
+    createServerOperation = (state) => new NnrpServerOperation(state);
+  }
+
+  public get operationId(): bigint {
+    return this.#state.operationId;
+  }
+
+  public get frameId(): number {
+    return this.#state.frameId;
+  }
+
+  public get submit(): NnrpRuntimeEvent {
+    return this.#state.submit;
+  }
+
+  public sendResult(metadata: NnrpResultPushMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    try {
+      this.#ensureReplyAllowed(this.#state.operationId, true);
+      const send = serverOperationResultSenders.get(this.#state.runtime);
+      if (send === undefined) return Promise.reject(bindingNotConnectedError("sendResult"));
+      this.#terminal = true;
+      return send(
+        this.#state.routingKey,
+        this.#state.handle,
+        metadata,
+        body.slice(),
+      ).catch((error) => {
+        this.#terminal = false;
+        throw error;
+      });
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  public sendResultDrop(
+    metadata: ResultDropReasonMetadata,
+    diagnostic: Uint8Array = EMPTY_PAYLOAD,
+  ): Promise<void> {
+    return this.#sendRuntimeFrame(
+      NnrpMessageType.ResultDropReason,
+      metadata.operationId,
+      encodeRuntimeControlMetadata(NnrpMessageType.ResultDropReason, metadata, diagnostic.slice()),
+      true,
+    );
+  }
+
+  public sendProgress(metadata: ProgressMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeFrame(
+      NnrpMessageType.Progress,
+      metadata.operationId,
+      encodeRuntimeControlMetadata(NnrpMessageType.Progress, metadata, body.slice()),
+      false,
+    );
+  }
+
+  public sendPartialResult(metadata: PartialResultMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
+    return this.#sendRuntimeFrame(
+      NnrpMessageType.PartialResult,
+      metadata.operationId,
+      encodeRuntimeControlMetadata(NnrpMessageType.PartialResult, metadata, body.slice()),
+      false,
+    );
+  }
+
+  #sendRuntimeFrame(
+    messageType: NnrpMessageType,
+    operationId: bigint,
+    payload: Uint8Array,
+    terminal: boolean,
+  ): Promise<void> {
+    try {
+      this.#ensureReplyAllowed(operationId, terminal);
+      const send = serverOperationFrameSenders.get(this.#state.runtime);
+      if (send === undefined) return Promise.reject(bindingNotConnectedError("sendOperationRuntimeFrame"));
+      if (terminal) this.#terminal = true;
+      return send(this.#state.routingKey, this.#state.handle, {
+        sessionId: this.#state.sessionId,
+        messageType,
+        frameId: this.#state.frameId,
+        payload,
+      }).catch((error) => {
+        if (terminal) this.#terminal = false;
+        throw error;
+      });
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  #ensureReplyAllowed(operationId: bigint, terminal: boolean): void {
+    if (this.#state.sessionClosed()) throw closedError("server session");
+    if (operationId !== this.#state.operationId) {
+      throw new NnrpProtocolError({
+        code: "NNRP_SERVER_OPERATION_ID_MISMATCH",
+        message: `Reply operation ${operationId} does not match accepted operation ${this.#state.operationId}.`,
+        source: "protocol",
+        retryable: false,
+      });
+    }
+    if (this.#terminal) {
+      throw terminal ? serverTerminalDuplicateError(this.#state.frameId) : new NnrpProtocolError({
+        code: "NNRP_SERVER_INCREMENTAL_AFTER_TERMINAL",
+        message: `Operation ${operationId} already reached a terminal server reply.`,
+        source: "protocol",
+        retryable: false,
+      });
+    }
+  }
+}
+
 interface NnrpServerSessionState {
   readonly runtime: NnrpBackendRuntime;
   readonly routingKey: string;
@@ -1482,8 +1680,8 @@ function assertNegotiatedSessionId(sessionId: number): number {
 export class NnrpServerSession {
   readonly #state: NnrpServerSessionState | undefined;
   readonly #runtimeObjects = new RuntimeObjectLifecycle();
-  readonly #frameByOperation = new Map<bigint, number>();
-  readonly #terminalFrames = new Set<number>();
+  readonly #pendingEvents: NnrpServerEvent[] = [];
+  #receiveQueue: Promise<void> = Promise.resolve();
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
   #nextRuntimeFrameId = 1;
   #closed = false;
@@ -1504,7 +1702,7 @@ export class NnrpServerSession {
     return sessionId;
   }
 
-  public receive(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpServerEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -1512,53 +1710,40 @@ export class NnrpServerSession {
       return Promise.reject(error);
     }
 
-    const state = this.#state;
-    if (state === undefined) {
-      return Promise.reject(bindingNotConnectedError("receive"));
+    return this.#serializeReceive(async () => {
+      const queued = this.#pendingEvents.shift();
+      if (queued !== undefined) return await raceEventPoll(Promise.resolve(queued), options);
+      return await this.#pollServerEvent(options);
+    });
+  }
+
+  public receiveSubmit(options: NnrpEventPollOptions = {}): Promise<NnrpServerOperation> {
+    try {
+      this.#ensureOpen();
+      validateEventPollOptions(options);
+    } catch (error) {
+      return Promise.reject(error);
     }
 
-    return raceEventPoll(
-      (serverRoleEventReceivers.get(state.runtime) ?? (() => Promise.reject(bindingNotConnectedError("receive"))))(
-        state.routingKey,
-        {
-          sessionId: state.sessionId,
-          ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
-        },
-      ),
-      options,
-    ).then(async (event) => {
-      await this.#releaseForTerminalControl(event);
-      if (event.metadata.type === "frame_submit") {
-        this.#frameByOperation.set(event.metadata.value.operationId, event.header.frameId);
+    return this.#serializeReceive(async () => {
+      const queuedIndex = this.#pendingEvents.findIndex((event) => event.type === "submit");
+      if (queuedIndex >= 0) {
+        const queued = this.#pendingEvents.splice(queuedIndex, 1)[0]!;
+        if (queued.type !== "submit") throw new Error("pending server event selection invariant failed");
+        return await raceEventPoll(Promise.resolve(queued.operation), options);
       }
-      return event;
+
+      const deadline = options.timeoutMillis === undefined ? undefined : Date.now() + options.timeoutMillis;
+      while (true) {
+        const remaining = deadline === undefined ? undefined : Math.max(0, deadline - Date.now());
+        const event = await this.#pollServerEvent({
+          ...(remaining === undefined ? {} : { timeoutMillis: remaining }),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        });
+        if (event.type === "submit") return event.operation;
+        this.#pendingEvents.push(event);
+      }
     });
-  }
-
-  public sendResult(result: NnrpResult): Promise<void> {
-    this.#ensureOpen();
-    const state = this.#state;
-    if (state === undefined) return Promise.reject(bindingNotConnectedError("sendResult"));
-    const sendResult = serverRoleResultSenders.get(state.runtime);
-    if (sendResult === undefined) return Promise.reject(bindingNotConnectedError("sendResult"));
-    const event = successfulRuntimeResultEvent(result);
-    const frameId = event.header.frameId;
-    if (this.#terminalFrames.has(frameId)) {
-      return Promise.reject(serverTerminalDuplicateError(frameId));
-    }
-    this.#terminalFrames.add(frameId);
-    return sendResult(state.routingKey, result).catch((error) => {
-      this.#terminalFrames.delete(frameId);
-      throw error;
-    });
-  }
-
-  public sendProgress(metadata: ProgressMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.Progress, metadata, body);
-  }
-
-  public sendPartialResult(metadata: PartialResultMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.PartialResult, metadata, body);
   }
 
   public sendBackpressure(metadata: PressureMetadata): Promise<void> {
@@ -1567,13 +1752,6 @@ export class NnrpServerSession {
 
   public sendCreditUpdate(metadata: PressureMetadata): Promise<void> {
     return this.sendControl(NnrpMessageType.CreditUpdate, metadata);
-  }
-
-  public sendResultDropReason(
-    metadata: ResultDropReasonMetadata,
-    diagnostic: Uint8Array = EMPTY_PAYLOAD,
-  ): Promise<void> {
-    return this.sendControl(NnrpMessageType.ResultDropReason, metadata, diagnostic);
   }
 
   public sendTraceContext(metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
@@ -1642,9 +1820,6 @@ export class NnrpServerSession {
   ): Promise<void> {
     try {
       assertServerRuntimeControlMessage(messageType);
-      if (messageType === NnrpMessageType.Progress || messageType === NnrpMessageType.PartialResult) {
-        this.#ensureIncrementalAllowed((metadata as ProgressMetadata | PartialResultMetadata).operationId);
-      }
       return this.#sendRuntimeFrame(messageType, encodeRuntimeControlMetadata(messageType, metadata, tail));
     } catch (error) {
       return Promise.reject(error);
@@ -1654,8 +1829,7 @@ export class NnrpServerSession {
   public async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    this.#frameByOperation.clear();
-    this.#terminalFrames.clear();
+    this.#pendingEvents.length = 0;
     this.#runtimeObjects.clear();
     const state = this.#state;
     const closeRoleSession = state === undefined ? undefined : serverRoleSessionClosers.get(state.runtime);
@@ -1672,6 +1846,52 @@ export class NnrpServerSession {
     if (this.#closed) {
       throw closedError("server session");
     }
+  }
+
+  #serializeReceive<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.#receiveQueue.then(operation, operation);
+    this.#receiveQueue = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+
+  async #pollServerEvent(options: NnrpEventPollOptions): Promise<NnrpServerEvent> {
+    const state = this.#state;
+    if (state === undefined) throw bindingNotConnectedError("nextEvent");
+    const receive = serverRoleEventReceivers.get(state.runtime);
+    if (receive === undefined) throw bindingNotConnectedError("nextEvent");
+    const decoded = await raceEventPoll(
+      receive(state.routingKey, {
+        sessionId: state.sessionId,
+        ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
+      }),
+      options,
+    );
+    if (decoded.type === "lifecycle") return decoded;
+
+    const event = decoded.event;
+    await this.#releaseForTerminalControl(event);
+    if (event.header.messageType !== NnrpMessageType.FrameSubmit) {
+      return { type: "runtime", event };
+    }
+    if (event.metadata.type !== "frame_submit" || decoded.operation === undefined) {
+      throw new NnrpProtocolError({
+        code: "NNRP_NATIVE_SUBMIT_OPERATION_MISSING",
+        message: "Native server submit delivery did not include an owning operation handle.",
+        source: "native",
+        retryable: false,
+      });
+    }
+    const operation = createServerOperation({
+      runtime: state.runtime,
+      routingKey: state.routingKey,
+      sessionId: state.sessionId,
+      handle: decoded.operation,
+      operationId: event.metadata.value.operationId,
+      frameId: event.header.frameId,
+      submit: event,
+      sessionClosed: () => this.closed,
+    });
+    return { type: "submit", operation };
   }
 
   #sendRuntimeObject(
@@ -1713,18 +1933,6 @@ export class NnrpServerSession {
         sourceRole: RuntimeRole.Server,
         flags: 0,
         diagnosticBytes: 0,
-      });
-    }
-  }
-
-  #ensureIncrementalAllowed(operationId: bigint): void {
-    const frameId = this.#frameByOperation.get(operationId);
-    if (frameId !== undefined && this.#terminalFrames.has(frameId)) {
-      throw new NnrpProtocolError({
-        code: "NNRP_SERVER_INCREMENTAL_AFTER_TERMINAL",
-        message: `Operation ${operationId} already reached terminal frame ${frameId}.`,
-        source: "protocol",
-        retryable: false,
       });
     }
   }
@@ -1836,12 +2044,9 @@ function validateEndpoint(endpoint: string | URL): void {
 
 function assertServerRuntimeControlMessage(messageType: NnrpMessageType): void {
   if (
-    messageType === NnrpMessageType.Progress ||
-    messageType === NnrpMessageType.PartialResult ||
     messageType === NnrpMessageType.Backpressure ||
     messageType === NnrpMessageType.CreditUpdate ||
     messageType === NnrpMessageType.TraceContext ||
-    messageType === NnrpMessageType.ResultDropReason ||
     messageType === NnrpMessageType.ErrorRecoverable ||
     messageType === NnrpMessageType.RetryAfter
   ) {
