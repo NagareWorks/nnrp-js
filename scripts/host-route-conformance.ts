@@ -26,7 +26,7 @@ export interface HostRouteProfile {
 export const NATIVE_HOST_ROUTE_PROFILES: readonly HostRouteProfile[] = [
   {
     name: "installed-native",
-    expected: 9,
+    expected: 10,
     modes: ["suite_as_client", "suite_as_server"],
     providers: [
       {

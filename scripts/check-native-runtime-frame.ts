@@ -9,7 +9,8 @@ import { openNativeClient } from "@nnrp/native-client";
 import { openBackendRuntime } from "@nnrp/native-server";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createServer as createTcpServer } from "node:net";
-import { createSuccessResult } from "./runtime-event-fixtures.ts";
+import { createSuccessResultReply } from "./runtime-event-fixtures.ts";
+import { receiveServerLifecycleEvent, receiveServerRuntimeEvent } from "./server-event-helpers.ts";
 
 if (import.meta.main) {
   await verifyNativeRuntimeFrame();
@@ -48,17 +49,18 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
     clientSession = await client.openSession();
     const bootstrapResult = clientSession.submit(tokenSubmit(1n, 1, new Uint8Array([0x62, 0x6f, 0x6f, 0x74])));
     serverSession = await accepting;
-    const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+    const bootstrapOperation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+    const bootstrapEvent = bootstrapOperation.submit;
     if (bootstrapEvent.metadata.type !== "frame_submit") {
       throw new Error(`expected bootstrap submit event, got ${bootstrapEvent.metadata.type}`);
     }
-    await serverSession.sendResult(
-      createSuccessResult(bootstrapEvent.metadata.value.operationId, bootstrapEvent.header.frameId, new Uint8Array()),
-    );
+    const bootstrapReply = createSuccessResultReply(new Uint8Array());
+    await bootstrapOperation.sendResult(bootstrapReply.metadata, bootstrapReply.body);
     await bootstrapResult;
+    await receiveServerLifecycleEvent(serverSession, 5_000, 1n, "completed");
 
     await clientSession.submitNoWait(tokenSubmit(2n, 2, new Uint8Array([0x77, 0x6f, 0x72, 0x6b])));
-    const pendingSubmit = await serverSession.receive({ timeoutMillis: 5_000 });
+    const pendingSubmit = (await serverSession.receiveSubmit({ timeoutMillis: 5_000 })).submit;
     if (pendingSubmit.metadata.type !== "frame_submit") {
       throw new Error(`expected pending submit event, got ${pendingSubmit.metadata.type}`);
     }
@@ -75,7 +77,7 @@ export async function verifyNativeRuntimeFrame(): Promise<void> {
     await cancelPending;
     diagnostic.fill(0);
 
-    const event = await serverSession.receive({ timeoutMillis: 5_000 });
+    const event = await receiveServerRuntimeEvent(serverSession, 5_000);
     if (
       event.header.messageType !== NnrpMessageType.Cancel || event.header.sessionId === 0 ||
       event.metadata.type !== "control_request" || event.metadata.value.operationId !== 2n ||

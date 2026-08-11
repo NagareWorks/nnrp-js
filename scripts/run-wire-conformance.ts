@@ -106,7 +106,7 @@ export async function runWireConformance(options: WireConformanceOptions): Promi
 }
 
 export async function runHostRouteConformance(options: WireConformanceOptions, suitePath: string): Promise<void> {
-  await runHostRouteProfiles(options, suitePath, NATIVE_HOST_ROUTE_PROFILES, 10);
+  await runHostRouteProfiles(options, suitePath, NATIVE_HOST_ROUTE_PROFILES, 11);
 }
 
 export async function runBrowserHostRouteConformance(

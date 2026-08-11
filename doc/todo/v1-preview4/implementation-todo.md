@@ -24,17 +24,17 @@ native ABI `4.4.x`; and `nnrp-conformance` owns wire-level schemas and scenarios
 - [x] [01 - Core contract and endpoints](01-core-contract-and-endpoints.md)
 - [x] [02 - Codecs and runtime events](02-codecs-and-runtime-events.md)
 - [x] [03 - Client control surface](03-client-control-surface.md)
-- [ ] [04 - Server control surface](04-server-control-surface.md)
+- [x] [04 - Server control surface](04-server-control-surface.md)
 - [x] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)
 - [x] [06 - IPC carrier provider](06-ipc-provider.md)
 - [x] [07 - WebSocket carrier provider](07-websocket-provider.md)
 - [x] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
 - [x] [09 - Artifacts, release, and docs](09-artifacts-release-docs.md)
-- [ ] [10 - SDK contract v13 role events and multiplexing](10-sdk-contract-v13-role-events-and-multiplexing.md)
+- [ ] [10 - SDK contract v15 role events and multiplexing](10-sdk-contract-v15-role-events-and-multiplexing.md)
 
 ## Release Closure
 
 - [ ] All workstream files contain zero unchecked boxes.
 - [x] `deno task lint`, `deno task test`, `deno task coverage`, and `deno task package-check` pass.
 - [x] Native and browser wire-conformance target manifests validate against the released suite schema.
-- [ ] Release dry-run tarballs pass the ownership checks in workstream 09 after the v13 role-event surface is complete.
+- [ ] Release dry-run tarballs pass the ownership checks in workstream 09 after the v15 role-event surface is complete.

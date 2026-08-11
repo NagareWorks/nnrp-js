@@ -1054,11 +1054,11 @@ class DenoServerRoleSession {
     assertStatus(await this.library.symbols.nnrp_server_send_result(request), "server result send");
   }
 
-  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+  async sendRuntimeFrame(handle: FfiHandle, messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
     this.#requireOpen();
     assertStatus(
       await this.library.symbols.nnrp_runtime_frame_send(
-        packRuntimeFrameRequest(this.handle, messageType, frameId, payload),
+        packRuntimeFrameRequest(handle, messageType, frameId, payload),
       ),
       "server runtime frame send",
     );

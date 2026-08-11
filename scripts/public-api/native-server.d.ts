@@ -1,4 +1,4 @@
-import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, NnrpSchemaRegistry, type NnrpServerProviderRoutes, type NnrpSessionOpenMetadata, type NnrpTransportCandidateReadiness, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, NnrpMessageType, type NnrpOperationLifecycleEvent, type NnrpResultPushMetadata, type NnrpRuntimeEvent, NnrpSchemaRegistry, type NnrpServerProviderRoutes, type NnrpSessionOpenMetadata, type NnrpTransportCandidateReadiness, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -129,6 +129,27 @@ export declare class NnrpServer {
     close(): Promise<void>;
     get closed(): boolean;
 }
+export type NnrpServerEvent = {
+    readonly type: "submit";
+    readonly operation: NnrpServerOperation;
+} | {
+    readonly type: "runtime";
+    readonly event: NnrpRuntimeEvent;
+} | {
+    readonly type: "lifecycle";
+    readonly event: NnrpOperationLifecycleEvent;
+};
+export declare class NnrpServerOperation {
+    #private;
+    private constructor();
+    get operationId(): bigint;
+    get frameId(): number;
+    get submit(): NnrpRuntimeEvent;
+    sendResult(metadata: NnrpResultPushMetadata, body?: Uint8Array): Promise<void>;
+    sendResultDrop(metadata: ResultDropReasonMetadata, diagnostic?: Uint8Array): Promise<void>;
+    sendProgress(metadata: ProgressMetadata, body?: Uint8Array): Promise<void>;
+    sendPartialResult(metadata: PartialResultMetadata, body?: Uint8Array): Promise<void>;
+}
 interface NnrpServerSessionState {
     readonly runtime: NnrpBackendRuntime;
     readonly routingKey: string;
@@ -140,13 +161,10 @@ export declare class NnrpServerSession {
     constructor(state?: NnrpServerSessionState);
     get activeTransport(): NnrpTransportKind;
     get sessionId(): number;
-    receive(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
-    sendResult(result: NnrpResult): Promise<void>;
-    sendProgress(metadata: ProgressMetadata, body?: Uint8Array): Promise<void>;
-    sendPartialResult(metadata: PartialResultMetadata, body?: Uint8Array): Promise<void>;
+    nextEvent(options?: NnrpEventPollOptions): Promise<NnrpServerEvent>;
+    receiveSubmit(options?: NnrpEventPollOptions): Promise<NnrpServerOperation>;
     sendBackpressure(metadata: PressureMetadata): Promise<void>;
     sendCreditUpdate(metadata: PressureMetadata): Promise<void>;
-    sendResultDropReason(metadata: ResultDropReasonMetadata, diagnostic?: Uint8Array): Promise<void>;
     sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array): Promise<void>;
     sendRecoverableError(metadata: RecoverableErrorMetadata, diagnostic?: Uint8Array): Promise<void>;
     sendRetryAfter(metadata: RetryAfterMetadata, diagnostic?: Uint8Array): Promise<void>;

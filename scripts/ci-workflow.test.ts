@@ -12,7 +12,7 @@ const browserRoleIntegration = await Deno.readTextFile(
   "packages/browser-client/test/browser-role.integration.test.ts",
 );
 
-const CONFORMANCE_REVISION = "0072970d1212a650fa8a1be83b7b2a61c817f799";
+const CONFORMANCE_REVISION = "a1edf8e60f28af081c006d9d36d2ab8cab177f89";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
@@ -50,8 +50,9 @@ Deno.test("installed tarballs run the real Node role E2E", () => {
   assertStringIncludes(installedPackageSmoke, 'await run("node", ["native-role-smoke.mjs", "--installed"]');
   assertStringIncludes(installedPackageSmoke, 'nodeNativeRole: "passed"');
   assertStringIncludes(nodeImportSmoke, 'const installedMode = process.argv.includes("--installed")');
-  assertStringIncludes(nodeImportSmoke, "await serverSession.sendPartialResult");
-  assertStringIncludes(nodeImportSmoke, "await serverSession.sendResult");
+  assertStringIncludes(nodeImportSmoke, "await serverSession.receiveSubmit");
+  assertStringIncludes(nodeImportSmoke, "await operation.sendPartialResult");
+  assertStringIncludes(nodeImportSmoke, "await operation.sendResult");
   assertStringIncludes(nodeImportSmoke, "for (let exchange = 1; exchange <= 2; exchange += 1)");
 });
 

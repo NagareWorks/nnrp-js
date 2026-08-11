@@ -102,7 +102,7 @@ Deno.test("@nnrp/browser-client preserves explicit module and provider ownership
   assertEquals(binding.transportProviders, [provider]);
 });
 
-Deno.test("@nnrp/browser-client exposes frozen v9 session defaults and eager open failures", async () => {
+Deno.test("@nnrp/browser-client exposes frozen session defaults and eager open failures", async () => {
   let connectCalls = 0;
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const version = await runtime.protocolVersion();
@@ -277,7 +277,7 @@ Deno.test("@nnrp/browser-client selects its installed compatible browser provide
   await runtime.close();
 });
 
-Deno.test("@nnrp/browser-client validates v9 session options before opening a carrier", async () => {
+Deno.test("@nnrp/browser-client validates frozen session options before opening a carrier", async () => {
   let connectCalls = 0;
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const client = runtime.connect({

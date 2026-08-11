@@ -2,30 +2,36 @@
 
 ## Receive Path
 
-- [ ] Extend `NnrpServerSession.receive(options?)` to return the frozen `NnrpServerEvent` tagged union.
-  - [ ] Return `submit` with an owning `NnrpServerOperation` for `FRAME_SUBMIT`.
-  - [ ] Return `runtime` for non-submit wire events.
-  - [ ] Return `lifecycle` for headerless operation lifecycle notifications.
-  - [ ] Preserve operation-local order and owned tail bytes across all variants.
-  - [ ] Keep skipped non-submit and lifecycle events queued when `receiveSubmit()` selects the next operation.
+- [x] Implement the frozen `NnrpServerEvent` receive surface.
+  - [x] `nextEvent(options?)` returns `submit`, `runtime`, or `lifecycle`.
+  - [x] `submit` carries an owning `NnrpServerOperation` for `FRAME_SUBMIT`.
+  - [x] `runtime` carries every non-submit wire event.
+  - [x] `lifecycle` carries headerless operation lifecycle notifications.
+  - [x] Preserve operation-local order and owned tail bytes across all variants.
+  - [x] Keep skipped non-submit and lifecycle events queued when `receiveSubmit()` selects the next operation.
 
-## Incremental Result and Flow Methods
+## Operation Replies and Session Controls
 
-- [x] Add every frozen server control method.
+- [x] Put every operation-scoped reply on `NnrpServerOperation`.
   - [x] `sendProgress(metadata, body?)`.
   - [x] `sendPartialResult(metadata, body?)`.
+  - [x] `sendResult(metadata, body?)`.
+  - [x] `sendResultDrop(metadata, diagnostic?)`.
+  - [x] Validate the supplied operation id against the accepted operation.
+  - [x] Route every reply through the accepted native operation handle, including its generation and flags.
+- [x] Keep session-scoped flow, diagnostics, object, and cache methods on `NnrpServerSession`.
   - [x] `sendBackpressure(metadata)`.
   - [x] `sendCreditUpdate(metadata)`.
-  - [x] `sendResultDropReason(metadata, diagnostic?)`.
   - [x] `sendTraceContext(metadata, body?)`.
   - [x] `sendRecoverableError(metadata, diagnostic?)`.
   - [x] `sendRetryAfter(metadata, diagnostic?)`.
-  - [x] Public `sendControl(messageType, metadata, tail?)` escape hatch.
-- [x] Keep final result semantics separate.
-  - [x] Preserve `sendResult(result)` as the terminal result API.
+  - [x] Keep `sendControl(messageType, metadata, tail?)` for session-scoped server messages only.
+  - [x] Reject progress, partial-result, result, and result-drop bypass through the session.
+- [x] Enforce operation terminal semantics.
   - [x] Reject partial-result or progress sends after a terminal result.
   - [x] Reject a second terminal result.
-  - [x] Permit the frozen result-drop and trace terminal evidence sequence.
+  - [x] Roll back local terminal state if the native send fails before completion.
+  - [x] Keep session trace evidence available after an operation reaches a terminal reply.
 
 ## Runtime and Provider Integration
 
@@ -69,9 +75,9 @@
 
 ## Acceptance Evidence
 
-- [ ] Server tests cover every receive variant, operation reply method, multi-listener ordering, rollback, and
+- [x] Server tests cover every receive variant, operation reply method, multi-listener ordering, rollback, and
       ownership.
 - [x] State-machine tests cover partial, terminal, duplicate-terminal, and post-terminal behavior.
 - [x] Direction tests reject client-only messages from server send helpers.
-- [ ] Public API snapshot `scripts/public-api/native-server.d.ts` matches the frozen JavaScript server page in
+- [x] Public API snapshot `scripts/public-api/native-server.d.ts` matches the frozen JavaScript server page in
       `nnrp-doc`.
