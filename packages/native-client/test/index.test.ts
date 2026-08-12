@@ -1046,10 +1046,39 @@ Deno.test("@nnrp/native-client suppresses cancelled payloads but preserves drop 
   if (dropEvidence.metadata.type === "result_drop_reason") {
     assertEquals(dropEvidence.metadata.value.operationId, 7n);
   }
+  assertEquals(session.inFlightFrames(), []);
 });
 
-Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation", async () => {
-  const controls: Array<{ messageType: NnrpMessageType; metadata: Record<string, unknown> }> = [];
+Deno.test("@nnrp/native-client retains peer-cancellation tombstones after releasing active ownership", async () => {
+  let polled = false;
+  const client = await openNativeClient({
+    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
+    ffi: {
+      mode: "test",
+      submitNoWait: ({ submit }) => submit.operationId,
+      awaitEvents: () => {
+        if (polled) return [];
+        polled = true;
+        return peerCancelledOperationEvents().map((event) => ({ sessionId: 1, event }));
+      },
+    },
+  });
+  const session = await client.openSession({ requestedSessionId: 1 });
+  assertEquals(await session.submitNoWait(tokenSubmit(17n, 170)), 17n);
+
+  const cancellation = expectRuntimeClientEvent(await session.nextEvent());
+  assertEquals(cancellation.metadata.type, "control_request");
+  assertEquals(session.inFlightFrames(), []);
+
+  const next = expectRuntimeClientEvent(await session.nextEvent());
+  assertEquals(next.metadata.type, "progress");
+  if (next.metadata.type === "progress") assertEquals(next.metadata.value.operationId, 18n);
+});
+
+Deno.test("@nnrp/native-client sends submit deadlines before dispatch with submit identity", async () => {
+  const controls: Array<{ messageType: NnrpMessageType; frameId: number; metadata: Record<string, unknown> }> = [];
+  const dispatchOrder: string[] = [];
   let markDispatched: (() => void) | undefined;
   const dispatched = new Promise<void>((resolve) => {
     markDispatched = resolve;
@@ -1061,14 +1090,17 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
     ffi: {
       mode: "test",
       submitResultCompact: ({ submit }) => {
+        dispatchOrder.push(`submit:${submit.frameId}`);
         markDispatched?.();
         return new Promise((resolve) => {
           resolveResult = () => resolve(createSuccessResult(submit.operationId, submit.frameId, new Uint8Array()));
         });
       },
-      sendRuntimeFrame: ({ messageType, payload }) => {
+      sendRuntimeFrame: ({ messageType, frameId, payload }) => {
+        dispatchOrder.push(`${NnrpMessageType[messageType]}:${frameId}`);
         controls.push({
           messageType,
+          frameId,
           metadata: decodeRuntimeControlMetadata(messageType, payload).metadata as unknown as Record<string, unknown>,
         });
       },
@@ -1076,13 +1108,15 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
   });
   const session = await client.openSession({ requestedSessionId: 16 });
   await session.cancel({
-    operationId: 40n,
+    operationId: 0n,
     controlSequence: 10n,
     reasonCode: 0,
     sourceRole: RuntimeRole.Client,
     flags: 0,
     diagnosticBytes: 0,
   });
+  controls.length = 0;
+  dispatchOrder.length = 0;
   const controller = new AbortController();
   const pending = session.submit(tokenSubmit(41n, 4_101), {
     signal: controller.signal,
@@ -1093,22 +1127,20 @@ Deno.test("@nnrp/native-client sends submit deadlines and protocol cancellation"
   controller.abort("caller-stop");
   const error = await assertRejects(() => pending, NnrpTimeoutError);
   assertEquals(error.diagnostic.code, "NNRP_SUBMIT_CANCELLED");
-  assertEquals(controls.map(({ messageType }) => messageType), [
-    NnrpMessageType.Cancel,
-    NnrpMessageType.Deadline,
-    NnrpMessageType.Cancel,
-  ]);
-  assertEquals(controls[1]?.metadata.controlSequence, 11n);
-  assertEquals(controls[1]?.metadata.operationId, 41n);
-  assertEquals(controls[2]?.metadata.controlSequence, 12n);
-  assertEquals(controls[2]?.metadata.reasonCode, 1);
+  assertEquals(dispatchOrder.slice(0, 2), ["Deadline:4101", "submit:4101"]);
+  assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
+  assertEquals(controls[0]?.frameId, 4_101);
+  assertEquals(controls[0]?.metadata.controlSequence, 11n);
+  assertEquals(controls[0]?.metadata.operationId, 41n);
+  assertEquals(controls[1]?.metadata.controlSequence, 12n);
+  assertEquals(controls[1]?.metadata.reasonCode, 1);
 
   resolveResult?.();
 });
 
 Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal listeners", async () => {
   let submitCalls = 0;
-  const controls: Array<{ messageType: NnrpMessageType; metadata: Record<string, unknown> }> = [];
+  const controls: Array<{ messageType: NnrpMessageType; frameId: number; metadata: Record<string, unknown> }> = [];
   const client = await openNativeClient({
     endpoint: "nnrp://127.0.0.1:4433/session/default",
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
@@ -1122,9 +1154,10 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
         submitCalls += 1;
         return submit.operationId;
       },
-      sendRuntimeFrame: ({ messageType, payload }) => {
+      sendRuntimeFrame: ({ messageType, frameId, payload }) => {
         controls.push({
           messageType,
+          frameId,
           metadata: decodeRuntimeControlMetadata(messageType, payload).metadata as unknown as Record<string, unknown>,
         });
       },
@@ -1153,6 +1186,7 @@ Deno.test("@nnrp/native-client rejects pre-dispatch aborts and cleans terminal l
   assertEquals(await session.submitNoWait(tokenSubmit(53n, 5_303), { timeoutMillis: 5 }), 53n);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assertEquals(controls.map(({ messageType }) => messageType), [NnrpMessageType.Deadline, NnrpMessageType.Cancel]);
+  assertEquals(controls[0]?.frameId, 5_303);
   assertEquals(controls[1]?.metadata.operationId, 53n);
   assertEquals(controls[1]?.metadata.reasonCode, 3);
 });
@@ -1206,6 +1240,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
+      submitNoWait: ({ submit }) => submit.operationId,
       sendRuntimeFrame: ({ messageType, frameId, payload }) => {
         seen.push({ messageType, frameId, payload });
       },
@@ -1214,7 +1249,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   const session = await client.openSession({ requestedSessionId: 18 });
   const one = new Uint8Array([1]);
   const control = {
-    operationId: 1n,
+    operationId: 0n,
     controlSequence: 2n,
     reasonCode: 3,
     sourceRole: RuntimeRole.Client,
@@ -1230,19 +1265,13 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     flags: 0,
   } as const;
 
+  await session.submitNoWait(tokenSubmit(1n, 77));
+  await session.submitNoWait(tokenSubmit(2n, 78));
   await session.cancel(control, one);
   await session.abort(control, one);
   await session.updatePriority(scheduling);
   await session.updateDeadline(scheduling);
   await session.expireAt(scheduling);
-  await session.supersede({
-    oldOperationId: 1n,
-    newOperationId: 2n,
-    controlSequence: 3n,
-    dropReasonCode: 4,
-    flags: 0,
-    diagnosticBytes: 1,
-  }, one);
   await session.updateBudget({
     operationId: 1n,
     computeBudgetUnits: 2n,
@@ -1307,7 +1336,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   }, one);
   await session.referenceObject({
     objectId: 1n,
-    operationId: 2n,
+    operationId: 1n,
     objectVersion: 3n,
     offset: 0n,
     length: 1n,
@@ -1316,7 +1345,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   }, one);
   await session.releaseObject({
     objectId: 1n,
-    operationId: 2n,
+    operationId: 1n,
     releaseReason: ObjectReleaseReason.Completed,
     sourceRole: RuntimeRole.Client,
     flags: 0,
@@ -1370,6 +1399,22 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     cacheKeyLo: 0n,
     reasonCode: 5,
   });
+  await session.supersede({
+    oldOperationId: 1n,
+    newOperationId: 2n,
+    controlSequence: 3n,
+    dropReasonCode: 4,
+    flags: 0,
+    diagnosticBytes: 1,
+  }, one);
+  await session.updatePriority({ ...scheduling, operationId: 2n });
+  const inactive = await assertRejects(() => session.updatePriority(scheduling), NnrpProtocolError);
+  assertEquals(inactive.diagnostic.code, "NNRP_OPERATION_UNKNOWN");
+  const unscoped = await assertRejects(
+    () => session.updatePriority({ ...scheduling, operationId: 0n }),
+    NnrpProtocolError,
+  );
+  assertEquals(unscoped.diagnostic.code, "NNRP_OPERATION_SCOPE_REQUIRED");
 
   assertEquals(seen.map(({ messageType }) => messageType), [
     NnrpMessageType.Cancel,
@@ -1377,7 +1422,6 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     NnrpMessageType.PriorityUpdate,
     NnrpMessageType.Deadline,
     NnrpMessageType.ExpireAt,
-    NnrpMessageType.Supersede,
     NnrpMessageType.BudgetUpdate,
     NnrpMessageType.CapabilityNegotiation,
     NnrpMessageType.DegradeProfile,
@@ -1393,8 +1437,49 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     NnrpMessageType.CacheReference,
     NnrpMessageType.CacheMiss,
     NnrpMessageType.CacheInvalidate,
+    NnrpMessageType.Supersede,
+    NnrpMessageType.PriorityUpdate,
   ]);
-  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 21 }, (_, index) => index + 1));
+  assertEquals(
+    seen.filter(({ messageType }) =>
+      messageType === NnrpMessageType.Cancel ||
+      messageType === NnrpMessageType.Abort ||
+      messageType === NnrpMessageType.PriorityUpdate ||
+      messageType === NnrpMessageType.Deadline ||
+      messageType === NnrpMessageType.ExpireAt ||
+      messageType === NnrpMessageType.BudgetUpdate ||
+      messageType === NnrpMessageType.RouteHint ||
+      messageType === NnrpMessageType.ExecutionHint ||
+      messageType === NnrpMessageType.ObjectRef ||
+      messageType === NnrpMessageType.ObjectRelease ||
+      messageType === NnrpMessageType.Supersede
+    ).map(({ frameId }) => frameId),
+    [0, 0, 77, 77, 77, 77, 77, 77, 77, 77, 77, 78],
+  );
+  assertEquals(seen.map(({ frameId }) => frameId), [
+    0,
+    0,
+    77,
+    77,
+    77,
+    77,
+    1,
+    2,
+    77,
+    77,
+    3,
+    4,
+    5,
+    77,
+    77,
+    6,
+    7,
+    8,
+    9,
+    10,
+    77,
+    78,
+  ]);
   assertEquals(seen.every(({ payload }) => payload.byteLength > 0), true);
   assertEquals(
     decodeRuntimeObjectMetadata(
@@ -1419,6 +1504,7 @@ Deno.test("@nnrp/native-client enforces operation-owned runtime object lifecycle
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
     ffi: {
       mode: "test",
+      submitNoWait: ({ submit }) => submit.operationId,
       sendRuntimeFrame: ({ messageType, payload }) => {
         seen.push({ messageType, payload });
       },
@@ -1449,6 +1535,7 @@ Deno.test("@nnrp/native-client enforces operation-owned runtime object lifecycle
     lifetimeHintMs: 1_000,
     metadataBytes: 0,
   });
+  await session.submitNoWait(tokenSubmit(7n, 70));
   await session.referenceObject(reference);
   await assertRejects(
     () => session.referenceObject({ ...reference, objectVersion: 1n }),
@@ -1508,6 +1595,7 @@ Deno.test("@nnrp/native-client enforces operation-owned runtime object lifecycle
     lifetimeHintMs: 1_000,
     metadataBytes: 0,
   });
+  await session.submitNoWait(tokenSubmit(8n, 80));
   await session.referenceObject({ ...reference, objectId: 42n, operationId: 8n });
   await session.supersede({
     oldOperationId: 8n,
@@ -1638,6 +1726,35 @@ function cancelledOperationEvents(): NnrpClientEvent[] {
       flags: 0,
       diagnosticBytes: 1,
     }, new Uint8Array([3])),
+  ].map((event) => ({ type: "runtime", event } as const));
+}
+
+function peerCancelledOperationEvents(): NnrpClientEvent[] {
+  return [
+    runtimeControlEvent(NnrpMessageType.Cancel, 170, {
+      operationId: 17n,
+      controlSequence: 1n,
+      reasonCode: 2,
+      sourceRole: RuntimeRole.Server,
+      flags: 0,
+      diagnosticBytes: 0,
+    }),
+    runtimeControlEvent(NnrpMessageType.PartialResult, 170, {
+      operationId: 17n,
+      resultSequence: 1n,
+      objectId: 1n,
+      deltaSequence: 1n,
+      bodyBytes: 1,
+      flags: 0,
+    }, new Uint8Array([1])),
+    runtimeControlEvent(NnrpMessageType.Progress, 180, {
+      operationId: 18n,
+      progressSequence: 1n,
+      stageCode: 2,
+      percentX100: 5000,
+      objectId: 0n,
+      bodyBytes: 0,
+    }),
   ].map((event) => ({ type: "runtime", event } as const));
 }
 

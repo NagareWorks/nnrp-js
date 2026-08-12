@@ -1043,20 +1043,12 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   }, one);
   await session.referenceObject({
     objectId: 1n,
-    operationId: 2n,
+    operationId: 0n,
     objectVersion: 3n,
     offset: 0n,
     length: 1n,
     flags: 0,
     metadataBytes: 1,
-  }, one);
-  await session.releaseObject({
-    objectId: 1n,
-    operationId: 2n,
-    releaseReason: ObjectReleaseReason.Completed,
-    sourceRole: RuntimeRole.Server,
-    flags: 0,
-    diagnosticBytes: 1,
   }, one);
   const delta = {
     objectId: 1n,
@@ -1079,6 +1071,14 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpProtocolError,
     "delta declares 2 bytes but received 1",
   );
+  await session.releaseObject({
+    objectId: 1n,
+    operationId: 0n,
+    releaseReason: ObjectReleaseReason.Completed,
+    sourceRole: RuntimeRole.Server,
+    flags: 0,
+    diagnosticBytes: 1,
+  }, one);
   await session.referenceCache({
     cacheNamespace: 0,
     cacheKeyHi: 1n,
@@ -1115,14 +1115,14 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpMessageType.RetryAfter,
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
-    NnrpMessageType.ObjectRelease,
     NnrpMessageType.ObjectPatch,
     NnrpMessageType.ObjectDelta,
+    NnrpMessageType.ObjectRelease,
     NnrpMessageType.CacheReference,
     NnrpMessageType.CacheMiss,
     NnrpMessageType.CacheInvalidate,
   ]);
-  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 13 }, (_, index) => index + 1));
+  assertEquals(seen.map(({ frameId }) => frameId), [1, 2, 3, 4, 5, 6, 0, 7, 8, 0, 9, 10, 11]);
   assertEquals(
     decodeRuntimeObjectMetadata(
       NnrpMessageType.ObjectPatch,
@@ -1139,9 +1139,98 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   );
 });
 
-Deno.test("@nnrp/native-server releases operation-owned objects on peer cancellation", async () => {
-  const runtimeFrames: Array<{ readonly messageType: NnrpMessageType; readonly payload: Uint8Array }> = [];
+Deno.test("@nnrp/native-server binds operation-scoped object frames and releases terminal ownership", async () => {
+  const observedFrames: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number }> = [];
+  const runtime = await openBackendRuntime({
+    transports: [
+      createTcpTransportProvider({
+        binding: roleServerBinding(
+          [
+            roleSubmitEvent(22n, 81, { kind: 4, id: 220n, generation: 1, flags: 0 }),
+            roleSubmitEvent(23n, 82, { kind: 4, id: 230n, generation: 1, flags: 0 }),
+          ],
+          {
+            onRuntimeFrame: (_handle, messageType, _payload, frameId) => {
+              observedFrames.push({ messageType: messageType as NnrpMessageType, frameId });
+            },
+          },
+        ),
+      }),
+    ],
+    transportPolicy: "force-tcp",
+  });
+  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+  const session = await server.accept();
+  const operation = await session.receiveSubmit();
+  const retainedOperation = await session.receiveSubmit();
+
+  for (const objectId of [1n, 2n]) {
+    await session.declareObject({
+      objectId,
+      objectKind: RuntimeObjectKind.Tensor,
+      producerRole: RuntimeRole.Server,
+      consumerRole: RuntimeRole.Client,
+      sessionId: session.sessionId,
+      byteSize: 8n,
+      computeCostUnits: 1,
+      memoryLocationHint: MemoryLocationHint.HostMemory,
+      ownershipHint: OwnershipHint.SessionOwned,
+      lifetimeHintMs: 1_000,
+      metadataBytes: 0,
+    });
+  }
+  await session.referenceObject({
+    objectId: 1n,
+    operationId: 22n,
+    objectVersion: 1n,
+    offset: 0n,
+    length: 8n,
+    flags: 0,
+    metadataBytes: 0,
+  });
+  assertEquals(observedFrames.at(-1), { messageType: NnrpMessageType.ObjectRef, frameId: 81 });
+
+  const result = createSuccessResultReply(new Uint8Array());
+  await operation.sendResult(result.metadata, result.body);
+  const inactive = await assertRejects(
+    () =>
+      session.referenceObject({
+        objectId: 2n,
+        operationId: 22n,
+        objectVersion: 1n,
+        offset: 0n,
+        length: 8n,
+        flags: 0,
+        metadataBytes: 0,
+      }),
+    NnrpProtocolError,
+  );
+  assertEquals(inactive.diagnostic.code, "NNRP_OPERATION_UNKNOWN");
+  await session.referenceObject({
+    objectId: 2n,
+    operationId: 23n,
+    objectVersion: 1n,
+    offset: 0n,
+    length: 8n,
+    flags: 0,
+    metadataBytes: 0,
+  });
+  assertEquals(observedFrames.at(-1), { messageType: NnrpMessageType.ObjectRef, frameId: 82 });
+  await retainedOperation.sendResult(result.metadata, result.body);
+
+  await session.close();
+  await server.close();
+  await runtime.close();
+});
+
+Deno.test("@nnrp/native-server preserves reply ownership after peer cancellation", async () => {
+  const runtimeFrames: Array<{
+    readonly messageType: NnrpMessageType;
+    readonly frameId: number;
+    readonly payload: Uint8Array;
+  }> = [];
   const events = [
+    roleSubmitEvent(7n, 70, { kind: 4, id: 700n, generation: 1, flags: 0 }),
     roleRuntimeEvent(
       NnrpMessageType.Cancel,
       encodeRuntimeControlMetadata(NnrpMessageType.Cancel, {
@@ -1152,15 +1241,17 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
         flags: 0,
         diagnosticBytes: 0,
       }),
+      { operationId: 7n, frameId: 70 },
     ),
   ];
   const runtime = await openBackendRuntime({
     transports: [
       createTcpTransportProvider({
         binding: roleServerBinding(events, {
-          onRuntimeFrame: (_handle, messageType, payload) =>
+          onRuntimeFrame: (_handle, messageType, payload, frameId) =>
             runtimeFrames.push({
               messageType: messageType as NnrpMessageType,
+              frameId,
               payload,
             }),
         }),
@@ -1170,6 +1261,9 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
   });
   const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
   const session = await server.accept();
+  const operation = await session.receiveSubmit();
+  assertEquals(operation.operationId, 7n);
+  assertEquals(operation.frameId, 70);
   const reference = {
     objectId: 51n,
     operationId: 7n,
@@ -1232,15 +1326,33 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
     flags: 0,
     diagnosticBytes: 0,
   });
+  assertEquals(runtimeFrames.at(-1)!.frameId, 70);
   assertEquals(runtimeFrames.some(({ messageType }) => messageType === NnrpMessageType.CacheInvalidate), false);
   await assertRejects(() => session.referenceObject(reference), NnrpProtocolError, "was already released");
+
+  await operation.sendResultDrop({
+    operationId: 7n,
+    resultSequence: 1n,
+    dropReasonCode: 2,
+    sourceRole: RuntimeRole.Server,
+    flags: 0,
+    diagnosticBytes: 0,
+  });
+  assertEquals(runtimeFrames.at(-1)!.messageType, NnrpMessageType.ResultDropReason);
+  assertEquals(runtimeFrames.at(-1)!.frameId, 70);
 
   await session.close();
   await server.close();
   await runtime.close();
 });
 
-function roleRuntimeEvent(messageType: NnrpMessageType, payload: Uint8Array) {
+function roleRuntimeEvent(
+  messageType: NnrpMessageType,
+  payload: Uint8Array,
+  identity: { readonly operationId?: bigint; readonly frameId?: number } = {},
+) {
+  const operationId = identity.operationId ?? 1n;
+  const frameId = identity.frameId ?? 1;
   return {
     kind: 13,
     headerPresent: true,
@@ -1251,10 +1363,10 @@ function roleRuntimeEvent(messageType: NnrpMessageType, payload: Uint8Array) {
     wireSessionId: 1,
     connection: { kind: 1, id: 1n, generation: 1, flags: 0 },
     session: { kind: 3, id: 1n, generation: 1, flags: 0 },
-    operation: { kind: 4, id: 1n, generation: 1, flags: 0 },
-    relatedOperationId: 1n,
-    relatedFrameId: 1,
-    frameId: 1,
+    operation: { kind: 4, id: operationId, generation: 1, flags: 0 },
+    relatedOperationId: operationId,
+    relatedFrameId: frameId,
+    frameId,
     viewId: 0,
     routeId: 0,
     traceId: 0n,
@@ -1378,6 +1490,7 @@ function roleServerBinding(
       handle: { kind: number; id: bigint; generation: number; flags: number },
       messageType: number,
       payload: Uint8Array,
+      frameId: number,
     ) => void;
   } = {},
 ): NnrpNativeTransportBinding {
@@ -1407,7 +1520,7 @@ function roleServerBinding(
                   _frameId: number,
                   payload: Uint8Array,
                 ) => {
-                  callbacks.onRuntimeFrame?.(_handle, messageType, payload);
+                  callbacks.onRuntimeFrame?.(_handle, messageType, payload, _frameId);
                   return Promise.resolve();
                 },
                 close: () => Promise.resolve(),

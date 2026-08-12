@@ -127,7 +127,7 @@ Deno.test({
       await within(
         role.sendRuntimeFrame(
           NnrpMessageType.Cancel,
-          2,
+          9,
           encodeRuntimeControlMetadata(NnrpMessageType.Cancel, {
             operationId: 42n,
             controlSequence: 1n,
@@ -160,9 +160,9 @@ Deno.test({
             (await receiveServerRuntimeEvent(serverSession)).header.messageType,
             NnrpMessageType.SessionClose,
           );
-          await serverSession.close();
+          await within(serverSession.close(), "native server session close did not complete");
           await within(clientClosing, "WASM role close did not complete");
-          await wasmConnection.close();
+          await within(wasmConnection.close(), "WASM connection close did not complete");
         } catch (error) {
           failure = error;
         }
@@ -172,11 +172,17 @@ Deno.test({
         } catch {
           // Preserve the failure that forced transport cleanup.
         }
-        await wasmConnection.close().catch(() => undefined);
+        await within(wasmConnection.close(), "WASM connection close did not complete").catch(() => undefined);
       }
-      if (failure !== undefined) await serverSession.close();
-      await server.close();
-      await serverRuntime.close();
+      if (failure !== undefined) {
+        await within(serverSession.close(), "native server session close did not complete").catch(() => undefined);
+      }
+      try {
+        await within(server.close(), "native server listener close did not complete");
+        await within(serverRuntime.close(), "native server runtime close did not complete");
+      } catch (error) {
+        if (failure === undefined) failure = error;
+      }
     }
     if (failure !== undefined) throw failure;
   },

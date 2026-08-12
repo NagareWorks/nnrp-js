@@ -1534,6 +1534,7 @@ interface NnrpServerOperationState {
   readonly frameId: number;
   readonly submit: NnrpRuntimeEvent;
   readonly sessionClosed: () => boolean;
+  readonly complete: (operationId: bigint, frameId: number) => void;
 }
 
 let createServerOperation: (state: NnrpServerOperationState) => NnrpServerOperation;
@@ -1578,7 +1579,7 @@ export class NnrpServerOperation {
         this.#state.handle,
         metadata,
         body.slice(),
-      ).catch((error) => {
+      ).then(() => this.#state.complete(this.#state.operationId, this.#state.frameId)).catch((error) => {
         this.#terminal = false;
         throw error;
       });
@@ -1633,6 +1634,8 @@ export class NnrpServerOperation {
         messageType,
         frameId: this.#state.frameId,
         payload,
+      }).then(() => {
+        if (terminal) this.#state.complete(this.#state.operationId, this.#state.frameId);
       }).catch((error) => {
         if (terminal) this.#terminal = false;
         throw error;
@@ -1681,6 +1684,8 @@ export class NnrpServerSession {
   readonly #state: NnrpServerSessionState | undefined;
   readonly #runtimeObjects = new RuntimeObjectLifecycle();
   readonly #pendingEvents: NnrpServerEvent[] = [];
+  readonly #operationByFrame = new Map<number, bigint>();
+  readonly #frameByOperation = new Map<bigint, number>();
   #receiveQueue: Promise<void> = Promise.resolve();
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
   #nextRuntimeFrameId = 1;
@@ -1830,6 +1835,8 @@ export class NnrpServerSession {
     if (this.#closed) return;
     this.#closed = true;
     this.#pendingEvents.length = 0;
+    this.#operationByFrame.clear();
+    this.#frameByOperation.clear();
     this.#runtimeObjects.clear();
     const state = this.#state;
     const closeRoleSession = state === undefined ? undefined : serverRoleSessionClosers.get(state.runtime);
@@ -1870,6 +1877,10 @@ export class NnrpServerSession {
 
     const event = decoded.event;
     await this.#releaseForTerminalControl(event);
+    if (event.header.messageType === NnrpMessageType.SessionClose) {
+      this.#operationByFrame.clear();
+      this.#frameByOperation.clear();
+    }
     if (event.header.messageType !== NnrpMessageType.FrameSubmit) {
       return { type: "runtime", event };
     }
@@ -1890,7 +1901,10 @@ export class NnrpServerSession {
       frameId: event.header.frameId,
       submit: event,
       sessionClosed: () => this.closed,
+      complete: (operationId, frameId) => this.#finishOperation(operationId, frameId),
     });
+    this.#operationByFrame.set(operation.frameId, operation.operationId);
+    this.#frameByOperation.set(operation.operationId, operation.frameId);
     return { type: "submit", operation };
   }
 
@@ -1905,7 +1919,12 @@ export class NnrpServerSession {
       const payload = metadataBody === undefined
         ? encodeRuntimeObjectMetadata(messageType, metadata, tail)
         : encodeRuntimeObjectMetadataSegments(messageType, metadata, [metadataBody, tail]);
-      await this.#sendRuntimeFrame(messageType, payload);
+      const operationFrameId = this.#runtimeObjectFrameId(messageType, metadata);
+      if (operationFrameId === undefined) {
+        await this.#sendRuntimeFrame(messageType, payload);
+      } else {
+        await this.#sendRuntimeFrameForFrame(messageType, operationFrameId, payload);
+      }
       this.#runtimeObjects.commit(messageType, metadata);
     });
     this.#runtimeObjectQueue = send.catch(() => undefined);
@@ -1956,6 +1975,48 @@ export class NnrpServerSession {
       });
     } catch (error) {
       return Promise.reject(error);
+    }
+  }
+
+  #sendRuntimeFrameForFrame(messageType: NnrpMessageType, frameId: number, payload: Uint8Array): Promise<void> {
+    try {
+      this.#ensureOpen();
+      const state = this.#state;
+      if (state === undefined) return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
+      const sendRuntimeFrame = serverRoleFrameSenders.get(state.runtime);
+      if (sendRuntimeFrame === undefined) return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
+      return sendRuntimeFrame(state.routingKey, {
+        sessionId: state.sessionId,
+        messageType,
+        frameId,
+        payload,
+      });
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  #runtimeObjectFrameId(messageType: NnrpMessageType, metadata: RuntimeObjectSendMetadata): number | undefined {
+    if (messageType !== NnrpMessageType.ObjectRef && messageType !== NnrpMessageType.ObjectRelease) return undefined;
+    const operationId = (metadata as ObjectReferenceMetadata | ObjectReleaseMetadata).operationId;
+    if (operationId === 0n) return 0;
+    const frameId = this.#frameForOperation(operationId);
+    if (frameId === undefined) throw inactiveOperationError(messageType, operationId);
+    return frameId;
+  }
+
+  #frameForOperation(operationId: bigint): number | undefined {
+    return this.#frameByOperation.get(operationId);
+  }
+
+  #finishOperation(operationId: bigint, expectedFrameId?: number): void {
+    if (operationId === 0n) return;
+    const frameId = expectedFrameId ?? this.#frameForOperation(operationId);
+    if (frameId !== undefined && this.#operationByFrame.get(frameId) === operationId) {
+      this.#operationByFrame.delete(frameId);
+      if (this.#frameByOperation.get(operationId) === frameId) {
+        this.#frameByOperation.delete(operationId);
+      }
     }
   }
 }
@@ -2075,6 +2136,15 @@ function serverTerminalDuplicateError(frameId: number): NnrpProtocolError {
     code: "NNRP_SERVER_RESULT_TERMINAL_DUPLICATE",
     message: `Frame ${frameId} already has a terminal server result.`,
     source: "protocol",
+    retryable: false,
+  });
+}
+
+function inactiveOperationError(messageType: NnrpMessageType, operationId: bigint): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_OPERATION_UNKNOWN",
+    message: `${NnrpMessageType[messageType]} references inactive operation ${operationId}.`,
+    source: "core",
     retryable: false,
   });
 }

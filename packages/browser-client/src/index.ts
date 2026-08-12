@@ -706,7 +706,9 @@ export class NnrpBrowserClientSession {
   readonly #inFlightFrames = new Set<number>();
   readonly #terminalFrames = new Set<number>();
   readonly #operationByFrame = new Map<number, bigint>();
+  readonly #frameByOperation = new Map<bigint, number>();
   readonly #cancelledOperations = new Set<bigint>();
+  readonly #terminalControlOperations = new Set<bigint>();
   readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
   readonly #eventQueue: NnrpClientEvent[] = [];
@@ -749,7 +751,15 @@ export class NnrpBrowserClientSession {
     }
 
     try {
-      this.#prepareSubmitDispatch(options, deadlineMillis);
+      const preparation = this.#prepareSubmitDispatch(
+        normalized.operationId,
+        normalized.frameId,
+        options,
+        deadlineMillis,
+      );
+      if (preparation !== undefined) {
+        await preparation;
+      }
       const role = this.#role();
       const result = this.#waitForResult(normalized.frameId);
       try {
@@ -764,7 +774,6 @@ export class NnrpBrowserClientSession {
         options,
         deadlineMillis,
       );
-      await this.#sendSubmitDeadline(normalized.operationId, deadlineMillis);
       this.#ensureEventPump();
       return await Promise.race([result, cancellation.promise]).finally(cancellation.cleanup);
     } finally {
@@ -786,14 +795,21 @@ export class NnrpBrowserClientSession {
     }
 
     try {
-      this.#prepareSubmitDispatch(options, deadlineMillis);
+      const preparation = this.#prepareSubmitDispatch(
+        normalized.operationId,
+        normalized.frameId,
+        options,
+        deadlineMillis,
+      );
+      if (preparation !== undefined) {
+        await preparation;
+      }
       const operationId = await this.#role().submitNoWait(
         normalized.frameId,
         normalized.header,
         encodeSubmitPayload(normalized),
       );
       this.#armDetachedSubmitCancellation(normalized.frameId, normalized.operationId, options, deadlineMillis);
-      await this.#sendSubmitDeadline(normalized.operationId, deadlineMillis);
       return operationId;
     } catch (error) {
       this.#finishFrame(normalized.frameId);
@@ -858,7 +874,11 @@ export class NnrpBrowserClientSession {
       assertClientRuntimeControlMessage(messageType);
       const payload = encodeRuntimeControlMetadata(messageType, metadata, tail);
       this.#observeControlSequence(metadata);
-      return this.#sendRuntimeFrame(messageType, payload).then(
+      const operationFrameId = this.#runtimeFrameId(messageType, metadata);
+      const send = operationFrameId === undefined
+        ? this.#sendRuntimeFrame(messageType, payload)
+        : this.#sendRuntimeFrameForFrame(messageType, operationFrameId, payload);
+      return send.then(
         async () => await this.#applySentTerminalControl(messageType, metadata),
       );
     } catch (error) {
@@ -919,7 +939,9 @@ export class NnrpBrowserClientSession {
       (event.header.messageType === NnrpMessageType.Cancel || event.header.messageType === NnrpMessageType.Abort) &&
       event.metadata.type === "control_request"
     ) {
-      this.#cancelledOperations.add(event.metadata.value.operationId);
+      const operationId = event.metadata.value.operationId;
+      this.#cancelledOperations.add(operationId);
+      this.#finishOperation(operationId);
       return;
     }
 
@@ -947,7 +969,9 @@ export class NnrpBrowserClientSession {
       this.#inFlightFrames.clear();
       this.#terminalFrames.clear();
       this.#operationByFrame.clear();
+      this.#frameByOperation.clear();
       this.#cancelledOperations.clear();
+      this.#terminalControlOperations.clear();
       this.#drainCapacityWaiters();
     }
   }
@@ -1055,7 +1079,9 @@ export class NnrpBrowserClientSession {
     this.#inFlightFrames.clear();
     this.#terminalFrames.clear();
     this.#operationByFrame.clear();
+    this.#frameByOperation.clear();
     this.#cancelledOperations.clear();
+    this.#terminalControlOperations.clear();
     this.#runtimeObjects.clear();
     for (const cleanup of this.#submitCancellationCleanups.values()) {
       cleanup();
@@ -1130,18 +1156,28 @@ export class NnrpBrowserClientSession {
     this.#inFlightFrames.add(frameId);
     this.#terminalFrames.delete(frameId);
     this.#operationByFrame.set(frameId, operationId);
+    this.#frameByOperation.set(operationId, frameId);
+    this.#cancelledOperations.delete(operationId);
+    this.#terminalControlOperations.delete(operationId);
   }
 
-  #prepareSubmitDispatch(options: NnrpSubmitOptions, deadlineMillis: number | undefined): void {
+  #prepareSubmitDispatch(
+    operationId: bigint,
+    frameId: number,
+    options: NnrpSubmitOptions,
+    deadlineMillis: number | undefined,
+  ): Promise<void> | undefined {
     throwIfSubmitCancelledBeforeDispatch(options, "wasm");
-    if (deadlineMillis !== undefined) {
-      throwIfSubmitCancelledBeforeDispatch(options, "wasm", deadlineMillis);
+    if (deadlineMillis === undefined) {
+      return undefined;
     }
+    return this.#sendSubmitDeadline(operationId, frameId, deadlineMillis).then(() => {
+      throwIfSubmitCancelledBeforeDispatch(options, "wasm", deadlineMillis);
+    });
   }
 
-  #sendSubmitDeadline(operationId: bigint, deadlineMillis: number | undefined): Promise<void> {
-    if (deadlineMillis === undefined) return Promise.resolve();
-    return this.updateDeadline({
+  #sendSubmitDeadline(operationId: bigint, frameId: number, deadlineMillis: number): Promise<void> {
+    const payload = encodeRuntimeControlMetadata(NnrpMessageType.Deadline, {
       operationId,
       controlSequence: this.#allocateControlSequence(),
       priorityClass: 0,
@@ -1149,6 +1185,7 @@ export class NnrpBrowserClientSession {
       deadlineUnixMs: BigInt(Math.ceil(deadlineMillis)),
       flags: 0,
     });
+    return this.#sendRuntimeFrameForFrame(NnrpMessageType.Deadline, frameId, payload);
   }
 
   #armSubmitCancellation(
@@ -1324,10 +1361,17 @@ export class NnrpBrowserClientSession {
   }
 
   #finishFrame(frameId: number): void {
+    const operationId = this.#operationByFrame.get(frameId);
     this.#submitCancellationCleanups.get(frameId)?.();
     this.#submitCancellationCleanups.delete(frameId);
     this.#inFlightFrames.delete(frameId);
     this.#operationByFrame.delete(frameId);
+    if (operationId !== undefined) {
+      if (this.#frameByOperation.get(operationId) === frameId) {
+        this.#frameByOperation.delete(operationId);
+      }
+      this.#terminalControlOperations.delete(operationId);
+    }
   }
 
   #finishTerminalFrame(frameId: number): void {
@@ -1387,7 +1431,12 @@ export class NnrpBrowserClientSession {
       const payload = metadataBody === undefined
         ? encodeRuntimeObjectMetadata(messageType, metadata, tail)
         : encodeRuntimeObjectMetadataSegments(messageType, metadata, [metadataBody, tail]);
-      await this.#sendRuntimeFrame(messageType, payload);
+      const operationFrameId = this.#runtimeFrameId(messageType, metadata);
+      if (operationFrameId === undefined) {
+        await this.#sendRuntimeFrame(messageType, payload);
+      } else {
+        await this.#sendRuntimeFrameForFrame(messageType, operationFrameId, payload);
+      }
       this.#runtimeObjects.commit(messageType, metadata);
     });
     this.#runtimeObjectQueue = send.catch(() => undefined);
@@ -1410,11 +1459,11 @@ export class NnrpBrowserClientSession {
       const operationId = (metadata as ControlRequestMetadata).operationId;
       this.#cancelledOperations.add(operationId);
       await this.#releaseOperationObjects(operationId, ObjectReleaseReason.Cancelled);
+      if (operationId !== 0n) this.#terminalControlOperations.add(operationId);
     } else if (messageType === NnrpMessageType.Supersede) {
-      await this.#releaseOperationObjects(
-        (metadata as SupersedeMetadata).oldOperationId,
-        ObjectReleaseReason.Replaced,
-      );
+      const operationId = (metadata as SupersedeMetadata).oldOperationId;
+      await this.#releaseOperationObjects(operationId, ObjectReleaseReason.Replaced);
+      if (operationId !== 0n) this.#terminalControlOperations.add(operationId);
     }
   }
 
@@ -1437,6 +1486,43 @@ export class NnrpBrowserClientSession {
       this.#ensureOpen();
       const frameId = this.#nextRuntimeFrameId;
       this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      return this.#role().sendRuntimeFrame(messageType, frameId, payload);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  #runtimeFrameId(
+    messageType: NnrpMessageType,
+    metadata: RuntimeControlMetadata | RuntimeObjectSendMetadata,
+  ): number | undefined {
+    const operationId = runtimeOperationId(messageType, metadata);
+    if (operationId === undefined) return undefined;
+    if (operationId === 0n) {
+      if (!SESSION_SCOPED_OPERATION_MESSAGES.has(messageType)) {
+        throw operationScopeRequiredError(messageType);
+      }
+      return 0;
+    }
+    if (this.#terminalControlOperations.has(operationId)) throw inactiveOperationError(messageType, operationId);
+    const frameId = this.#frameForOperation(operationId);
+    if (frameId === undefined) throw inactiveOperationError(messageType, operationId);
+    return frameId;
+  }
+
+  #finishOperation(operationId: bigint): void {
+    if (operationId === 0n) return;
+    const frameId = this.#frameForOperation(operationId);
+    if (frameId !== undefined) this.#finishFrame(frameId);
+  }
+
+  #sendRuntimeFrameForFrame(
+    messageType: NnrpMessageType,
+    frameId: number,
+    payload: Uint8Array,
+  ): Promise<void> {
+    try {
+      this.#ensureOpen();
       return this.#role().sendRuntimeFrame(messageType, frameId, payload);
     } catch (error) {
       return Promise.reject(error);
@@ -1520,10 +1606,7 @@ export class NnrpBrowserClientSession {
   }
 
   #frameForOperation(operationId: bigint): number | undefined {
-    for (const [frameId, candidate] of this.#operationByFrame) {
-      if (candidate === operationId) return frameId;
-    }
-    return undefined;
+    return this.#frameByOperation.get(operationId);
   }
 }
 
@@ -2123,6 +2206,55 @@ function wasmRuntimeReadinessError(code: string, message: string): NnrpCapabilit
     code,
     message,
     source: "wasm",
+    retryable: false,
+  });
+}
+
+const SESSION_SCOPED_OPERATION_MESSAGES = new Set<NnrpMessageType>([
+  NnrpMessageType.Cancel,
+  NnrpMessageType.Abort,
+  NnrpMessageType.BudgetUpdate,
+  NnrpMessageType.ObjectRef,
+  NnrpMessageType.ObjectRelease,
+]);
+
+function runtimeOperationId(
+  messageType: NnrpMessageType,
+  metadata: RuntimeControlMetadata | RuntimeObjectSendMetadata,
+): bigint | undefined {
+  if (messageType === NnrpMessageType.Cancel || messageType === NnrpMessageType.Abort) {
+    return (metadata as ControlRequestMetadata).operationId;
+  }
+  if (
+    messageType === NnrpMessageType.PriorityUpdate || messageType === NnrpMessageType.Deadline ||
+    messageType === NnrpMessageType.ExpireAt
+  ) {
+    return (metadata as SchedulingMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.Supersede) return (metadata as SupersedeMetadata).oldOperationId;
+  if (messageType === NnrpMessageType.BudgetUpdate) return (metadata as BudgetMetadata).operationId;
+  if (messageType === NnrpMessageType.RouteHint || messageType === NnrpMessageType.ExecutionHint) {
+    return (metadata as RouteHintMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.ObjectRef) return (metadata as ObjectReferenceMetadata).operationId;
+  if (messageType === NnrpMessageType.ObjectRelease) return (metadata as ObjectReleaseMetadata).operationId;
+  return undefined;
+}
+
+function operationScopeRequiredError(messageType: NnrpMessageType): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_OPERATION_SCOPE_REQUIRED",
+    message: `${NnrpMessageType[messageType]} requires an operation-scoped non-zero operationId.`,
+    source: "core",
+    retryable: false,
+  });
+}
+
+function inactiveOperationError(messageType: NnrpMessageType, operationId: bigint): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_OPERATION_UNKNOWN",
+    message: `${NnrpMessageType[messageType]} references inactive operation ${operationId}.`,
+    source: "core",
     retryable: false,
   });
 }

@@ -179,6 +179,9 @@ Deno.test({
       await session.submitNoWait(tokenSubmit(99n, 8, new Uint8Array([4, 5])));
       const cancellable = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
       assertEquals(eventLabel(cancellable.submit), "submit");
+      await session.submitNoWait(tokenSubmit(100n, 9, new Uint8Array([6, 7])));
+      const retainedOperation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+      assertEquals(eventLabel(retainedOperation.submit), "submit");
       await session.declareObject({
         objectId: 99n,
         objectKind: RuntimeObjectKind.Tensor,
@@ -249,8 +252,6 @@ Deno.test({
         "was already released",
       );
 
-      await session.submitNoWait(tokenSubmit(100n, 9, new Uint8Array([6])));
-      assertEquals(eventLabel((await serverSession.receiveSubmit({ timeoutMillis: 5_000 })).submit), "submit");
       await session.updatePriority({
         operationId: 100n,
         controlSequence: 2n,
@@ -259,6 +260,7 @@ Deno.test({
         deadlineUnixMs: 0n,
         flags: 0,
       });
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "priority-update");
 
       const scheduling = {
@@ -270,8 +272,10 @@ Deno.test({
         flags: 0,
       } as const;
       await session.updateDeadline(scheduling);
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "deadline");
       await session.expireAt({ ...scheduling, controlSequence: 4n });
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "expire-at");
       await session.updateBudget({
         operationId: 100n,
@@ -281,6 +285,7 @@ Deno.test({
         tokenBudget: 6,
         flags: 0,
       });
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "budget-update");
 
       const capability = {
@@ -308,8 +313,10 @@ Deno.test({
         flags: 0,
       } as const;
       await session.sendRouteHint(route, new Uint8Array([5]));
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "route-hint");
       await session.sendExecutionHint(route, new Uint8Array([6]));
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "execution-hint");
       await session.sendTraceContext({
         traceId: 1n,
@@ -354,6 +361,7 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 1,
       }, new Uint8Array([1]));
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 9);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "abort");
       await expectServerLifecycle(serverSession, "failed");
       assertEquals(eventLabel(await session.nextEvent({ timeoutMillis: 5_000 })), "lifecycle-failed");
@@ -384,6 +392,7 @@ Deno.test({
         flags: 0,
         metadataBytes: 1,
       }, new Uint8Array([9]));
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 11);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "object-ref");
       await session.releaseObject({
         objectId: 101n,
@@ -393,6 +402,7 @@ Deno.test({
         flags: 0,
         diagnosticBytes: 1,
       }, new Uint8Array([10]));
+      assertEquals(new DataView(sentPackets.at(-1)!.buffer).getUint32(24, true), 11);
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "object-release");
       const delta = {
         objectId: 101n,
@@ -550,10 +560,27 @@ Deno.test({
       assertEquals(terminalSignal.addCount, 1);
       assertEquals(terminalSignal.removeCount, 1);
 
-      const timedSubmit = session.submit(tokenSubmit(106n, 15, new Uint8Array([23])), { timeoutMillis: 200 });
+      const timedPacketStart = sentPackets.length;
+      const timedSubmit = session.submit(tokenSubmit(106n, 15, new Uint8Array([23])), { timeoutMillis: 1_000 });
       const timedObserved = timedSubmit.catch((error) => error);
-      assertEquals(eventLabel((await serverSession.receiveSubmit({ timeoutMillis: 5_000 })).submit), "submit");
-      assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "deadline");
+      const timedOperation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+      assertEquals(eventLabel(timedOperation.submit), "submit");
+      assertEquals(timedOperation.submit.header.frameId, 15);
+      const retainedDeadline = await serverSession.nextEvent({ timeoutMillis: 5_000 });
+      assertEquals(retainedDeadline.type, "runtime");
+      if (retainedDeadline.type !== "runtime") throw new Error("expected retained deadline event");
+      assertEquals(eventLabel(retainedDeadline.event), "deadline");
+      const timedDispatchPackets = sentPackets.slice(timedPacketStart).filter((packet) =>
+        packet[6] === NnrpMessageType.Deadline || packet[6] === NnrpMessageType.FrameSubmit
+      );
+      assertEquals(timedDispatchPackets.map((packet) => packet[6]), [
+        NnrpMessageType.Deadline,
+        NnrpMessageType.FrameSubmit,
+      ]);
+      assertEquals(
+        timedDispatchPackets.map((packet) => new DataView(packet.buffer, packet.byteOffset).getUint32(24, true)),
+        [15, 15],
+      );
       const timeoutError = await timedObserved;
       assert(timeoutError instanceof NnrpTimeoutError);
       assertEquals(timeoutError.diagnostic.code, "NNRP_SUBMIT_TIMEOUT");

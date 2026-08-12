@@ -66,6 +66,9 @@ paths.
 
 - [x] Add unit coverage for canonical tickets, option validation, async handshake, resume, policy, and multi-session
       use.
+- [x] Bind every operation-scoped control, route, budget, and object message to its submit frame; restrict
+      `operation_id = 0` to the frozen session-scoped whitelist, reject unknown client ownership, and retain server
+      ownership until a terminal reply succeeds or the session closes.
 - [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against successful full-matrix Rust workflow artifact run
       `31442036247` at merge commit `13f72e7a81a54b9eb26ee68e399c2cf84bb5525d`.
 - [x] Run suite-owned adapter conformance and native/browser independent-process wire E2E without skips.

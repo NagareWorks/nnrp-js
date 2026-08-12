@@ -134,6 +134,7 @@ export async function runWireTarget(options: WireTargetOptions): Promise<void> {
     });
 
     await handleCancel(await acceptedSession(tcpAccepting, "TCP"));
+    await handleDeadlineBeforeSubmit(await acceptedSession(startAccept(tcp.server), "TCP deadline"));
     await tcp.server.close();
     await tcp.runtime.close();
 
@@ -237,6 +238,39 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
     flags: 0,
     diagnosticBytes: 0,
   });
+  expectMessage(
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
+    NnrpMessageType.SessionClose,
+    "SESSION_CLOSE",
+  );
+  await session.close();
+}
+
+async function handleDeadlineBeforeSubmit(session: NnrpServerSession): Promise<void> {
+  const operation = await session.receiveSubmit({ timeoutMillis: TIMEOUT_MILLIS });
+  const submit = expectMessage(operation.submit, NnrpMessageType.FrameSubmit, "FRAME_SUBMIT");
+  assertRuntimeMetadata(submit, "frame_submit");
+  const retained = await session.nextEvent({ timeoutMillis: TIMEOUT_MILLIS });
+  if (retained.type !== "runtime") {
+    throw new Error(`deadline-before-submit wire case expected retained DEADLINE, got ${retained.type}`);
+  }
+  const deadline = expectMessage(retained.event, NnrpMessageType.Deadline, "DEADLINE");
+  assertRuntimeMetadata(deadline, "scheduling");
+  if (
+    deadline.header.frameId !== submit.header.frameId ||
+    deadline.metadata.value.operationId !== submit.metadata.value.operationId ||
+    deadline.metadata.value.deadlineUnixMs !== 4_000_000_000_000n
+  ) {
+    throw new Error("deadline-before-submit wire case changed its reserved submit identity");
+  }
+  const result = createSuccessResultReply(RESPONSE_BODY);
+  await operation.sendResult(result.metadata, result.body);
+  await receiveServerLifecycleEvent(
+    session,
+    TIMEOUT_MILLIS,
+    submit.metadata.value.operationId,
+    "completed",
+  );
   expectMessage(
     await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.SessionClose,
