@@ -134,6 +134,7 @@ export async function runWireTarget(options: WireTargetOptions): Promise<void> {
     });
 
     await handleCancel(await acceptedSession(tcpAccepting, "TCP"));
+    await handleDeadlineBeforeSubmit(await tcp.server.accept());
     await tcp.server.close();
     await tcp.runtime.close();
 
@@ -237,6 +238,36 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
     flags: 0,
     diagnosticBytes: 0,
   });
+  expectMessage(
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
+    NnrpMessageType.SessionClose,
+    "SESSION_CLOSE",
+  );
+  await session.close();
+}
+
+async function handleDeadlineBeforeSubmit(session: NnrpServerSession): Promise<void> {
+  const deadline = expectMessage(
+    await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
+    NnrpMessageType.Deadline,
+    "DEADLINE",
+  );
+  assertRuntimeMetadata(deadline, "scheduling");
+  if (
+    deadline.header.frameId !== 1 ||
+    deadline.metadata.value.operationId !== 151n ||
+    deadline.metadata.value.deadlineUnixMs !== 4_000_000_000_000n
+  ) {
+    throw new Error("deadline-before-submit wire case used unexpected reserved scheduling metadata");
+  }
+
+  const operation = await session.receiveSubmit({ timeoutMillis: TIMEOUT_MILLIS });
+  if (operation.operationId !== deadline.metadata.value.operationId || operation.frameId !== deadline.header.frameId) {
+    throw new Error("deadline-before-submit wire case changed operation or frame identity");
+  }
+  const result = createSuccessResultReply(RESPONSE_BODY);
+  await operation.sendResult(result.metadata, result.body);
+  await receiveServerLifecycleEvent(session, TIMEOUT_MILLIS, operation.operationId, "completed");
   expectMessage(
     await receiveServerRuntimeEvent(session, TIMEOUT_MILLIS),
     NnrpMessageType.SessionClose,
