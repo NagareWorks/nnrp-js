@@ -58,9 +58,14 @@ export async function executePreview4AdapterPlan(
   const plan = parsePreview4AdapterPlan(value);
   const evidenceDirectory = options.evidenceDirectory ?? plan.artifacts.evidence_dir;
   const results: Preview4AdapterCaseResult[] = [];
-  for (const { id } of plan.cases) {
+  for (const { id, parameters } of plan.cases) {
     results.push(
-      await executePreview4ImplementedCase(id as Preview4AdapterCaseId, evidenceDirectory, options.verifyHeader),
+      await executePreview4ImplementedCase(
+        id as Preview4AdapterCaseId,
+        evidenceDirectory,
+        options.verifyHeader,
+        parameters,
+      ),
     );
   }
   return {
@@ -87,9 +92,10 @@ export async function executePreview4ImplementedCase(
   caseId: Preview4ImplementedCaseId,
   evidenceDirectory: string,
   verifyHeader: (() => void | Promise<void>) | undefined,
+  parameters: Readonly<Record<string, unknown>> = {},
 ): Promise<Preview4AdapterCaseResult> {
   try {
-    const evidence = await CASE_EXECUTORS[caseId](verifyHeader);
+    const evidence = await CASE_EXECUTORS[caseId](parameters, verifyHeader);
     await Deno.mkdir(evidenceDirectory, { recursive: true });
     const evidencePath = `${evidenceDirectory}/${safeFileStem(caseId)}.json`;
     await Deno.writeTextFile(evidencePath, `${JSON.stringify(evidence, bigintReplacer, 2)}\n`);
@@ -110,9 +116,37 @@ export async function executePreview4ImplementedCase(
 }
 
 const CASE_EXECUTORS: Readonly<
-  Record<Preview4ImplementedCaseId, (verifyHeader?: () => void | Promise<void>) => unknown | Promise<unknown>>
+  Record<
+    Preview4ImplementedCaseId,
+    (
+      parameters: Readonly<Record<string, unknown>>,
+      verifyHeader?: () => void | Promise<void>,
+    ) => unknown | Promise<unknown>
+  >
 > = {
-  "l0.header.fixed_shape.golden": async (verifyHeader) => {
+  "l0.header.fixed_shape.golden": async (parameters, verifyHeader) => {
+    const expected = hexParameter(parameters, "header_hex");
+    if (expected.byteLength !== 40) throw new RangeError("NNRP/1 common header must be 40 bytes");
+    const view = new DataView(expected.buffer, expected.byteOffset, expected.byteLength);
+    assertEquivalent(
+      [
+        ...expected.slice(0, 4),
+        view.getUint8(4),
+        view.getUint8(5),
+        view.getUint8(6),
+        view.getUint8(7),
+        view.getUint32(8, true),
+        view.getUint32(12, true),
+        view.getUint32(16, true),
+        view.getUint32(20, true),
+        view.getUint32(24, true),
+        view.getUint16(28, true),
+        view.getUint16(30, true),
+        view.getBigUint64(32, true),
+      ],
+      [0x4e, 0x4e, 0x52, 0x50, 1, 0, 0x10, 40, 33, 48, 4096, 7, 11, 2, 0, 123456789n],
+      "NNRP/1 common header",
+    );
     if (verifyHeader !== undefined) {
       await verifyHeader();
     } else {
@@ -121,7 +155,65 @@ const CASE_EXECUTORS: Readonly<
     }
     return { case_id: "l0.header.fixed_shape.golden", action: "native-runtime-frame-roundtrip", header_bytes: 40 };
   },
-  "l0.typed_payload.descriptor.current.golden": () => {
+  "l0.body_region.prelude.golden": (parameters) => {
+    const expected = hexParameter(parameters, "metadata_hex");
+    const view = new DataView(expected.buffer, expected.byteOffset, expected.byteLength);
+    const fields = Array.from({ length: 8 }, (_, index) => view.getUint32(index * 4, true));
+    assertEquivalent(fields, [24, 24, 24, 14, 16, 5, 0, 0], "NNRP/1 baseline body-region prelude");
+    const encoded = new Uint8Array(32);
+    const encodedView = new DataView(encoded.buffer);
+    fields.forEach((value, index) => encodedView.setUint32(index * 4, value, true));
+    assertBytes(encoded, expected, "NNRP/1 baseline body-region prelude");
+    return { case_id: "l0.body_region.prelude.golden", action: "baseline-body-prelude-roundtrip" };
+  },
+  "l0.typed_payload.descriptor.golden": (parameters) => {
+    const expected = hexParameter(parameters, "descriptor_hex");
+    const descriptor = decodeBaselineTypedPayloadDescriptor(expected);
+    assertEquivalent(
+      descriptor,
+      { payloadKind: NnrpPayloadKind.StructuredEvent, profileId: 3, offset: 4, length: 7 },
+      "NNRP/1 baseline typed-payload descriptor",
+    );
+    assertBytes(
+      encodeBaselineTypedPayloadDescriptor(descriptor),
+      expected,
+      "NNRP/1 baseline typed-payload descriptor",
+    );
+    return { case_id: "l0.typed_payload.descriptor.golden", action: "baseline-descriptor-roundtrip" };
+  },
+  "l0.typed_payload.frame_regions.golden": (parameters) => {
+    const descriptorRegion = hexParameter(parameters, "descriptor_region_hex");
+    const payloadRegion = hexParameter(parameters, "payload_hex");
+    const descriptors = decodeBaselineTypedPayloadRegion(descriptorRegion, payloadRegion);
+    assertEquivalent(
+      descriptors.map(({ payloadKind }) => payloadKind),
+      [
+        NnrpPayloadKind.TokenChunk,
+        NnrpPayloadKind.AudioChunk,
+        NnrpPayloadKind.VideoChunk,
+        NnrpPayloadKind.StructuredEvent,
+      ],
+      "NNRP/1 baseline typed-payload frame kinds",
+    );
+    assertBytes(
+      concat(...descriptors.map(encodeBaselineTypedPayloadDescriptor)),
+      descriptorRegion,
+      "NNRP/1 baseline descriptor region",
+    );
+    return { case_id: "l0.typed_payload.frame_regions.golden", action: "baseline-frame-regions-roundtrip" };
+  },
+  "l1.typed_payload.region.pack": () => {
+    const payloadRegion = bytes("tokevent");
+    const descriptors = [
+      { payloadKind: NnrpPayloadKind.TokenChunk, profileId: 2, offset: 0, length: 3 },
+      { payloadKind: NnrpPayloadKind.StructuredEvent, profileId: 2, offset: 3, length: 5 },
+    ];
+    const descriptorRegion = concat(...descriptors.map(encodeBaselineTypedPayloadDescriptor));
+    const decoded = decodeBaselineTypedPayloadRegion(descriptorRegion, payloadRegion);
+    assertEquivalent(decoded, descriptors, "NNRP/1 baseline typed-payload region pack");
+    return { case_id: "l1.typed_payload.region.pack", action: "baseline-region-pack", offsets: [0, 3] };
+  },
+  "l0.typed_payload.descriptor.current.golden": (parameters) => {
     const descriptor = {
       profileId: 2,
       payloadKind: NnrpPayloadKind.TokenChunk,
@@ -133,32 +225,7 @@ const CASE_EXECUTORS: Readonly<
       length: 24,
     };
     const encoded = encodeTypedPayloadDescriptor(descriptor);
-    const expected = Uint8Array.from([
-      0x02,
-      0x00,
-      0x02,
-      0x02,
-      0x01,
-      0x10,
-      0x00,
-      0x00,
-      0x03,
-      0x00,
-      0x00,
-      0x00,
-      0x02,
-      0x00,
-      0x00,
-      0x00,
-      0x08,
-      0x00,
-      0x00,
-      0x00,
-      0x18,
-      0x00,
-      0x00,
-      0x00,
-    ]);
+    const expected = hexParameter(parameters, "descriptor_hex");
     if (!encoded.every((value, index) => value === expected[index])) {
       throw new Error("current typed payload descriptor golden bytes changed");
     }
@@ -484,6 +551,87 @@ function assertBytes(actual: Uint8Array, expected: Uint8Array, label: string): v
   if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) {
     throw new Error(`${label} changed during roundtrip`);
   }
+}
+
+interface BaselineTypedPayloadDescriptor {
+  readonly payloadKind: NnrpPayloadKind;
+  readonly profileId: number;
+  readonly offset: number;
+  readonly length: number;
+}
+
+function encodeBaselineTypedPayloadDescriptor(descriptor: BaselineTypedPayloadDescriptor): Uint8Array {
+  validateBaselinePayloadKind(descriptor.payloadKind);
+  const encoded = new Uint8Array(16);
+  const view = new DataView(encoded.buffer);
+  view.setUint8(0, descriptor.payloadKind);
+  view.setUint16(2, descriptor.profileId, true);
+  view.setUint32(4, descriptor.offset, true);
+  view.setUint32(8, descriptor.length, true);
+  return encoded;
+}
+
+function decodeBaselineTypedPayloadDescriptor(source: Uint8Array): BaselineTypedPayloadDescriptor {
+  if (source.byteLength !== 16) throw new RangeError("NNRP/1 baseline typed-payload descriptor must be 16 bytes");
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  const payloadKind = view.getUint8(0) as NnrpPayloadKind;
+  validateBaselinePayloadKind(payloadKind);
+  if (view.getUint8(1) !== 0 || view.getUint32(12, true) !== 0) {
+    throw new RangeError("NNRP/1 baseline typed-payload descriptor reserved fields must be zero");
+  }
+  return {
+    payloadKind,
+    profileId: view.getUint16(2, true),
+    offset: view.getUint32(4, true),
+    length: view.getUint32(8, true),
+  };
+}
+
+function decodeBaselineTypedPayloadRegion(
+  descriptorRegion: Uint8Array,
+  payloadRegion: Uint8Array,
+): readonly BaselineTypedPayloadDescriptor[] {
+  if (descriptorRegion.byteLength % 16 !== 0) {
+    throw new RangeError("NNRP/1 baseline descriptor region length must be a multiple of 16 bytes");
+  }
+  const descriptors: BaselineTypedPayloadDescriptor[] = [];
+  let nextOffset = 0;
+  for (let offset = 0; offset < descriptorRegion.byteLength; offset += 16) {
+    const descriptor = decodeBaselineTypedPayloadDescriptor(descriptorRegion.slice(offset, offset + 16));
+    if (descriptor.offset !== nextOffset) throw new RangeError("NNRP/1 baseline descriptors must be contiguous");
+    nextOffset = descriptor.offset + descriptor.length;
+    if (nextOffset > payloadRegion.byteLength) throw new RangeError("NNRP/1 baseline range exceeds payload region");
+    descriptors.push(descriptor);
+  }
+  if (nextOffset !== payloadRegion.byteLength) {
+    throw new RangeError("NNRP/1 baseline descriptors must cover payload region");
+  }
+  return descriptors;
+}
+
+function validateBaselinePayloadKind(payloadKind: NnrpPayloadKind): void {
+  const raw = Number(payloadKind);
+  if (raw === 0 || (raw & (raw - 1)) !== 0 || (raw & ~0x7f) !== 0) {
+    throw new RangeError("NNRP/1 baseline payload kind is invalid");
+  }
+}
+
+function hexBytes(value: string): Uint8Array {
+  if (value.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(value)) {
+    throw new RangeError("hex input must contain complete hexadecimal bytes");
+  }
+  return Uint8Array.from(value.match(/../g)?.map((byte) => Number.parseInt(byte, 16)) ?? []);
+}
+
+function hexParameter(parameters: Readonly<Record<string, unknown>>, name: string): Uint8Array {
+  const value = parameters[name];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new RangeError(`frozen adapter parameter ${name} must be a non-empty hexadecimal string`);
+  }
+  if (value.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(value)) {
+    throw new RangeError(`frozen adapter parameter ${name} must contain complete hexadecimal bytes`);
+  }
+  return hexBytes(value);
 }
 
 function bytes(value: string): Uint8Array<ArrayBuffer> {

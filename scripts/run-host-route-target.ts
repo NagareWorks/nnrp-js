@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
@@ -332,7 +333,7 @@ async function runClientCase(
   const providers = await Promise.all(fixture.routes.map(async (route, index) => {
     const security = await clientSecurity(route, artifacts);
     providerRoutes[route.transport] = {
-      endpoint: clientLocator(route, resolvedFixture.routes[index]!),
+      endpoint: FrozenNnrpProviderEndpoint.parse(clientLocator(route, resolvedFixture.routes[index]!)),
       ...(security === undefined ? {} : { security }),
     };
     return observeClientSelection(providerForRoute(route), selectedProviderIds);
@@ -340,7 +341,7 @@ async function runClientCase(
   const policy = clientPolicy(fixture.routes);
   try {
     const client = await openNativeClient({
-      endpoint: fixture.application_endpoint,
+      endpoint: FrozenNnrpEndpoint.parse(fixture.application_endpoint),
       providerRoutes: providerRoutes as NnrpClientProviderRoutes,
       transports: providers,
       transportPolicy: policy,
@@ -368,11 +369,11 @@ async function runClientCase(
       createSuccessfulClientRouteEvidence(fixture, selectedProviderIds[0]!),
     );
   } catch (error) {
-    if (!(error instanceof NnrpTransportSelectionError) || error.selection === undefined) throw error;
+    if (!(error instanceof NnrpTransportSelectionError)) throw error;
     return passedHostRouteResult(
       scenario,
       "error",
-      createClientRouteEvidence(fixture, error.selection.candidates),
+      createClientRouteEvidence(fixture, error.candidates),
       error.message,
     );
   }
@@ -390,7 +391,7 @@ async function runServerCase(
   const providers = await Promise.all(fixture.routes.map(async (route, index) => {
     const security = await serverSecurity(route, options.artifacts);
     providerRoutes[route.transport] = {
-      endpoint: providerRouteLocator(route, resolvedFixture.routes[index]!),
+      endpoint: FrozenNnrpProviderEndpoint.parse(providerRouteLocator(resolvedFixture.routes[index]!)),
       ...(security === undefined ? {} : { security }),
     };
     let provider = providerForRoute(route);
@@ -405,7 +406,7 @@ async function runServerCase(
   }));
   const runtime = await openBackendRuntime({ transports: providers, transportPolicy: serverPolicy(fixture.routes) });
   const server = runtime.listen({
-    endpoint: fixture.application_endpoint,
+    endpoint: FrozenNnrpEndpoint.parse(fixture.application_endpoint),
     providerRoutes: providerRoutes as NnrpServerProviderRoutes,
     transports: providers,
     transportPolicy: serverPolicy(fixture.routes),
@@ -487,12 +488,14 @@ async function runServerCase(
   }
 }
 
-function providerForRoute(route: HostProviderRoute): HostTransportProvider {
+export function providerForRoute(route: HostProviderRoute): HostTransportProvider {
   if (route.provider_id === "example.transport.quic.uninstalled") {
     const provider = createQuicTransportProvider({ available: false });
+    const metadata = { ...provider.metadata, id: route.provider_id };
     return {
       ...provider,
-      metadata: { ...provider.metadata, id: route.provider_id },
+      descriptor: { ...provider.descriptor, metadata },
+      metadata,
     } as HostTransportProvider;
   }
   if (OFFICIAL_PROVIDER_IDS[route.transport] !== route.provider_id) {
@@ -575,8 +578,9 @@ export function clientLocator(route: HostProviderRoute, resolved: HostProviderRo
   if (injectedFailures(route).has("security_incompatible")) {
     switch (route.transport) {
       case "tcp":
+        return "tcp://127.0.0.1:9";
       case "quic":
-        return "127.0.0.1:9";
+        return "quic://127.0.0.1:9";
       case "ipc":
         return Deno.build.os === "windows"
           ? "npipe://nnrp-security-incompatible"
@@ -585,13 +589,10 @@ export function clientLocator(route: HostProviderRoute, resolved: HostProviderRo
         return "ws://127.0.0.1:9/nnrp";
     }
   }
-  return providerRouteLocator(route, resolved);
+  return providerRouteLocator(resolved);
 }
 
-export function providerRouteLocator(route: HostProviderRoute, resolved: HostProviderRoute): string {
-  if (route.transport === "tcp" || route.transport === "quic") {
-    return resolved.locator.replace(new RegExp(`^${route.transport}://`), "");
-  }
+export function providerRouteLocator(resolved: HostProviderRoute): string {
   return resolved.locator;
 }
 

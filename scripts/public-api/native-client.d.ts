@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, type NnrpCacheObjectKind, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpClientEvent, type NnrpClientProviderRoutes, type NnrpDiagnostic, type NnrpEventPollOptions, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, NnrpSessionPriorityClass, NnrpSessionRecoveryTicket, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidateReadiness, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, type NnrpCacheObjectKind, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpClientEvent, type NnrpClientProviderRoutes, type NnrpDiagnostic, NnrpEndpoint, type NnrpEventPollOptions, NnrpMessageType, type NnrpNormalizedSubmitRequest, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, NnrpSessionPriorityClass, NnrpSessionRecoveryTicket, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionOptions, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -70,7 +70,7 @@ export interface NnrpSessionOptions {
     readonly cacheHints?: readonly NnrpCacheObjectKind[];
 }
 export interface NnrpNativeClientOptions {
-    readonly endpoint: string | URL;
+    readonly endpoint: NnrpEndpoint;
     readonly providerRoutes?: NnrpClientProviderRoutes;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
@@ -78,7 +78,7 @@ export interface NnrpNativeClientOptions {
     readonly ffi?: NnrpNativeFfiBinding;
 }
 export interface NnrpConnectOptions {
-    readonly endpoint: string | URL;
+    readonly endpoint: NnrpEndpoint;
     readonly providerRoutes?: NnrpClientProviderRoutes;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
@@ -88,14 +88,6 @@ export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
     readonly kind: NnrpTransportKind;
     probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
     connect(options: NnrpTransportEndpoint): Promise<NnrpTransportConnection>;
-}
-export interface NnrpTransportSelectionOptions {
-    readonly peerManifest: NnrpCapabilityManifest;
-    readonly providers?: readonly NnrpNativeTransportProvider[];
-    readonly policy?: NnrpTransportPolicy;
-    readonly requestedMaxFrameBytes?: bigint;
-    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;

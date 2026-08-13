@@ -62,6 +62,60 @@ Deno.test("Preview4 adapter plan must exactly equal the executable case catalog"
     Error,
     "protocol_version",
   );
+  assertThrows(
+    () =>
+      parsePreview4AdapterPlan({
+        ...missing,
+        cases: missing.cases.map((entry) =>
+          entry.id === "l0.header.fixed_shape.golden" ? { ...entry, parameters: {} } : entry
+        ),
+      }),
+    Error,
+    "parameters must equal [header_hex]",
+  );
+  assertThrows(
+    () =>
+      parsePreview4AdapterPlan({
+        ...missing,
+        cases: missing.cases.map((entry) =>
+          entry.id === "l1.control.cancel-abort" ? { ...entry, parameters: { legacy: true } } : entry
+        ),
+      }),
+    Error,
+    "parameters must equal []",
+  );
+});
+
+Deno.test("Preview4 adapter consumes suite-owned frozen vectors", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const invalid = plan(directory);
+    const report = await executePreview4AdapterPlan({
+      ...invalid,
+      cases: invalid.cases.map((entry) =>
+        entry.id === "l0.body_region.prelude.golden"
+          ? {
+            ...entry,
+            parameters: { metadata_hex: "1900000018000000180000000e00000010000000050000000000000000000000" },
+          }
+          : entry
+      ),
+    }, { verifyHeader: () => undefined });
+    assertEquals(report.results[1].outcome, "fail");
+    assertEquals(report.results[1].message, "NNRP/1 baseline body-region prelude changed during roundtrip");
+
+    const malformedHex = plan(directory);
+    const malformedReport = await executePreview4AdapterPlan({
+      ...malformedHex,
+      cases: malformedHex.cases.map((entry) =>
+        entry.id === "l0.header.fixed_shape.golden" ? { ...entry, parameters: { header_hex: "not-hex" } } : entry
+      ),
+    }, { verifyHeader: () => undefined });
+    assertEquals(malformedReport.results[0].outcome, "fail");
+    assertEquals(malformedReport.results[0].message?.includes("header_hex"), true);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
 });
 
 Deno.test("Preview4 adapter writes failures instead of masking execution errors", async () => {
@@ -131,6 +185,26 @@ function plan(directory: string) {
       results_path: `${directory}/results.json`,
       evidence_dir: `${directory}/evidence`,
     },
-    cases: PREVIEW4_ADAPTER_CASE_IDS.map((id) => ({ id })),
+    cases: PREVIEW4_ADAPTER_CASE_IDS.map((id) => ({ id, parameters: FROZEN_PARAMETERS[id] ?? {} })),
   };
 }
+
+const FROZEN_PARAMETERS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "l0.header.fixed_shape.golden": {
+    header_hex: "4e4e525001001028210000003000000000100000070000000b0000000200000015cd5b0700000000",
+  },
+  "l0.body_region.prelude.golden": {
+    metadata_hex: "1800000018000000180000000e00000010000000050000000000000000000000",
+  },
+  "l0.typed_payload.descriptor.golden": {
+    descriptor_hex: "10000300040000000700000000000000",
+  },
+  "l0.typed_payload.frame_regions.golden": {
+    descriptor_region_hex:
+      "020001000000000003000000000000000400020003000000020000000000000008000300050000000500000000000000100004000a0000000300000000000000",
+    payload_hex: "746f6b6175766964656f657674",
+  },
+  "l0.typed_payload.descriptor.current.golden": {
+    descriptor_hex: "020002020110000003000000020000000800000018000000",
+  },
+};

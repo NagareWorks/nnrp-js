@@ -28,6 +28,10 @@ export const PREVIEW4_ADAPTER_CAPABILITIES = [
 
 export const PREVIEW4_ADAPTER_CASE_IDS = [
   "l0.header.fixed_shape.golden",
+  "l0.body_region.prelude.golden",
+  "l0.typed_payload.descriptor.golden",
+  "l0.typed_payload.frame_regions.golden",
+  "l1.typed_payload.region.pack",
   "l0.typed_payload.descriptor.current.golden",
   "l1.control.cancel-abort",
   "l1.control.priority-deadline",
@@ -51,6 +55,7 @@ export type Preview4ImplementedCaseId = typeof PREVIEW4_IMPLEMENTED_CASE_IDS[num
 
 export interface Preview4AdapterPlanCase {
   readonly id: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
 }
 
 export interface Preview4AdapterPlan {
@@ -83,7 +88,12 @@ export function parsePreview4AdapterPlan(value: unknown): Preview4AdapterPlan {
   if (!Array.isArray(plan.cases)) throw new Error("adapter execution plan cases must be an array");
   const cases = plan.cases.map((entry, index) => {
     const candidate = record(entry, `adapter execution plan cases[${index}]`);
-    return { id: nonEmptyString(candidate.id, `adapter execution plan cases[${index}].id`) };
+    const id = nonEmptyString(candidate.id, `adapter execution plan cases[${index}].id`);
+    const parameters = candidate.parameters === undefined
+      ? {}
+      : record(candidate.parameters, `adapter execution plan cases[${index}].parameters`);
+    validateFrozenParameterKeys(id, parameters);
+    return { id, parameters };
   });
 
   const actual = cases.map(({ id }) => id);
@@ -100,6 +110,26 @@ export function parsePreview4AdapterPlan(value: unknown): Preview4AdapterPlan {
     artifacts: { results_path: resultsPath, evidence_dir: evidenceDir },
     cases,
   };
+}
+
+const FROZEN_PARAMETER_KEYS: Readonly<Record<string, readonly string[]>> = {
+  "l0.header.fixed_shape.golden": ["header_hex"],
+  "l0.body_region.prelude.golden": ["metadata_hex"],
+  "l0.typed_payload.descriptor.golden": ["descriptor_hex"],
+  "l0.typed_payload.frame_regions.golden": ["descriptor_region_hex", "payload_hex"],
+  "l0.typed_payload.descriptor.current.golden": ["descriptor_hex"],
+};
+
+function validateFrozenParameterKeys(id: string, parameters: Readonly<Record<string, unknown>>): void {
+  const expected = FROZEN_PARAMETER_KEYS[id] ?? [];
+  const actual = Object.keys(parameters).sort();
+  const sortedExpected = [...expected].sort();
+  if (!sameStrings(actual, sortedExpected)) {
+    throw new Error(
+      `adapter execution plan case ${id} parameters must equal [${sortedExpected.join(", ")}], ` +
+        `received [${actual.join(", ")}]`,
+    );
+  }
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

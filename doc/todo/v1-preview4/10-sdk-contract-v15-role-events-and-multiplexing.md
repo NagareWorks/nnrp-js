@@ -11,6 +11,10 @@ paths.
 - [x] Export the frozen recovery and multiplexing symbols and reject non-canonical ticket or metadata encodings.
 - [x] Upgrade the machine-contract checker to version 15.
 - [x] Validate every JavaScript v15 projection, option field, default, role operation, and async semantic.
+  - [x] Resolve every `@nnrp/*.<symbol>` projection to a real public package export.
+  - [x] Validate projected declaration structure rather than accepting a matching projection-map string alone.
+  - [x] Fail the gate when a role method, option field, default, or async contract is documented but absent from the
+        generated public declaration snapshots.
 - [x] Freeze deterministic pre-dispatch cancellation, post-dispatch cancellation, timeout, and lifecycle-race behavior.
 
 ## Closed Role Events
@@ -67,7 +71,7 @@ paths.
 - [x] Add unit coverage for canonical tickets, option validation, async handshake, resume, policy, and multi-session
       use.
 - [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against successful full-matrix Rust workflow artifact run
-      `31442036247` at merge commit `13f72e7a81a54b9eb26ee68e399c2cf84bb5525d`.
+      `31666415612` at merge commit `295f5b65ac71885b5c1b54d927b2595005038481`.
 - [x] Run suite-owned adapter conformance and native/browser independent-process wire E2E without skips.
 - [x] Run format, lint, typecheck, tests, total and incremental coverage, build, package, and installed-package gates.
 - [x] Inspect every staged npm package and verify only provider packages contain their owned native artifacts.

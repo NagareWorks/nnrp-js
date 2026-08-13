@@ -8,11 +8,16 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "a1edf8e60f28af081c006d9d36d2ab8cab177f89";
+const CONFORMANCE_REVISION = "05dc6d8283d0941b129f1c5a93e399b97153d38b";
 
 Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
-  assertEquals((releaseWorkflow.match(/1\.0\.0-preview\.4\.22/g)?.length ?? 0) >= 3, true);
+  assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.22/g)?.length ?? 0, 2);
   assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22"');
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_RUN_ID = "31666415612"');
+  assertStringIncludes(
+    artifactPreparation,
+    'DEFAULT_RUST_ARTIFACT_COMMIT = "295f5b65ac71885b5c1b54d927b2595005038481"',
+  );
   assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22"');
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.17"), false);
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.18"), false);
@@ -23,17 +28,34 @@ Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
 });
 
 Deno.test("CI consumes an immutable successful Rust workflow artifact without weakening release inputs", () => {
-  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "31442036247"');
+  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "31666415612"');
   assertStringIncludes(
     ciWorkflow,
-    "NNRP_JS_RUST_ARTIFACT_COMMIT: 13f72e7a81a54b9eb26ee68e399c2cf84bb5525d",
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: 295f5b65ac71885b5c1b54d927b2595005038481",
   );
   assertStringIncludes(artifactPreparation, "run.headSha !== expectedCommit");
   assertStringIncludes(artifactPreparation, 'run.status !== "completed" || run.conclusion !== "success"');
   assertStringIncludes(artifactPreparation, "nnrp-rs-release-${artifactVersion}");
+  assertEquals(artifactPreparation.includes('"release",\n        "download"'), false);
+  assertStringIncludes(artifactPreparation, "pinned Rust workflow artifact");
   assertStringIncludes(denoConfig, "NNRP_JS_RUST_ARTIFACT_RUN_ID,NNRP_JS_RUST_ARTIFACT_COMMIT");
-  assertEquals(releaseWorkflow.includes("NNRP_JS_RUST_ARTIFACT_RUN_ID"), false);
-  assertEquals(releaseWorkflow.includes("NNRP_JS_RUST_ARTIFACT_COMMIT"), false);
+  assertEquals(releaseWorkflow.match(/NNRP_JS_RUST_ARTIFACT_RUN_ID:/g)?.length, 1);
+  assertEquals(releaseWorkflow.match(/NNRP_JS_RUST_ARTIFACT_COMMIT:/g)?.length, 1);
+  assertStringIncludes(releaseWorkflow, "ref: ${{ env.NNRP_JS_RUST_ARTIFACT_COMMIT }}");
+  assertStringIncludes(
+    artifactPreparation,
+    "NNRP_JS_RUST_ARTIFACT_VERSION, NNRP_JS_RUST_ARTIFACT_RUN_ID, and",
+  );
+  assertStringIncludes(releaseWorkflow, "rust_artifact_run_id:");
+  assertStringIncludes(releaseWorkflow, "rust_artifact_commit:");
+  assertStringIncludes(
+    releaseWorkflow,
+    "NNRP_JS_RUST_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_run_id",
+  );
+  assertStringIncludes(
+    releaseWorkflow,
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_commit",
+  );
 });
 
 Deno.test("generated Rust artifacts stay out of source control for every package owner", () => {
@@ -62,7 +84,8 @@ Deno.test("release benchmark separates production providers from the explicit Ru
 });
 
 Deno.test("release validates the complete Preview4 adapter suite before publishing", () => {
-  assertStringIncludes(releaseWorkflow, CONFORMANCE_REVISION);
+  assertStringIncludes(releaseWorkflow, `NNRP_CONFORMANCE_SOURCE_COMMIT: ${CONFORMANCE_REVISION}`);
+  assertStringIncludes(releaseWorkflow, "ref: ${{ env.NNRP_CONFORMANCE_SOURCE_COMMIT }}");
   assertStringIncludes(releaseWorkflow, "uses: ./.conformance/.github/actions/run-conformance");
   assertStringIncludes(releaseWorkflow, "protocol-version: nnrp-1-preview4");
   assertStringIncludes(releaseWorkflow, "capabilities-path: conformance/nnrp-1-preview4.capabilities.json");

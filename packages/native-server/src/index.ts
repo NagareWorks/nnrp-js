@@ -3,7 +3,6 @@ import {
   type CacheMissMetadata,
   type CacheReferenceMetadata,
   createCapabilityManifest,
-  createTransportCandidates,
   createTransportSelectionSummary,
   decodeNnrpRuntimeEvent,
   encodeCacheInvalidateMetadata,
@@ -16,6 +15,7 @@ import {
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
   type NnrpDiagnostic,
+  NnrpEndpoint,
   type NnrpEventPollOptions,
   NnrpMessageType,
   type NnrpOperationLifecycleEvent,
@@ -30,17 +30,15 @@ import {
   type NnrpSessionOpenMetadata,
   NnrpStandardProfile,
   NnrpTimeoutError,
-  type NnrpTransportCandidate,
-  type NnrpTransportCandidateReadiness,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportProbeMetrics,
-  type NnrpTransportProbeObservation,
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportRejectionReason,
+  type NnrpTransportSelectionOptions,
   type NnrpTransportSelectionSummary,
   type NnrpTransportServer,
   type NnrpTransportServerSecurity,
@@ -601,7 +599,7 @@ export interface NnrpServerAcceptOptions {
 }
 
 export interface NnrpListenOptions {
-  readonly endpoint: string | URL;
+  readonly endpoint: NnrpEndpoint;
   readonly providerRoutes?: NnrpServerProviderRoutes;
   readonly transports?: readonly NnrpNativeTransportProvider[];
   readonly transportPolicy?: NnrpTransportPolicy;
@@ -698,15 +696,6 @@ export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
   readonly kind: NnrpTransportKind;
   probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
   listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer>;
-}
-
-export interface NnrpTransportSelectionOptions {
-  readonly peerManifest: NnrpCapabilityManifest;
-  readonly providers?: readonly NnrpNativeTransportProvider[];
-  readonly policy?: NnrpTransportPolicy;
-  readonly requestedMaxFrameBytes?: bigint;
-  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export interface NnrpNativeRuntimeBinding {
@@ -928,10 +917,7 @@ export class NnrpBackendRuntime {
     this.#ensureOpen();
 
     return createTransportSelectionSummary(
-      selectTransport(
-        this.#createTransportCandidates(options),
-        options.policy ?? this.#transportPolicy,
-      ),
+      selectTransport(this.#transportProviders.map((provider) => provider.descriptor), options),
     );
   }
 
@@ -1006,20 +992,6 @@ export class NnrpBackendRuntime {
       return;
     }
     await role.close();
-  }
-
-  #createTransportCandidates(options: NnrpTransportSelectionOptions): readonly NnrpTransportCandidate[] {
-    const providers = options.providers ?? this.#transportProviders;
-    return createTransportCandidates({
-      local: { ...this.#binding.manifest, transports: providers.map((provider) => provider.kind) },
-      peer: options.peerManifest,
-      providers,
-      ...(options.requestedMaxFrameBytes === undefined
-        ? {}
-        : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      candidateReadiness: options.candidateReadiness,
-      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
-    });
   }
 }
 
@@ -1135,7 +1107,12 @@ async function listenServerRoles(
   }> = [];
   let nextServerId = firstServerId;
   try {
-    const resolutions = resolveServerProviderRoutes(endpoint, providerRoutes, providers, policy);
+    const resolutions = resolveServerProviderRoutes(
+      parseApplicationEndpoint(endpoint),
+      providerRoutes,
+      providers,
+      policy,
+    );
     for (const resolution of resolutions) {
       const provider = resolution.provider;
       const listener = await provider.listen({
@@ -1213,7 +1190,7 @@ interface ResolvedServerProviderRoute {
 }
 
 function resolveServerProviderRoutes(
-  endpoint: string | URL,
+  endpoint: NnrpEndpoint,
   providerRoutes: NnrpServerProviderRoutes | undefined,
   providers: readonly NnrpNativeTransportProvider[],
   policy: NnrpTransportPolicy,
@@ -1247,43 +1224,37 @@ function resolveServerProviderRoutes(
 }
 
 function resolveServerProviderEndpoint(
-  applicationEndpoint: string | URL,
+  applicationEndpoint: NnrpEndpoint,
   kind: Exclude<NnrpTransportKind, "websocket">,
-  providerEndpoint: string | URL | undefined,
+  providerEndpoint: import("@nnrp/core").NnrpProviderEndpoint | undefined,
 ): string {
   if ((kind !== "tcp" && kind !== "quic") || providerEndpoint === undefined) {
     return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
   }
-  if (providerEndpoint instanceof URL) {
+  const parsedEndpoint = new URL(providerEndpoint.uri);
+  if (parsedEndpoint.port !== "0") {
     return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
   }
-
-  const value = providerEndpoint.trim();
-  if (!value.endsWith(":0")) {
-    return resolveProviderEndpoint(applicationEndpoint, kind, providerEndpoint);
+  if (!providerEndpoint.matchesTransport(kind)) {
+    throw new TypeError(`${kind} server provider endpoint must use ${kind}://.`);
   }
-  if (value.length === 0 || value.includes("://")) {
-    throw new TypeError(`${kind} server provider endpoint must use host:port form.`);
-  }
-
-  const parsed = new URL(`tcp://${value}`);
   if (
-    parsed.hostname.length === 0 || parsed.port !== "0" || parsed.username.length > 0 ||
-    parsed.password.length > 0 || (parsed.pathname !== "" && parsed.pathname !== "/") ||
-    parsed.search.length > 0 || parsed.hash.length > 0
+    parsedEndpoint.hostname.length === 0 || parsedEndpoint.username.length > 0 ||
+    parsedEndpoint.password.length > 0 || (parsedEndpoint.pathname !== "" && parsedEndpoint.pathname !== "/") ||
+    parsedEndpoint.search.length > 0 || parsedEndpoint.hash.length > 0
   ) {
-    throw new TypeError(`${kind} server provider endpoint must contain only host and port.`);
+    throw new TypeError(`${kind} server provider endpoint must contain only an authority host and port.`);
   }
-  return `${parsed.hostname}:0`;
+  return `${parsedEndpoint.hostname}:0`;
 }
 
 function serverRouteSecuritySatisfied(
-  applicationEndpoint: string | URL,
+  applicationEndpoint: NnrpEndpoint,
   kind: NnrpTransportKind,
   providerEndpoint: string,
   hasSecurity: boolean,
 ): boolean {
-  const secureApplication = parseApplicationEndpoint(applicationEndpoint).protocol === "nnrps:";
+  const secureApplication = applicationEndpoint.secure;
   if (kind === "tcp") return !secureApplication || hasSecurity;
   if (kind === "quic") return hasSecurity;
   if (kind === "ipc") return !secureApplication && !hasSecurity;
@@ -1291,9 +1262,9 @@ function serverRouteSecuritySatisfied(
   return (!secureApplication || secureWebSocket) && secureWebSocket === hasSecurity;
 }
 
-function resolveNativeWebSocketEndpoint(endpoint: string | URL | undefined): string {
+function resolveNativeWebSocketEndpoint(endpoint: import("@nnrp/core").NnrpProviderEndpoint | undefined): string {
   if (endpoint === undefined) throw new TypeError("Native ws/wss routes require an explicit endpoint.");
-  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  const parsed = new URL(endpoint.uri);
   if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
     throw new TypeError("Native ws/wss routes require a ws:// or wss:// endpoint.");
   }
@@ -1353,9 +1324,7 @@ function copyServerProviderRoutes(
     const route = providerRoutes[kind];
     if (route === undefined) continue;
     copy[kind] = {
-      ...(route.endpoint === undefined
-        ? {}
-        : { endpoint: route.endpoint instanceof URL ? new URL(route.endpoint.toString()) : route.endpoint }),
+      ...(route.endpoint === undefined ? {} : { endpoint: route.endpoint }),
       ...(route.security === undefined ? {} : {
         security: {
           mode: "server",
@@ -2027,15 +1996,15 @@ export function validateNativeRuntimeCapabilities(capabilities: NnrpNativeRuntim
   }
 }
 
-function normalizeEndpoint(endpoint: string | URL): string {
-  return endpoint instanceof URL ? endpoint.toString() : endpoint;
+function normalizeEndpoint(endpoint: NnrpEndpoint): string {
+  return endpoint.uri;
 }
 
-function validateEndpoint(endpoint: string | URL): void {
-  if (normalizeEndpoint(endpoint).trim().length === 0) {
+function validateEndpoint(endpoint: NnrpEndpoint): void {
+  if (!(endpoint instanceof NnrpEndpoint)) {
     throw new NnrpCapabilityError({
-      code: "NNRP_NATIVE_ENDPOINT_EMPTY",
-      message: "NNRP native endpoint must not be empty.",
+      code: "NNRP_NATIVE_ENDPOINT_INVALID",
+      message: "NNRP native endpoint must be an NnrpEndpoint value.",
       source: "native",
       retryable: false,
     });

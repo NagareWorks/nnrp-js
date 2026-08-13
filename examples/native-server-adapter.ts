@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint } from "@nnrp/core";
 import { NnrpNativeBindingUnavailableError, openBackendRuntime } from "@nnrp/native-server";
 import { NnrpResultClass } from "@nnrp/core";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
@@ -7,7 +8,7 @@ const runtime = await openBackendRuntime({
   transportPolicy: "auto",
 });
 
-const server = runtime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default" });
+const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default") });
 
 try {
   const session = await server.accept();

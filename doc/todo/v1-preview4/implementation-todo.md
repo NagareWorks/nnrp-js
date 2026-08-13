@@ -1,8 +1,10 @@
 # NNRP/1 Preview4 JavaScript/TypeScript Implementation Todo
 
 This directory is the closed implementation plan for JavaScript/TypeScript Preview4. The public API contract is frozen
-in `nnrp-doc`; audited Rust release `1.0.0-preview.4.22` at merge commit `784a4a354f4e6a73798248f93cf574bd7a5af829` owns
-native ABI `4.4.x`; and `nnrp-conformance` owns wire-level schemas and scenarios.
+in `nnrp-doc`; current development validation consumes the exact Rust ABI `4.4.0` workflow artifact from successful run
+`31666415612` at commit `295f5b65ac71885b5c1b54d927b2595005038481`; and `nnrp-conformance` owns wire-level schemas and
+scenarios. The public Rust tag `v1.0.0-preview.4.22` does not contain that development commit, so release closure still
+requires the explicit Rust release pin in workstream 10.
 
 ## Closure Rules
 
@@ -28,7 +30,7 @@ native ABI `4.4.x`; and `nnrp-conformance` owns wire-level schemas and scenarios
 - [x] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)
 - [x] [06 - IPC carrier provider](06-ipc-provider.md)
 - [x] [07 - WebSocket carrier provider](07-websocket-provider.md)
-- [x] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
+- [ ] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
 - [x] [09 - Artifacts, release, and docs](09-artifacts-release-docs.md)
 - [ ] [10 - SDK contract v15 role events and multiplexing](10-sdk-contract-v15-role-events-and-multiplexing.md)
 

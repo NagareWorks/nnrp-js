@@ -36,6 +36,7 @@ Deno.test("@nnrp/transport-tcp delegates probe, connect, and listen to the packa
   const peer = await server.accept();
 
   assertEquals(provider.localAvailable, true);
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
   assertEquals(provider.metadata.preferenceRank, 5);
   assertEquals(provider.metadata.limits.maxFrameBytes, 1024n);
   assertEquals(probe.successCount, 1);

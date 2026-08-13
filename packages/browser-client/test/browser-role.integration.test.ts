@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
   CacheMissReason,
@@ -46,8 +47,8 @@ Deno.test({
     const server = await setupForTest(
       () =>
         serverRuntime.listen({
-          endpoint: "nnrp://127.0.0.1/browser-role",
-          providerRoutes: { websocket: { endpoint: "ws://127.0.0.1:0" } },
+          endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1/browser-role"),
+          providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("ws://127.0.0.1:0") } },
           transportPolicy: "force-websocket",
         }),
       cleanups,
@@ -113,8 +114,8 @@ Deno.test({
     const client = await setupForTest(
       () =>
         browserRuntime.connect({
-          endpoint: "nnrp://127.0.0.1/browser-role",
-          providerRoutes: { websocket: { endpoint: providerEndpoint } },
+          endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1/browser-role"),
+          providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
         }),
       cleanups,
       "browser client creation",

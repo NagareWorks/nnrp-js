@@ -30,9 +30,17 @@ on:
         required: true
         default: preview
       rust_artifact_version:
-        description: nnrp-rs release version that provides the Linux native benchmark artifact.
+        description: nnrp-rs release version that provides the native artifacts.
         required: true
         default: 1.0.0-preview.4.22
+      rust_artifact_run_id:
+        description: Successful nnrp-rs release workflow run that produced the selected version.
+        required: true
+        default: "31666415612"
+      rust_artifact_commit:
+        description: Exact nnrp-rs source commit associated with the selected workflow run.
+        required: true
+        default: 295f5b65ac71885b5c1b54d927b2595005038481
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -42,6 +50,12 @@ on:
 permissions:
   contents: write
   id-token: write
+
+env:
+  NNRP_CONFORMANCE_SOURCE_COMMIT: 05dc6d8283d0941b129f1c5a93e399b97153d38b
+  NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.22' }}
+  NNRP_JS_RUST_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_run_id || '31666415612' }}
+  NNRP_JS_RUST_ARTIFACT_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_commit || '295f5b65ac71885b5c1b54d927b2595005038481' }}
 
 jobs:
   publish:
@@ -69,13 +83,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-rs
-          ref: v${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.22' }}
+          ref: ${{ env.NNRP_JS_RUST_ARTIFACT_COMMIT }}
           path: .rust-benchmark
       - name: Checkout conformance suite
         uses: actions/checkout@v5
         with:
           repository: NagareWorks/nnrp-conformance
-          ref: a1edf8e60f28af081c006d9d36d2ab8cab177f89
+          ref: ${{ env.NNRP_CONFORMANCE_SOURCE_COMMIT }}
           path: .conformance
       - name: Resolve version
         id: version
@@ -127,7 +141,6 @@ jobs:
       - name: Verify release gates
         env:
           GH_TOKEN: ${{ github.token }}
-          NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.22' }}
         run: deno task todo:release-check && deno task benchmark:smoke && deno task release-dry-run
       - name: Run suite-owned Preview4 adapter conformance
         uses: ./.conformance/.github/actions/run-conformance

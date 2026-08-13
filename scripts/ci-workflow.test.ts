@@ -12,7 +12,8 @@ const browserRoleIntegration = await Deno.readTextFile(
   "packages/browser-client/test/browser-role.integration.test.ts",
 );
 
-const CONFORMANCE_REVISION = "a1edf8e60f28af081c006d9d36d2ab8cab177f89";
+const DOC_REVISION = "ec9c801c5249c3d5efd923f108ae4ebd74b11aa9";
+const CONFORMANCE_REVISION = "05dc6d8283d0941b129f1c5a93e399b97153d38b";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
@@ -57,7 +58,11 @@ Deno.test("installed tarballs run the real Node role E2E", () => {
 });
 
 Deno.test("CI gates Preview4 with suite-owned adapter and wire conformance", () => {
-  assertEquals(ciWorkflow.match(new RegExp(CONFORMANCE_REVISION, "g"))?.length ?? 0, 3);
+  assertStringIncludes(ciWorkflow, `NNRP_CONFORMANCE_SOURCE_COMMIT: ${CONFORMANCE_REVISION}`);
+  assertEquals(
+    ciWorkflow.match(/ref: \$\{\{ env\.NNRP_CONFORMANCE_SOURCE_COMMIT \}\}/g)?.length ?? 0,
+    3,
+  );
   assertStringIncludes(ciWorkflow, "suite-conformance:");
   assertStringIncludes(ciWorkflow, "uses: ./.conformance/.github/actions/run-conformance");
   assertStringIncludes(ciWorkflow, "protocol-version: nnrp-1-preview4");
@@ -73,7 +78,8 @@ Deno.test("CI gates Preview4 with suite-owned adapter and wire conformance", () 
 Deno.test("CI compares the public API against the frozen nnrp-doc contract", () => {
   assertStringIncludes(ciWorkflow, "Checkout frozen SDK contract");
   assertStringIncludes(ciWorkflow, "repository: NagareWorks/nnrp-doc");
-  assertStringIncludes(ciWorkflow, "ref: master");
+  assertStringIncludes(ciWorkflow, `NNRP_DOC_SOURCE_COMMIT: ${DOC_REVISION}`);
+  assertStringIncludes(ciWorkflow, "ref: ${{ env.NNRP_DOC_SOURCE_COMMIT }}");
   assertStringIncludes(ciWorkflow, "path: .docs");
   assertStringIncludes(ciWorkflow, "NNRP_DOC_ROOT: ${{ github.workspace }}/.docs");
   assertStringIncludes(ciWorkflow, "deno task api-consistency");

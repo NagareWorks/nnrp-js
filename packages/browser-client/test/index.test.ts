@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import {
   createCapabilityManifest,
   NNRP_SESSION_RECOVERY_TICKET_PREFIX_BYTES,
@@ -109,8 +110,8 @@ Deno.test("@nnrp/browser-client exposes frozen session defaults and eager open f
   assertEquals(version, { protocolMajor: 1, wireFormat: 0, version: "1.0.0" });
 
   const client = runtime.connect({
-    endpoint: "nnrps://example.test/render",
-    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
     sessionDefaults: {
       profileId: 2,
       schemaId: 0x1001,
@@ -141,8 +142,8 @@ Deno.test("@nnrp/browser-client exposes frozen session defaults and eager open f
   assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrps://example.test/render",
-        providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+        providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
       }),
     NnrpCapabilityError,
     "closed browser runtime",
@@ -156,8 +157,8 @@ Deno.test("@nnrp/browser-client validates provider policy and endpoint boundarie
   assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrps://example.test/render",
-        providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+        providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
       }),
     NnrpTransportError,
     "No viable transport provider",
@@ -165,8 +166,8 @@ Deno.test("@nnrp/browser-client validates provider policy and endpoint boundarie
   assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrps://example.test/render",
-        providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+        providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
         transportProviders: [browserProvider()],
         transportPolicy: "force-quic",
       }),
@@ -176,7 +177,7 @@ Deno.test("@nnrp/browser-client validates provider policy and endpoint boundarie
   assertThrows(
     () =>
       runtime.connect({
-        endpoint: "ws://example.test/not-an-application-endpoint",
+        endpoint: FrozenNnrpEndpoint.parse("ws://example.test/not-an-application-endpoint"),
         transportProviders: [browserProvider()],
       }),
     Error,
@@ -190,8 +191,8 @@ Deno.test("@nnrp/browser-client enforces the frozen browser route and security b
   const invalidKey = assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrp://example.test/render",
-        providerRoutes: { tcp: { endpoint: "example.test:4433" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrp://example.test/render"),
+        providerRoutes: { tcp: { endpoint: FrozenNnrpProviderEndpoint.parse("tcp://example.test:4433") } },
       }),
     NnrpTransportError,
   );
@@ -200,30 +201,30 @@ Deno.test("@nnrp/browser-client enforces the frozen browser route and security b
   const unresolved = assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrp://example.test/render",
-        providerRoutes: { websocket: { endpoint: "https://example.test/nnrp" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrp://example.test/render"),
+        providerRoutes: {},
       }),
     NnrpTransportSelectionError,
   );
-  assertEquals(unresolved.selection?.candidates[0]?.rejectionReason, "route-unresolved");
+  assertEquals(unresolved.candidates[0]?.rejectionReason, "route-unresolved");
 
   const insecure = assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrps://example.test/render",
-        providerRoutes: { websocket: { endpoint: "ws://example.test/nnrp" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+        providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("ws://example.test/nnrp") } },
       }),
     NnrpTransportSelectionError,
   );
-  assertEquals(insecure.selection?.candidates[0]?.rejectionReason, "security-unsatisfied");
+  assertEquals(insecure.candidates[0]?.rejectionReason, "security-unsatisfied");
 
   const nativeCredentials = assertThrows(
     () =>
       runtime.connect({
-        endpoint: "nnrps://example.test/render",
+        endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
         providerRoutes: {
           websocket: {
-            endpoint: "wss://example.test/nnrp",
+            endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp"),
             security: {
               mode: "client",
               serverName: "example.test",
@@ -234,19 +235,19 @@ Deno.test("@nnrp/browser-client enforces the frozen browser route and security b
       }),
     NnrpTransportSelectionError,
   );
-  assertEquals(nativeCredentials.selection?.candidates[0]?.rejectionReason, "security-unsatisfied");
+  assertEquals(nativeCredentials.candidates[0]?.rejectionReason, "security-unsatisfied");
   await runtime.close();
 
   const withoutProvider = await browserRuntime([]);
   const unavailable = assertThrows(
     () =>
       withoutProvider.connect({
-        endpoint: "nnrp://example.test/render",
-        providerRoutes: { websocket: { endpoint: "ws://example.test/nnrp" } },
+        endpoint: FrozenNnrpEndpoint.parse("nnrp://example.test/render"),
+        providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("ws://example.test/nnrp") } },
       }),
     NnrpTransportSelectionError,
   );
-  assertEquals(unavailable.selection?.candidates[0]?.rejectionReason, "local-unavailable");
+  assertEquals(unavailable.candidates[0]?.rejectionReason, "local-unavailable");
   await withoutProvider.close();
 });
 
@@ -260,14 +261,15 @@ Deno.test("@nnrp/browser-client selects its installed compatible browser provide
   });
 
   const selection = runtime.selectTransport({
-    peerManifest: peer,
-    providers: [preferred],
+    peerSupportedTransports: peer.transports,
+    policy: "auto",
     candidateReadiness: [{
       kind: "websocket",
       providerId: "browser.preferred",
       routeResolved: true,
       securitySatisfied: true,
     }],
+    probeObservations: [],
   });
   assertEquals(selection.selected, "websocket");
   assertEquals(
@@ -281,8 +283,8 @@ Deno.test("@nnrp/browser-client validates frozen session options before opening 
   let connectCalls = 0;
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const client = runtime.connect({
-    endpoint: "nnrps://example.test/render",
-    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
   });
 
   await assertRejects(
@@ -307,8 +309,8 @@ Deno.test("@nnrp/browser-client retries connection bootstrap after an eager open
   let connectCalls = 0;
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const client = runtime.connect({
-    endpoint: "nnrps://example.test/render",
-    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
   });
   await assertRejects(() => client.openSession({ requestedSessionId: 9 }), Error, "unit test provider");
   await assertRejects(() => client.openSession({ requestedSessionId: 9 }), Error, "unit test provider");
@@ -321,8 +323,8 @@ Deno.test("@nnrp/browser-client binds resumed session identity to the recovery t
   let connectCalls = 0;
   const runtime = await browserRuntime([browserProvider({ onConnect: () => connectCalls++ })]);
   const client = runtime.connect({
-    endpoint: "nnrps://example.test/render",
-    providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrps://example.test/render"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
   });
   const ticket = recoveryTicket(23);
 
@@ -359,17 +361,27 @@ function browserProvider(options: {
   readonly preferenceRank?: number;
   readonly onConnect?: () => void;
 } = {}): NnrpBrowserTransportProvider {
+  const metadata = {
+    id: options.id ?? "browser.websocket",
+    cost: { modelId: 0, units: 0n },
+    preferenceRank: options.preferenceRank ?? 3,
+    limits: { maxFrameBytes: 67_108_864n },
+    limitations: ["browser-host-only"] as const,
+  };
+  const available = options.localAvailable ?? true;
   return {
     kind: "websocket",
-    endpointSchemes: ["ws", "wss"],
-    localAvailable: options.localAvailable ?? true,
-    metadata: {
-      id: options.id ?? "browser.websocket",
-      cost: { modelId: 0, units: 0n },
-      preferenceRank: options.preferenceRank ?? 3,
-      limits: { maxFrameBytes: 67_108_864n },
-      limitations: ["browser-host-only"],
+    descriptor: {
+      name: "@nnrp/transport-websocket",
+      version: "test",
+      transportId: "websocket",
+      kind: "wasm",
+      available,
+      metadata,
     },
+    endpointSchemes: ["ws", "wss"],
+    localAvailable: available,
+    metadata,
     probe: (_options: NnrpTransportProbeOptions) =>
       Promise.resolve({
         sampleCount: 1,

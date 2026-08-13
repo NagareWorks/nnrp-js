@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { resolve } from "node:path";
 import {
   createTokenSubmitRequest,
@@ -305,8 +306,8 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     transportPolicy: "force-websocket",
   });
   const server = serverRuntime.listen({
-    endpoint: "nnrp://localhost/benchmark-browser",
-    providerRoutes: { websocket: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/benchmark-browser"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
     transportPolicy: "force-websocket",
   });
   const accepting = server.accept();
@@ -318,8 +319,8 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     transportPolicy: "force-websocket",
   });
   const client = browserRuntime.connect({
-    endpoint: "nnrp://localhost/benchmark-browser",
-    providerRoutes: { websocket: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/benchmark-browser"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
   });
   const session = await client.openSession();
   const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
@@ -363,19 +364,22 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   const provider = nativeProvider(transport);
   if (!provider.localAvailable) throw new Error(`${transport} provider is unavailable`);
   const providerEndpoint = transport === "ipc" ? transportEndpoint("ipc") : await reserveEndpoint(provider, transport);
+  const providerRouteEndpoint = FrozenNnrpProviderEndpoint.parse(
+    transport === "tcp" ? `tcp://${providerEndpoint}` : providerEndpoint,
+  );
   const policy = `force-${transport}` as const;
   const endpoint = `nnrp://localhost/benchmark-${transport}`;
   const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: policy });
   const server = serverRuntime.listen({
-    endpoint,
-    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse(endpoint),
+    providerRoutes: { [transport]: { endpoint: providerRouteEndpoint } },
     transportPolicy: policy,
   });
   const accepting = server.accept();
   await delay(25);
   const client = await openNativeClient({
-    endpoint,
-    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse(endpoint),
+    providerRoutes: { [transport]: { endpoint: providerRouteEndpoint } },
     transports: [provider],
     transportPolicy: policy,
   });

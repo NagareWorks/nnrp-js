@@ -17,9 +17,10 @@ Use `@nnrp/core` when building tools that need NNRP types without importing a na
 transport implementation.
 
 ```ts
-import { createTransportSelectionSummary, selectTransport } from "@nnrp/core";
+import { NnrpEndpoint, NnrpProviderEndpoint } from "@nnrp/core";
 
-const summary = createTransportSelectionSummary(selectTransport(candidates, "auto"));
+const endpoint = NnrpEndpoint.parse("nnrp://runtime.example/session/default");
+const websocket = NnrpProviderEndpoint.parse("wss://runtime.example/nnrp");
 ```
 
 SDK reference: https://nagareworks.github.io/nnrp-doc/en/sdk/javascript/api/core

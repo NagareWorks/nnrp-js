@@ -8,7 +8,6 @@ import {
   createBrowserWasmManifest,
   createNnrpResultFromLifecycle,
   createNnrpResultFromRuntimeEvent,
-  createTransportCandidates,
   createTransportSelectionSummary,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
@@ -26,6 +25,7 @@ import {
   type NnrpCapabilityManifest,
   type NnrpClientEvent,
   type NnrpClientProviderRoutes,
+  NnrpEndpoint,
   type NnrpEventPollOptions,
   NnrpFlowScopeKind,
   type NnrpInputProfile,
@@ -44,15 +44,13 @@ import {
   type NnrpSubmitOptions,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
-  type NnrpTransportCandidate,
-  type NnrpTransportCandidateReadiness,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
-  type NnrpTransportProbeObservation,
   type NnrpTransportProvider,
+  type NnrpTransportSelectionOptions,
   type NnrpTransportSelectionSummary,
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
@@ -63,7 +61,6 @@ import {
   type ObjectReleaseMetadata,
   ObjectReleaseReason,
   OwnershipHint,
-  parseApplicationEndpoint,
   type RouteHintMetadata,
   type RuntimeControlMetadata,
   RuntimeRole,
@@ -276,20 +273,11 @@ export interface NnrpBrowserRuntimeOptions {
 }
 
 export interface NnrpBrowserConnectOptions {
-  readonly endpoint: string;
+  readonly endpoint: NnrpEndpoint;
   readonly providerRoutes?: NnrpClientProviderRoutes;
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
   readonly sessionDefaults?: NnrpBrowserSessionOptions;
-}
-
-export interface NnrpBrowserTransportSelectionOptions {
-  readonly peerManifest: NnrpCapabilityManifest;
-  readonly providers?: readonly NnrpBrowserTransportProvider[];
-  readonly policy?: NnrpTransportPolicy;
-  readonly requestedMaxFrameBytes?: bigint;
-  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
@@ -444,14 +432,11 @@ export class NnrpBrowserRuntime {
     });
   }
 
-  public selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary {
+  public selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary {
     this.#ensureOpen();
 
     return createTransportSelectionSummary(
-      selectTransport(
-        this.#createTransportCandidates(options),
-        options.policy ?? this.#transportPolicy,
-      ),
+      selectTransport(this.#binding.transportProviders.map((provider) => provider.descriptor), options),
     );
   }
 
@@ -511,20 +496,6 @@ export class NnrpBrowserRuntime {
         );
       }
     }
-  }
-
-  #createTransportCandidates(options: NnrpBrowserTransportSelectionOptions): readonly NnrpTransportCandidate[] {
-    const providers = options.providers ?? this.#binding.transportProviders;
-    return createTransportCandidates({
-      local: { ...this.#binding.manifest, transports: providers.map((provider) => provider.kind) },
-      peer: options.peerManifest,
-      providers,
-      ...(options.requestedMaxFrameBytes === undefined
-        ? {}
-        : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      candidateReadiness: options.candidateReadiness,
-      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
-    });
   }
 }
 
@@ -858,7 +829,7 @@ export class NnrpBrowserClientSession {
       assertClientRuntimeControlMessage(messageType);
       const payload = encodeRuntimeControlMetadata(messageType, metadata, tail);
       this.#observeControlSequence(metadata);
-      return this.#sendRuntimeFrame(messageType, payload).then(
+      return this.#sendRuntimeFrame(messageType, payload, runtimeControlOperationId(messageType, metadata)).then(
         async () => await this.#applySentTerminalControl(messageType, metadata),
       );
     } catch (error) {
@@ -1387,7 +1358,7 @@ export class NnrpBrowserClientSession {
       const payload = metadataBody === undefined
         ? encodeRuntimeObjectMetadata(messageType, metadata, tail)
         : encodeRuntimeObjectMetadataSegments(messageType, metadata, [metadataBody, tail]);
-      await this.#sendRuntimeFrame(messageType, payload);
+      await this.#sendRuntimeFrame(messageType, payload, runtimeObjectOperationId(messageType, metadata));
       this.#runtimeObjects.commit(messageType, metadata);
     });
     this.#runtimeObjectQueue = send.catch(() => undefined);
@@ -1432,11 +1403,29 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  #sendRuntimeFrame(messageType: NnrpMessageType, payload: Uint8Array): Promise<void> {
+  #sendRuntimeFrame(
+    messageType: NnrpMessageType,
+    payload: Uint8Array,
+    operationId?: bigint,
+  ): Promise<void> {
     try {
       this.#ensureOpen();
-      const frameId = this.#nextRuntimeFrameId;
-      this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      let frameId: number;
+      if (operationId === undefined) {
+        frameId = this.#nextRuntimeFrameId;
+        this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      } else if (operationId === 0n) {
+        if (!allowsSessionScopedOperation(messageType)) {
+          throw sessionScopedRuntimeOperationError(messageType);
+        }
+        frameId = 0;
+      } else {
+        const operationFrameId = this.#frameForOperation(operationId);
+        if (operationFrameId === undefined) {
+          throw inactiveRuntimeOperationError(messageType, operationId);
+        }
+        frameId = operationFrameId;
+      }
       return this.#role().sendRuntimeFrame(messageType, frameId, payload);
     } catch (error) {
       return Promise.reject(error);
@@ -1641,7 +1630,7 @@ function validateBrowserTransportProviders(providers: readonly NnrpBrowserTransp
 }
 
 function selectBrowserTransportProvider(
-  endpoint: string | URL,
+  endpoint: NnrpEndpoint,
   providerRoutes: NnrpClientProviderRoutes | undefined,
   providers: readonly NnrpBrowserTransportProvider[],
   policy: NnrpTransportPolicy,
@@ -1658,37 +1647,36 @@ function selectBrowserTransportProvider(
   }
   const securitySatisfied = routeResolved && providerEndpoint !== undefined &&
     !(route !== undefined && "security" in route) && browserRouteSecuritySatisfied(endpoint, providerEndpoint);
-  const observedProviders = providers.length === 0 ? [uninstalledBrowserProviderObservation()] : providers;
-  const selection = selectTransport(
-    createTransportCandidates({
-      local: { ...manifest, transports: ["websocket"] },
-      peer: { ...manifest, transports: ["websocket"] },
-      providers: observedProviders,
-      candidateReadiness: observedProviders.map((provider) => ({
-        kind: provider.kind,
-        providerId: provider.metadata.id,
-        routeResolved,
-        securitySatisfied,
-        ...(!routeResolved || !securitySatisfied
-          ? {
-            diagnostic: {
-              code: !routeResolved
-                ? "NNRP_BROWSER_PROVIDER_ROUTE_UNRESOLVED"
-                : "NNRP_BROWSER_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
-              message: !routeResolved
-                ? "Browser WebSocket provider route is unresolved."
-                : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
-              source: "transport" as const,
-              retryable: false,
-              transport: "websocket" as const,
-            },
-          }
-          : {}),
-      })),
-    }),
+  const descriptors = providers.length === 0
+    ? [uninstalledBrowserProviderDescriptor()]
+    : providers.map((provider) => provider.descriptor);
+  const selection = selectTransport(descriptors, {
+    peerSupportedTransports: manifest.transports,
     policy,
-  );
-  const selected = providers.find((provider) => provider.metadata.id === selection.selected?.provider.id);
+    candidateReadiness: descriptors.map((provider) => ({
+      kind: provider.transportId,
+      providerId: provider.metadata.id,
+      routeResolved,
+      securitySatisfied,
+      ...(!routeResolved || !securitySatisfied
+        ? {
+          diagnostic: {
+            code: !routeResolved
+              ? "NNRP_BROWSER_PROVIDER_ROUTE_UNRESOLVED"
+              : "NNRP_BROWSER_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
+            message: !routeResolved
+              ? "Browser WebSocket provider route is unresolved."
+              : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
+            source: "transport" as const,
+            retryable: false,
+            transport: "websocket" as const,
+          },
+        }
+        : {}),
+    })),
+    probeObservations: [],
+  });
+  const selected = providers.find((provider) => provider.metadata.id === selection.selectedProvider.metadata.id);
   if (selected === undefined || providerEndpoint === undefined) {
     throw new NnrpTransportError({
       code: "NNRP_BROWSER_TRANSPORT_SELECTION_INCONSISTENT",
@@ -1715,32 +1703,36 @@ function validateBrowserProviderRoutes(providerRoutes: NnrpClientProviderRoutes 
   }
 }
 
-function browserRouteSecuritySatisfied(applicationEndpoint: string | URL, providerEndpoint: string): boolean {
-  return parseApplicationEndpoint(applicationEndpoint).protocol !== "nnrps:" ||
+function browserRouteSecuritySatisfied(applicationEndpoint: NnrpEndpoint, providerEndpoint: string): boolean {
+  return !applicationEndpoint.secure ||
     new URL(providerEndpoint).protocol === "wss:";
 }
 
-function resolveBrowserWebSocketEndpoint(endpoint: string | URL | undefined): string {
+function resolveBrowserWebSocketEndpoint(endpoint: import("@nnrp/core").NnrpProviderEndpoint | undefined): string {
   if (endpoint === undefined) throw new TypeError("Browser WebSocket routes require an explicit endpoint.");
-  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  const parsed = new URL(endpoint.uri);
   if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
     throw new TypeError("Browser WebSocket routes require a ws:// or wss:// endpoint.");
   }
   return parsed.toString();
 }
 
-function uninstalledBrowserProviderObservation(): NnrpTransportProvider {
+function uninstalledBrowserProviderDescriptor(): import("@nnrp/core").NnrpTransportProviderDescriptor {
+  const metadata = {
+    id: "nnrp.transport.websocket.uninstalled",
+    cost: { modelId: 0, units: 0n },
+    preferenceRank: 0xffff,
+    limits: { maxFrameBytes: 67_108_864n },
+    limitations: ["browser-host-only"] as const,
+  };
   return {
-    kind: "websocket",
-    endpointSchemes: ["ws", "wss"],
-    localAvailable: false,
-    metadata: {
-      id: "nnrp.transport.websocket.uninstalled",
-      cost: { modelId: 0, units: 0n },
-      preferenceRank: 0xffff,
-      limits: { maxFrameBytes: 67_108_864n },
-      limitations: ["browser-host-only"],
-    },
+    name: "@nnrp/transport-websocket",
+    version: "uninstalled",
+    transportId: "websocket",
+    kind: "wasm",
+    available: false,
+    metadata,
+    diagnostic: "Browser WebSocket provider is not installed.",
   };
 }
 
@@ -1784,15 +1776,15 @@ function isBrowserTransportProvider(value: unknown): value is NnrpBrowserTranspo
     typeof provider.localAvailable === "boolean";
 }
 
-function normalizeEndpoint(endpoint: string | URL): string {
-  return endpoint instanceof URL ? endpoint.toString() : endpoint;
+function normalizeEndpoint(endpoint: NnrpEndpoint): string {
+  return endpoint.uri;
 }
 
-function validateEndpoint(endpoint: string | URL): void {
-  if (normalizeEndpoint(endpoint).trim().length === 0) {
+function validateEndpoint(endpoint: NnrpEndpoint): void {
+  if (!(endpoint instanceof NnrpEndpoint)) {
     throw new NnrpCapabilityError({
-      code: "NNRP_WASM_ENDPOINT_EMPTY",
-      message: "NNRP browser endpoint must not be empty.",
+      code: "NNRP_WASM_ENDPOINT_INVALID",
+      message: "NNRP browser endpoint must be an NnrpEndpoint value.",
       source: "wasm",
       retryable: false,
     });
@@ -2150,6 +2142,71 @@ function assertClientRuntimeControlMessage(messageType: NnrpMessageType): void {
   throw new NnrpProtocolError({
     code: "NNRP_CLIENT_RUNTIME_MESSAGE_DIRECTION_INVALID",
     message: `Message type ${messageType} cannot be sent by a client session.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
+function runtimeControlOperationId(
+  messageType: NnrpMessageType,
+  metadata: RuntimeControlMetadata,
+): bigint | undefined {
+  if (messageType === NnrpMessageType.Cancel || messageType === NnrpMessageType.Abort) {
+    return (metadata as ControlRequestMetadata).operationId;
+  }
+  if (
+    messageType === NnrpMessageType.PriorityUpdate ||
+    messageType === NnrpMessageType.Deadline ||
+    messageType === NnrpMessageType.ExpireAt
+  ) {
+    return (metadata as SchedulingMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.Supersede) {
+    return (metadata as SupersedeMetadata).oldOperationId;
+  }
+  if (messageType === NnrpMessageType.BudgetUpdate) {
+    return (metadata as BudgetMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.RouteHint || messageType === NnrpMessageType.ExecutionHint) {
+    return (metadata as RouteHintMetadata).operationId;
+  }
+  return undefined;
+}
+
+function runtimeObjectOperationId(
+  messageType: NnrpMessageType,
+  metadata: RuntimeObjectSendMetadata,
+): bigint | undefined {
+  if (messageType === NnrpMessageType.ObjectRef) {
+    return (metadata as ObjectReferenceMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.ObjectRelease) {
+    return (metadata as ObjectReleaseMetadata).operationId;
+  }
+  return undefined;
+}
+
+function inactiveRuntimeOperationError(messageType: NnrpMessageType, operationId: bigint): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_RUNTIME_OPERATION_INACTIVE",
+    message: `${NnrpMessageType[messageType]} references inactive operation ${operationId}.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
+function allowsSessionScopedOperation(messageType: NnrpMessageType): boolean {
+  return messageType === NnrpMessageType.Cancel ||
+    messageType === NnrpMessageType.Abort ||
+    messageType === NnrpMessageType.BudgetUpdate ||
+    messageType === NnrpMessageType.ObjectRef ||
+    messageType === NnrpMessageType.ObjectRelease;
+}
+
+function sessionScopedRuntimeOperationError(messageType: NnrpMessageType): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_RUNTIME_OPERATION_SCOPE_INVALID",
+    message: `${NnrpMessageType[messageType]} requires a non-zero operation ID.`,
     source: "protocol",
     retryable: false,
   });

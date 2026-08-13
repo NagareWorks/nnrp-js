@@ -34,6 +34,12 @@ Deno.test("@nnrp/transport-ipc delegates complete packet lifecycle to its native
 
   assertEquals(provider.kind, "ipc");
   assertEquals(provider.localAvailable, true);
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
+  assertEquals(provider.descriptor.metadata.limitations, [
+    "local-host-only",
+    "native-host-only",
+    "unix-domain-socket",
+  ]);
   assertEquals(provider.metadata.preferenceRank, 1);
   assertEquals(probe.successCount, 1);
   assertEquals(packets, [new Uint8Array([1]), new Uint8Array([2])]);
@@ -44,6 +50,13 @@ Deno.test("@nnrp/transport-ipc enforces host-specific endpoint schemes", async (
   const binding = fakeIpcBinding([]);
   const unix = createIpcTransportProvider({ binding, platform: "unix" });
   const windows = createIpcTransportProvider({ binding, platform: "windows" });
+
+  assertEquals(windows.descriptor.metadata === windows.metadata, true);
+  assertEquals(windows.descriptor.metadata.limitations, [
+    "local-host-only",
+    "native-host-only",
+    "windows-named-pipe",
+  ]);
 
   await assertRejects(() => unix.connect({ endpoint: "npipe://./pipe/nnrp" }), NnrpTransportError);
   await assertRejects(() => windows.connect({ endpoint: "unix:///run/nnrp.sock" }), NnrpTransportError);

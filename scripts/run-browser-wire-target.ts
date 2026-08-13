@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
@@ -129,8 +130,8 @@ async function connectAndSubmit(
   let lastError: unknown;
   for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt++) {
     const client = runtime.connect({
-      endpoint: "nnrp://localhost/session/default",
-      providerRoutes: { websocket: { endpoint: providerEndpoint } },
+      endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/session/default"),
+      providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
       transportPolicy: "force-websocket",
     });
     let session: Awaited<ReturnType<typeof client.openSession>> | undefined;

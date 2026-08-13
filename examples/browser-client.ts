@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { NnrpWasmBindingUnavailableError, openBrowserRuntime } from "@nnrp/browser-client";
 import { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY } from "@nnrp/core";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
@@ -9,7 +10,10 @@ const runtime = await openBrowserRuntime({
 });
 
 const client = runtime.connect({
-  endpoint: "wss://nnrp.example.test/session",
+  endpoint: FrozenNnrpEndpoint.parse("nnrps://nnrp.example.test/session"),
+  providerRoutes: {
+    websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("wss://nnrp.example.test/nnrp") },
+  },
 });
 
 const session = await client.openSession();

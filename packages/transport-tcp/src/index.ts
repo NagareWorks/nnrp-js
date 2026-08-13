@@ -8,6 +8,7 @@ import {
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportProviderCost,
+  type NnrpTransportProviderMetadata,
   type NnrpTransportServer,
 } from "@nnrp/core";
 import { loadPackagedTcpBinding } from "./native.js";
@@ -39,15 +40,25 @@ export function createTcpTransportProvider(
     : loadPackagedTcpBinding();
   const available = options.available ?? loaded.binding !== undefined;
   const diagnostic = options.diagnostic ?? loaded.diagnostic ?? unavailableDiagnostic();
+  const metadata = {
+    id: "nnrp.transport.tcp.native",
+    cost: options.cost ?? { modelId: 0, units: 0n },
+    preferenceRank: options.preferenceRank ?? 2,
+    limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+    limitations: ["requires-tcp", "native-host-only"],
+  } satisfies NnrpTransportProviderMetadata;
   return {
     kind: "tcp",
-    metadata: {
-      id: "nnrp.transport.tcp.native",
-      cost: options.cost ?? { modelId: 0, units: 0n },
-      preferenceRank: options.preferenceRank ?? 2,
-      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
-      limitations: ["requires-tcp", "native-host-only"],
+    descriptor: {
+      name: "@nnrp/transport-tcp",
+      version: "1.0.0-preview.4.4",
+      transportId: "tcp",
+      kind: "native-dynamic",
+      available,
+      metadata,
+      ...(available ? {} : { diagnostic: diagnostic.message }),
     },
+    metadata,
     localAvailable: available,
     ...(available ? {} : { diagnostic }),
     endpointSchemes: ["tcp"],

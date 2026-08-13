@@ -65,6 +65,7 @@ Deno.test("@nnrp/transport-quic delegates connect and listen to its native bindi
   const server = await provider.listen({ endpoint: "quic://127.0.0.1:4433" });
 
   assertEquals(provider.localAvailable, true);
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
   assertEquals(provider.metadata.preferenceRank, 4);
   assertEquals(connection.connected, true);
   assertEquals(server.listening, true);

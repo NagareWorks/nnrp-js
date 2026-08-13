@@ -20,6 +20,8 @@ Deno.test("@nnrp/transport-websocket exposes browser WebSocket provider metadata
   assertEquals(provider.endpointSchemes, ["ws", "wss"]);
   assertEquals(provider.kind, "websocket");
   assertEquals(provider.localAvailable, true);
+  assertEquals(provider.descriptor.kind, "wasm");
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
   assertEquals(provider.metadata.id, "nnrp.transport.websocket.browser-wasm");
 });
 
@@ -82,6 +84,8 @@ Deno.test("@nnrp/transport-websocket delegates native probe and listen", async (
   };
   const provider = createWebSocketTransportProvider({ binding });
 
+  assertEquals(provider.descriptor.kind, "native-dynamic");
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
   assertEquals((await provider.probe({ endpoint: "ws://127.0.0.1/nnrp" })).successCount, 1);
   assertEquals((await provider.listen({ endpoint: "ws://127.0.0.1/nnrp" })).listening, true);
   assertEquals(provider.metadata.id, "nnrp.transport.websocket.native");
