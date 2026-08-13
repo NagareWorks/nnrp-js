@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { createIpcTransportProvider } from "@nnrp/transport-ipc";
 import { type NnrpNativeTransportProvider as NnrpClientTransportProvider, openNativeClient } from "@nnrp/native-client";
 import {
@@ -45,8 +46,8 @@ interface LoopbackSecurity {
 
 interface RoleLoopbackOptions {
   readonly provider: NativeProvider;
-  readonly providerEndpoint: string;
-  readonly endpoint: string;
+  readonly providerEndpoint: FrozenNnrpProviderEndpoint;
+  readonly endpoint: FrozenNnrpEndpoint;
   readonly policy: NnrpTransportPolicy;
   readonly security?: LoopbackSecurity;
 }
@@ -96,8 +97,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
     const providerEndpoint = formatHostAndPort(parseHostAndPort(packetEndpoint, "tcp"));
     await verifyRoleLoopback({
       provider,
-      providerEndpoint,
-      endpoint: `nnrp://${providerEndpoint}/session/default`,
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(`tcp://${providerEndpoint}`),
+      endpoint: FrozenNnrpEndpoint.parse(`nnrp://${providerEndpoint}/session/default`),
       policy: "force-tcp",
     });
     return;
@@ -111,8 +112,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
     await verifyPacketLoopback(provider, providerEndpoint);
     await verifyRoleLoopback({
       provider,
-      providerEndpoint,
-      endpoint: "nnrp://localhost/session/default",
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint),
+      endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/session/default"),
       policy: "force-ipc",
     });
     return;
@@ -123,8 +124,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
     const url = new URL(providerEndpoint);
     await verifyRoleLoopback({
       provider,
-      providerEndpoint,
-      endpoint: `nnrp://${url.hostname}:${url.port}/session/default`,
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint),
+      endpoint: FrozenNnrpEndpoint.parse(`nnrp://${url.hostname}:${url.port}/session/default`),
       policy: "force-websocket",
     });
     return;
@@ -135,8 +136,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
   const providerEndpoint = formatHostAndPort(address);
   await verifyRoleLoopback({
     provider,
-    providerEndpoint,
-    endpoint: `nnrps://localhost:${address.port}/session/default`,
+    providerEndpoint: FrozenNnrpProviderEndpoint.parse(`quic://${providerEndpoint}`),
+    endpoint: FrozenNnrpEndpoint.parse(`nnrps://localhost:${address.port}/session/default`),
     policy: "force-quic",
     security: quicSecurity,
   });

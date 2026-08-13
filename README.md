@@ -57,12 +57,13 @@ import {
   NNRP_STANDARD_PROFILE_TOKEN,
   NNRP_TOKEN_DELTA_SCHEMA_ID,
   NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+  NnrpEndpoint,
 } from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const client = await openNativeClient({
-  endpoint: "nnrp://127.0.0.1:4433/session/default",
+  endpoint: NnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
   transports: [createTcpTransportProvider()],
   transportPolicy: "auto",
 });

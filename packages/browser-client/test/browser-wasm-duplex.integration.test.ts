@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   createTokenSubmitRequest,
@@ -30,8 +31,8 @@ Deno.test({
       transportPolicy: "force-websocket",
     });
     const server = serverRuntime.listen({
-      endpoint: "nnrp://127.0.0.1/browser-wasm-duplex",
-      providerRoutes: { websocket: { endpoint: providerEndpoint } },
+      endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1/browser-wasm-duplex"),
+      providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
       transportPolicy: "force-websocket",
     });
     const accepting = server.accept();

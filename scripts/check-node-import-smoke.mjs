@@ -168,7 +168,9 @@ async function verifyNativeTransportLoopbacks() {
         createTokenSubmitRequest,
         NNRP_DEFAULT_SUBMIT_HEADER,
         NNRP_DEFAULT_SUBMIT_POLICY,
+        NnrpEndpoint,
         NnrpMessageType,
+        NnrpProviderEndpoint,
         NnrpResultClass,
       },
     ] =
@@ -215,10 +217,10 @@ async function verifyNativeTransportLoopbacks() {
       : "unix:///tmp/nnrp-js-node-role-" + nonce + ".sock";
     const runtime = await openBackendRuntime({ transports: [tcp, ipc], transportPolicy: "auto" });
     const server = runtime.listen({
-      endpoint: "nnrp://node-role-smoke",
+      endpoint: NnrpEndpoint.parse("nnrp://node-role-smoke"),
       providerRoutes: {
-        tcp: { endpoint: "127.0.0.1:0" },
-        ipc: { endpoint: ipcEndpoint },
+        tcp: { endpoint: NnrpProviderEndpoint.parse("tcp://127.0.0.1:0") },
+        ipc: { endpoint: NnrpProviderEndpoint.parse(ipcEndpoint) },
       },
       transports: [tcp, ipc],
       transportPolicy: "auto",
@@ -231,8 +233,8 @@ async function verifyNativeTransportLoopbacks() {
     const tcpEndpoint = server.boundProviderEndpoints.tcp;
     if (tcpEndpoint === undefined) throw new Error("Node role smoke did not publish its TCP endpoint");
     const client = await openNativeClient({
-      endpoint: "nnrp://node-role-smoke",
-      providerRoutes: { tcp: { endpoint: tcpEndpoint.replace("tcp://", "") } },
+      endpoint: NnrpEndpoint.parse("nnrp://node-role-smoke"),
+      providerRoutes: { tcp: { endpoint: NnrpProviderEndpoint.parse(tcpEndpoint) } },
       transports: [createTcpTransportProvider()],
       transportPolicy: "force-tcp",
     });

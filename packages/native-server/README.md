@@ -14,7 +14,7 @@ npm install @nnrp/native-server @nnrp/transport-tcp
 
 ```ts
 import { openBackendRuntime } from "@nnrp/native-server";
-import { NnrpResultClass } from "@nnrp/core";
+import { NnrpEndpoint, NnrpResultClass } from "@nnrp/core";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const runtime = await openBackendRuntime({
@@ -22,7 +22,7 @@ const runtime = await openBackendRuntime({
   transportPolicy: "force-tcp",
 });
 
-const server = runtime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default" });
+const server = runtime.listen({ endpoint: NnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default") });
 const session = await server.accept();
 const operation = await session.receiveSubmit();
 

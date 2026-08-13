@@ -25,15 +25,17 @@
   - [x] Start a browser client against the suite-owned WebSocket endpoint.
   - [x] Report browser/WASM observations in the standard case-results schema.
   - [x] Capture console, frame, and timing evidence without SDK-adapter translation.
-- [x] Integrate result validation.
+- [ ] Integrate result validation.
   - [x] Write observed frames, terminal state, failures, and evidence paths.
   - [x] Run the suite validator on every produced report.
   - [x] Keep adapter conformance and OpenAI API profile conformance as separate commands/jobs.
   - [x] Consume the suite-owned Preview4 adapter plan instead of generating SDK-owned skip reports.
-  - [x] Require exact equality between the 10 mandatory/optional suite-selected cases and the formal JS adapter catalog.
+  - [ ] Require exact equality between all 32 suite-selected cases and the formal JS adapter catalog.
   - [x] Keep `supersede` and `recoverable-error` executable and directly tested while their frozen status remains
         experimental.
-  - [x] Declare the complete 18-capability Preview4 catalog used for adapter case selection.
+  - [ ] Declare the complete 28-capability Preview4 catalog used for adapter case selection.
+  - [ ] Execute handshake, session, flow, submit/result, object/cache, probe, TCP, and QUIC cases through real released
+        codecs or live provider paths instead of skip reports.
 
 ## CI Coverage
 
@@ -44,7 +46,7 @@
   - [x] Run browser WebSocket/WASM scenarios in the browser job.
   - [x] Emit a machine-readable skip only for a matrix cell whose platform cannot host that provider.
   - [x] Fail when a declared capability, mode, or transport has no selected scenario.
-- [x] Add suite-owned adapter conformance as an independent CI and release gate.
+- [ ] Add suite-owned adapter conformance as an independent CI and release gate.
   - [x] Execute all selected cases through released JS codecs, facades, or live native paths.
   - [x] Validate adapter results and evidence with the pinned conformance suite.
   - [x] Keep adapter conformance separate from native and browser wire-target jobs.

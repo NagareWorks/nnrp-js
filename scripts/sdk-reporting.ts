@@ -1,6 +1,5 @@
 import {
   createCapabilityManifest,
-  createTransportCandidates,
   createTransportSelectionSummary,
   type NnrpBuildMode,
   type NnrpCapability,
@@ -230,29 +229,32 @@ function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTran
     transports: manifest.buildMode === "backend-native" ? ["tcp"] : ["websocket"],
     capabilities: ["client.session"],
   });
-  const candidates = createTransportCandidates({
-    local: manifest,
-    peer: peerManifest,
-    providers: peerManifest.transports.map((kind) => ({
-      kind,
-      metadata: {
-        id: `nnrp.transport.${kind}.benchmark`,
-        cost: { modelId: 0, units: 0n },
-        preferenceRank: 0,
-        limits: { maxFrameBytes: 67_108_864n },
-        limitations: [],
-      },
-      localAvailable: true,
-    })),
+  const providers = peerManifest.transports.map((kind) => ({
+    name: `@nnrp/transport-${kind}`,
+    version: "benchmark",
+    transportId: kind,
+    kind: manifest.buildMode === "browser-wasm" ? "wasm" as const : "native-dynamic" as const,
+    available: true,
+    metadata: {
+      id: `nnrp.transport.${kind}.benchmark`,
+      cost: { modelId: 0, units: 0n },
+      preferenceRank: 0,
+      limits: { maxFrameBytes: 67_108_864n },
+      limitations: [],
+    },
+  }));
+  const options = {
+    peerSupportedTransports: peerManifest.transports,
+    policy: "auto" as const,
     candidateReadiness: peerManifest.transports.map((kind) => ({
       kind,
       providerId: `nnrp.transport.${kind}.benchmark`,
       routeResolved: true,
       securitySatisfied: true,
     })),
-  });
-
-  return createTransportSelectionSummary(selectTransport(candidates));
+    probeObservations: [],
+  };
+  return createTransportSelectionSummary(selectTransport(providers, options));
 }
 
 export function parseCommandOptions(args: readonly string[]): SdkCommandOptions {

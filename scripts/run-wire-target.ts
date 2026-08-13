@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import {
   CacheMissReason,
   createTokenSubmitRequest,
@@ -30,6 +31,7 @@ import { QUIC_TEST_CERTIFICATE_DER, QUIC_TEST_PRIVATE_KEY_PKCS8_DER } from "./fi
 import { createWireConformanceTargetManifest } from "./wire-target-manifest.ts";
 import { assertRuntimeMetadata, assertRuntimeTail, createSuccessResultReply } from "./runtime-event-fixtures.ts";
 import { receiveServerLifecycleEvent, receiveServerRuntimeEvent } from "./server-event-helpers.ts";
+import { handleDeadlineBeforeSubmit } from "./wire-target-scenarios.ts";
 
 const SUITE_VERSION = "0.1.0";
 const TIMEOUT_MILLIS = 5_000;
@@ -38,6 +40,8 @@ const RESPONSE_BODY = bytes("wire-external-result");
 const TRACE_BODY = bytes("trace");
 const CACHE_KEY_HI = 1_234_605_616_436_508_552n;
 const CACHE_KEY_LO = 11_072_869_122_414_935_808n;
+const RESULT_DROP_SUPERSEDED = 2;
+const RESULT_DROP_PEER_CANCELLED = 3;
 
 type NativeProvider = NnrpClientTransportProvider & NnrpServerTransportProvider;
 
@@ -108,18 +112,23 @@ export async function runWireTarget(options: WireTargetOptions): Promise<void> {
   let quic: Awaited<ReturnType<typeof startServer>> | undefined;
   let ipc: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
-    tcp = await startServer(tcpProvider, "force-tcp", tcpEndpoint, `nnrp://${tcpEndpoint}/session/default`);
+    tcp = await startServer(
+      tcpProvider,
+      "force-tcp",
+      FrozenNnrpProviderEndpoint.parse(`tcp://${tcpEndpoint}`),
+      `nnrp://${tcpEndpoint}/session/default`,
+    );
     quic = await startServer(
       quicProvider,
       "force-quic",
-      quicEndpoint,
+      FrozenNnrpProviderEndpoint.parse(`quic://${quicEndpoint}`),
       `nnrps://localhost:${quicEndpoint.split(":").at(-1)}/session/default`,
       security.server,
     );
     ipc = await startServer(
       ipcProvider,
       "force-ipc",
-      ipcEndpoint,
+      FrozenNnrpProviderEndpoint.parse(ipcEndpoint),
       "nnrp://localhost/session/default",
     );
     const tcpAccepting = startAccept(tcp.server);
@@ -134,17 +143,18 @@ export async function runWireTarget(options: WireTargetOptions): Promise<void> {
     });
 
     await handleCancel(await acceptedSession(tcpAccepting, "TCP"));
+    await handleDeadlineBeforeSubmit(await acceptedSession(startAccept(tcp.server), "TCP"));
     await tcp.server.close();
     await tcp.runtime.close();
 
     await handlePriority(await acceptedSession(quicAccepting, "QUIC"));
     await handleProgressClient({
       endpoint: `nnrp://${tcpEndpoint}/session/default`,
-      providerEndpoint: tcpEndpoint,
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(`tcp://${tcpEndpoint}`),
       provider: tcpProvider,
       transportPolicy: "force-tcp",
     });
-    await handleCache(await quic.server.accept());
+    await handleCache(await acceptedSession(startAccept(quic.server), "QUIC"));
     await quic.server.close();
     await quic.runtime.close();
 
@@ -154,7 +164,7 @@ export async function runWireTarget(options: WireTargetOptions): Promise<void> {
 
     await handleProgressClient({
       endpoint: `nnrps://localhost:${new URL(websocketEndpoint).port}/session/default`,
-      providerEndpoint: websocketEndpoint,
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(websocketEndpoint),
       provider: websocketProvider,
       transportPolicy: "force-websocket",
       security: security.client,
@@ -185,7 +195,7 @@ async function acceptedSession(accepting: PendingAccept, transport: string): Pro
 async function startServer(
   provider: NativeProvider,
   transportPolicy: "force-tcp" | "force-quic" | "force-ipc",
-  providerEndpoint: string,
+  providerEndpoint: FrozenNnrpProviderEndpoint,
   endpoint: string,
   security?: NnrpTransportServerSecurity,
 ): Promise<{
@@ -194,7 +204,7 @@ async function startServer(
 }> {
   const runtime = await openBackendRuntime({ transports: [provider], transportPolicy });
   const server = runtime.listen({
-    endpoint,
+    endpoint: FrozenNnrpEndpoint.parse(endpoint),
     providerRoutes: {
       [provider.kind]: {
         endpoint: providerEndpoint,
@@ -232,7 +242,7 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
   await operation.sendResultDrop({
     operationId: submit.metadata.value.operationId,
     resultSequence: 1n,
-    dropReasonCode: 1,
+    dropReasonCode: RESULT_DROP_PEER_CANCELLED,
     sourceRole: RuntimeRole.Server,
     flags: 0,
     diagnosticBytes: 0,
@@ -271,7 +281,7 @@ async function handlePriority(session: NnrpServerSession): Promise<void> {
   await operation.sendResultDrop({
     operationId: submit.metadata.value.operationId,
     resultSequence: 1n,
-    dropReasonCode: 1,
+    dropReasonCode: RESULT_DROP_SUPERSEDED,
     sourceRole: RuntimeRole.Server,
     flags: 0,
     diagnosticBytes: 0,
@@ -341,7 +351,7 @@ async function handleCache(session: NnrpServerSession): Promise<void> {
 
 async function handleProgressClient(options: {
   readonly endpoint: string;
-  readonly providerEndpoint: string;
+  readonly providerEndpoint: FrozenNnrpProviderEndpoint;
   readonly provider: NativeProvider;
   readonly transportPolicy: "force-tcp" | "force-websocket";
   readonly security?: NnrpTransportClientSecurity;
@@ -400,7 +410,7 @@ async function connectWithRetry(options: Parameters<typeof handleProgressClient>
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
       return await openNativeClient({
-        endpoint: options.endpoint,
+        endpoint: FrozenNnrpEndpoint.parse(options.endpoint),
         providerRoutes: {
           [options.provider.kind]: {
             endpoint: options.providerEndpoint,

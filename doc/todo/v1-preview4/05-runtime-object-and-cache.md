@@ -30,6 +30,8 @@
 - [x] Implement local cache lease validation.
   - [x] Validate object/version, lease id, owner scope/id, grant time, and TTL.
   - [x] Keep lease state local and out of public native pointer representations.
+  - [x] Export the frozen `NnrpCacheLeaseResult` outcome value instead of exposing only the internal lease record.
+  - [x] Export and validate the frozen `NnrpCachePolicyOptions` fields and defaults.
 
 ## Browser and Worker Safety
 
@@ -48,5 +50,5 @@
 - [x] Patch/delta tests cover ordered metadata and delta tails, equal-total swapped segments, and independent length
       errors.
 - [x] Cache tests cover hit-reference, miss, invalidate, lease expiry, and no-implicit-lookup behavior.
-- [x] Structured-clone tests cover every public object/cache type.
+- [x] Structured-clone tests cover every public object/cache type, including lease results and policy options.
 - [x] Public API snapshots match the frozen JavaScript client, server, and runtime pages in `nnrp-doc`.

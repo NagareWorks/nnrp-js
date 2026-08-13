@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
 import { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY } from "@nnrp/core";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
@@ -39,8 +40,8 @@ async function run(): Promise<void> {
     transportPolicy: "force-websocket",
   });
   const client = runtime.connect({
-    endpoint: scenario.host_route.application_endpoint,
-    providerRoutes: { websocket: { endpoint: resolvedRoute.locator } },
+    endpoint: FrozenNnrpEndpoint.parse(scenario.host_route.application_endpoint),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(resolvedRoute.locator) } },
     transportPolicy: "force-websocket",
   });
   const session = await client.openSession();

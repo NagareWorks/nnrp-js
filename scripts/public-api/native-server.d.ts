@@ -1,4 +1,4 @@
-import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, type NnrpEventPollOptions, NnrpMessageType, type NnrpOperationLifecycleEvent, type NnrpResultPushMetadata, type NnrpRuntimeEvent, NnrpSchemaRegistry, type NnrpServerProviderRoutes, type NnrpSessionOpenMetadata, type NnrpTransportCandidateReadiness, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeObservation, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, NnrpCapabilityError, type NnrpCapabilityManifest, type NnrpDiagnostic, NnrpEndpoint, type NnrpEventPollOptions, NnrpMessageType, type NnrpOperationLifecycleEvent, type NnrpResultPushMetadata, type NnrpRuntimeEvent, NnrpSchemaRegistry, type NnrpServerProviderRoutes, type NnrpSessionOpenMetadata, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeMetrics, type NnrpTransportProbeOptions, type NnrpTransportProvider, type NnrpTransportSelectionOptions, type NnrpTransportSelectionSummary, type NnrpTransportServer, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type PartialResultMetadata, type PressureMetadata, type ProgressMetadata, type RecoverableErrorMetadata, type ResultDropReasonMetadata, type RetryAfterMetadata, type RuntimeControlMetadata, type TraceContextMetadata } from "@nnrp/core";
 export interface NnrpNativeRuntimeCapabilities {
     readonly abiMajor: number;
     readonly abiMinor: number;
@@ -72,7 +72,7 @@ export interface NnrpServerAcceptOptions {
     readonly timeoutMs?: number;
 }
 export interface NnrpListenOptions {
-    readonly endpoint: string | URL;
+    readonly endpoint: NnrpEndpoint;
     readonly providerRoutes?: NnrpServerProviderRoutes;
     readonly transports?: readonly NnrpNativeTransportProvider[];
     readonly transportPolicy?: NnrpTransportPolicy;
@@ -82,14 +82,6 @@ export interface NnrpNativeTransportProvider extends NnrpTransportProvider {
     readonly kind: NnrpTransportKind;
     probe(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
     listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer>;
-}
-export interface NnrpTransportSelectionOptions {
-    readonly peerManifest: NnrpCapabilityManifest;
-    readonly providers?: readonly NnrpNativeTransportProvider[];
-    readonly policy?: NnrpTransportPolicy;
-    readonly requestedMaxFrameBytes?: bigint;
-    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export interface NnrpNativeRuntimeBinding {
     readonly manifest: NnrpCapabilityManifest;
