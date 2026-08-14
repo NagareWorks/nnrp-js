@@ -8,7 +8,7 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "05dc6d8283d0941b129f1c5a93e399b97153d38b";
+const CONFORMANCE_REVISION = "0ae3bd5d8ecaa387822888868e8676f0a3596bcd";
 
 Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
   assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.22/g)?.length ?? 0, 2);
@@ -89,6 +89,7 @@ Deno.test("release validates the complete Preview4 adapter suite before publishi
   assertStringIncludes(releaseWorkflow, "uses: ./.conformance/.github/actions/run-conformance");
   assertStringIncludes(releaseWorkflow, "protocol-version: nnrp-1-preview4");
   assertStringIncludes(releaseWorkflow, "capabilities-path: conformance/nnrp-1-preview4.capabilities.json");
+  assertStringIncludes(releaseWorkflow, 'require-complete-capability-coverage: "true"');
   assertStringIncludes(releaseWorkflow, "deno task conformance:suite");
   const conformanceIndex = releaseWorkflow.indexOf("- name: Run suite-owned Preview4 adapter conformance");
   const publishIndex = releaseWorkflow.indexOf("- name: Publish packages");

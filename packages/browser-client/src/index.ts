@@ -1654,23 +1654,15 @@ function selectBrowserTransportProvider(
     peerSupportedTransports: manifest.transports,
     policy,
     candidateReadiness: descriptors.map((provider) => ({
-      kind: provider.transportId,
+      transportId: provider.transportId,
       providerId: provider.metadata.id,
       routeResolved,
       securitySatisfied,
       ...(!routeResolved || !securitySatisfied
         ? {
-          diagnostic: {
-            code: !routeResolved
-              ? "NNRP_BROWSER_PROVIDER_ROUTE_UNRESOLVED"
-              : "NNRP_BROWSER_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
-            message: !routeResolved
-              ? "Browser WebSocket provider route is unresolved."
-              : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
-            source: "transport" as const,
-            retryable: false,
-            transport: "websocket" as const,
-          },
+          diagnostic: !routeResolved
+            ? "Browser WebSocket provider route is unresolved."
+            : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
         }
         : {}),
     })),

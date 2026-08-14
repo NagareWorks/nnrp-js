@@ -79,7 +79,7 @@ export async function runNativeTransportSmoke(options: NativeTransportSmokeOptio
   const cells: NativeTransportSmokeCell[] = [];
   for (const transport of options.transports) {
     try {
-      await runNativeTransportCell(transport);
+      await verifyNativeTransportCell(transport);
       cells.push({ transport, status: "executed" });
     } catch (error) {
       cells.push({ transport, status: "failed", diagnostic: errorMessage(error) });
@@ -90,7 +90,7 @@ export async function runNativeTransportSmoke(options: NativeTransportSmokeOptio
   await writeNativeTransportSmokeResult(options.resultPath, cells);
 }
 
-async function runNativeTransportCell(transport: NativeTransportKind): Promise<void> {
+export async function verifyNativeTransportCell(transport: NativeTransportKind): Promise<void> {
   if (transport === "tcp") {
     const provider = createTcpTransportProvider();
     const packetEndpoint = await verifyPacketLoopback(provider, "127.0.0.1:0");

@@ -185,7 +185,15 @@ export function createBenchmarkReport(
         status: "measured",
         unit: "count",
         value: transport.rejected.length,
-        ...(transport.rejected[0]?.diagnostic === undefined ? {} : { diagnostic: transport.rejected[0].diagnostic }),
+        ...(transport.rejected[0]?.diagnostic === undefined ? {} : {
+          diagnostic: {
+            code: "NNRP_JS_TRANSPORT_REJECTION",
+            message: transport.rejected[0].diagnostic,
+            source: "transport" as const,
+            retryable: false,
+            transport: transport.rejected[0].transportId,
+          },
+        }),
       },
     ],
     diagnostics: [benchmarkDiagnostic(buildMode), ...transportDiagnostics(buildMode, transport)],
@@ -247,7 +255,7 @@ function createSdkTransportSelection(manifest: NnrpCapabilityManifest): NnrpTran
     peerSupportedTransports: peerManifest.transports,
     policy: "auto" as const,
     candidateReadiness: peerManifest.transports.map((kind) => ({
-      kind,
+      transportId: kind,
       providerId: `nnrp.transport.${kind}.benchmark`,
       routeResolved: true,
       securitySatisfied: true,
@@ -364,10 +372,10 @@ function transportDiagnostics(
     },
     ...transport.rejected.map((candidate): NnrpDiagnostic => ({
       code: "NNRP_JS_TRANSPORT_REJECTED",
-      message: `${buildMode} rejected ${candidate.kind}: ${candidate.reason}.`,
+      message: `${buildMode} rejected ${candidate.transportId}: ${candidate.reason}.`,
       source: "transport",
       retryable: candidate.reason === "local-unavailable",
-      transport: candidate.kind,
+      transport: candidate.transportId,
       ...(candidate.diagnostic === undefined ? {} : { cause: candidate.diagnostic }),
     })),
   ];

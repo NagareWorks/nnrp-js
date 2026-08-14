@@ -1002,38 +1002,24 @@ async function selectClientProvider(
   const candidateReadiness = descriptors.map((provider): NnrpTransportCandidateReadiness => {
     const resolution = resolutionByProviderId.get(provider.metadata.id);
     return {
-      kind: provider.transportId,
+      transportId: provider.transportId,
       providerId: provider.metadata.id,
       routeResolved: resolution?.rejectionReason !== "route-unresolved",
       securitySatisfied: resolution?.rejectionReason !== "security-unsatisfied",
       ...(resolution?.rejectionReason === undefined ? {} : {
-        diagnostic: {
-          code: resolution.rejectionReason === "route-unresolved"
-            ? "NNRP_NATIVE_PROVIDER_ROUTE_UNRESOLVED"
-            : "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
-          message: `${provider.transportId} client provider route is ${resolution.rejectionReason}.`,
-          source: "transport",
-          retryable: false,
-          transport: provider.transportId,
-        },
+        diagnostic: `${provider.transportId} client provider route is ${resolution.rejectionReason}.`,
       }),
     };
   });
   const probeObservations = samples.map(({ provider, metrics }): NnrpTransportProbeObservation =>
     metrics === undefined
       ? {
-        kind: provider.kind,
+        transportId: provider.kind,
         providerId: provider.metadata.id,
         state: "failed",
-        diagnostic: {
-          code: "NNRP_NATIVE_TRANSPORT_PROBE_FAILED",
-          message: `${provider.kind} transport probe failed.`,
-          source: "transport",
-          retryable: true,
-          transport: provider.kind,
-        },
+        diagnostic: `${provider.kind} transport probe failed.`,
       }
-      : { kind: provider.kind, providerId: provider.metadata.id, state: "succeeded", metrics }
+      : { transportId: provider.kind, providerId: provider.metadata.id, state: "succeeded", metrics }
   );
   const selection = selectTransport(descriptors, {
     peerSupportedTransports: peerSupportedKinds,

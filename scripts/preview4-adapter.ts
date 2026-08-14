@@ -1,19 +1,50 @@
 import {
+  CacheAckStatus,
+  CacheInvalidateScope,
   CacheMissReason,
   CacheReuseScope,
+  decodeCacheAckMetadata,
   decodeCacheInvalidateMetadata,
+  decodeCachePutMetadata,
+  decodeClientHelloMetadata,
+  decodeFlowUpdateMetadata,
+  decodeFrameSubmitMetadata,
+  decodeObjectReferenceBlock,
+  decodeResultHintMetadata,
+  decodeResultPushMetadata,
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
+  decodeSessionPatchAckMetadata,
+  decodeTransportProbeAckMetadata,
+  decodeTransportProbeMetadata,
   decodeTypedPayloadDescriptor,
+  encodeCacheAckMetadata,
   encodeCacheInvalidateMetadata,
+  encodeCachePutMetadata,
+  encodeClientHelloMetadata,
+  encodeFlowUpdateMetadata,
+  encodeFrameSubmitMetadata,
+  encodeObjectReferenceBlock,
+  encodeResultHintMetadata,
+  encodeResultPushMetadata,
   encodeRuntimeControlMetadata,
   encodeRuntimeObjectMetadata,
   encodeRuntimeObjectMetadataSegments,
+  encodeSessionPatchAckMetadata,
+  encodeTransportProbeAckMetadata,
+  encodeTransportProbeMetadata,
   encodeTypedPayloadDescriptor,
   ErrorScope,
   MemoryLocationHint,
+  NnrpBackpressureLevel,
+  NnrpCacheObjectKind,
+  NnrpFlowScopeKind,
+  NnrpFlowUpdateReason,
   NnrpMessageType,
   NnrpPayloadKind,
+  NnrpResultHintBudgetPolicy,
+  NnrpResultHintCongestionState,
+  NnrpResultHintReason,
   NnrpTypedPayloadDescriptorFlags,
   ObjectReleaseReason,
   OwnershipHint,
@@ -21,6 +52,7 @@ import {
   RuntimeObjectKind,
   type RuntimeObjectMetadata,
   RuntimeRole,
+  selectTransport,
 } from "@nnrp/core";
 import {
   parsePreview4AdapterPlan,
@@ -48,6 +80,7 @@ export interface Preview4AdapterResults {
 
 export interface Preview4AdapterExecutionOptions {
   readonly verifyHeader?: () => void | Promise<void>;
+  readonly verifyTransportSession?: (transport: "tcp" | "quic") => void | Promise<void>;
   readonly evidenceDirectory?: string;
 }
 
@@ -57,6 +90,7 @@ export async function executePreview4AdapterPlan(
 ): Promise<Preview4AdapterResults> {
   const plan = parsePreview4AdapterPlan(value);
   const evidenceDirectory = options.evidenceDirectory ?? plan.artifacts.evidence_dir;
+  const frozenCases = new Map(plan.cases.map((entry) => [entry.id, entry.parameters]));
   const results: Preview4AdapterCaseResult[] = [];
   for (const { id, parameters } of plan.cases) {
     results.push(
@@ -64,7 +98,9 @@ export async function executePreview4AdapterPlan(
         id as Preview4AdapterCaseId,
         evidenceDirectory,
         options.verifyHeader,
+        options.verifyTransportSession,
         parameters,
+        frozenCases,
       ),
     );
   }
@@ -92,10 +128,12 @@ export async function executePreview4ImplementedCase(
   caseId: Preview4ImplementedCaseId,
   evidenceDirectory: string,
   verifyHeader: (() => void | Promise<void>) | undefined,
+  verifyTransportSession: ((transport: "tcp" | "quic") => void | Promise<void>) | undefined = undefined,
   parameters: Readonly<Record<string, unknown>> = {},
+  frozenCases: ReadonlyMap<string, Readonly<Record<string, unknown>>> = new Map(),
 ): Promise<Preview4AdapterCaseResult> {
   try {
-    const evidence = await CASE_EXECUTORS[caseId](parameters, verifyHeader);
+    const evidence = await CASE_EXECUTORS[caseId](parameters, verifyHeader, verifyTransportSession, frozenCases);
     await Deno.mkdir(evidenceDirectory, { recursive: true });
     const evidencePath = `${evidenceDirectory}/${safeFileStem(caseId)}.json`;
     await Deno.writeTextFile(evidencePath, `${JSON.stringify(evidence, bigintReplacer, 2)}\n`);
@@ -121,6 +159,8 @@ const CASE_EXECUTORS: Readonly<
     (
       parameters: Readonly<Record<string, unknown>>,
       verifyHeader?: () => void | Promise<void>,
+      verifyTransportSession?: (transport: "tcp" | "quic") => void | Promise<void>,
+      frozenCases?: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
     ) => unknown | Promise<unknown>
   >
 > = {
@@ -155,6 +195,52 @@ const CASE_EXECUTORS: Readonly<
     }
     return { case_id: "l0.header.fixed_shape.golden", action: "native-runtime-frame-roundtrip", header_bytes: 40 };
   },
+  "l0.control.client_hello.golden": (parameters) =>
+    frozenCodecEvidence(
+      "l0.control.client_hello.golden",
+      parameters,
+      "metadata_hex",
+      decodeClientHelloMetadata,
+      encodeClientHelloMetadata,
+    ),
+  "l0.control.session_patch_ack.golden": (parameters) =>
+    frozenCodecEvidence(
+      "l0.control.session_patch_ack.golden",
+      parameters,
+      "metadata_hex",
+      decodeSessionPatchAckMetadata,
+      encodeSessionPatchAckMetadata,
+    ),
+  "l0.flow_update.packet.golden": (parameters) =>
+    frozenPacketEvidence(
+      "l0.flow_update.packet.golden",
+      parameters,
+      decodeFlowUpdateMetadata,
+      encodeFlowUpdateMetadata,
+    ),
+  "l0.result_hint.packet.golden": (parameters) =>
+    frozenPacketEvidence(
+      "l0.result_hint.packet.golden",
+      parameters,
+      decodeResultHintMetadata,
+      encodeResultHintMetadata,
+    ),
+  "l0.frame_submit.metadata.golden": (parameters) =>
+    frozenCodecEvidence(
+      "l0.frame_submit.metadata.golden",
+      parameters,
+      "metadata_hex",
+      decodeFrameSubmitMetadata,
+      encodeFrameSubmitMetadata,
+    ),
+  "l0.result_push.metadata.golden": (parameters) =>
+    frozenCodecEvidence(
+      "l0.result_push.metadata.golden",
+      parameters,
+      "metadata_hex",
+      decodeResultPushMetadata,
+      encodeResultPushMetadata,
+    ),
   "l0.body_region.prelude.golden": (parameters) => {
     const expected = hexParameter(parameters, "metadata_hex");
     const view = new DataView(expected.buffer, expected.byteOffset, expected.byteLength);
@@ -166,6 +252,14 @@ const CASE_EXECUTORS: Readonly<
     assertBytes(encoded, expected, "NNRP/1 baseline body-region prelude");
     return { case_id: "l0.body_region.prelude.golden", action: "baseline-body-prelude-roundtrip" };
   },
+  "l0.object_reference.block.golden": (parameters) =>
+    frozenCodecEvidence(
+      "l0.object_reference.block.golden",
+      parameters,
+      "metadata_hex",
+      decodeObjectReferenceBlock,
+      encodeObjectReferenceBlock,
+    ),
   "l0.typed_payload.descriptor.golden": (parameters) => {
     const expected = hexParameter(parameters, "descriptor_hex");
     const descriptor = decodeBaselineTypedPayloadDescriptor(expected);
@@ -202,6 +296,139 @@ const CASE_EXECUTORS: Readonly<
     );
     return { case_id: "l0.typed_payload.frame_regions.golden", action: "baseline-frame-regions-roundtrip" };
   },
+  "l1.flow_update.metadata.validation": () => {
+    const metadata = {
+      scopeKind: NnrpFlowScopeKind.Session,
+      updateReason: NnrpFlowUpdateReason.Congestion,
+      backpressureLevel: NnrpBackpressureLevel.Hard,
+      connectionCredit: 0,
+      sessionCredit: 1,
+      operationCredit: 0,
+      operationId: 0n,
+      retryAfterMs: 40,
+      creditEpoch: 5,
+      flowFlags: 0x03,
+    };
+    assertEquivalent(decodeFlowUpdateMetadata(encodeFlowUpdateMetadata(metadata)), metadata, "FLOW_UPDATE metadata");
+    expectProtocolFailure(() => encodeFlowUpdateMetadata({ ...metadata, flowFlags: 0x01 }), "FLOW_UPDATE retry flag");
+    return { case_id: "l1.flow_update.metadata.validation", action: "flow-update-validation" };
+  },
+  "l1.result_hint.metadata.validation": () => {
+    const metadata = {
+      appliedBudgetPolicy: NnrpResultHintBudgetPolicy.Partial,
+      congestionState: NnrpResultHintCongestionState.Elevated,
+      reason: NnrpResultHintReason.ServerBusy,
+      retryAfterMs: 20,
+    };
+    const encoded = encodeResultHintMetadata(metadata);
+    assertEquivalent(decodeResultHintMetadata(encoded), metadata, "RESULT_HINT metadata");
+    const invalid = encoded.slice();
+    new DataView(invalid.buffer).setUint32(8, 99, true);
+    expectProtocolFailure(() => decodeResultHintMetadata(invalid), "RESULT_HINT reason");
+    return { case_id: "l1.result_hint.metadata.validation", action: "result-hint-validation" };
+  },
+  "l1.cache.lifecycle.roundtrip": () => {
+    const cachePut = {
+      cacheNamespace: 1,
+      cacheKeyHi: 0x01020304n,
+      cacheKeyLo: 0x05060708n,
+      objectKind: NnrpCacheObjectKind.CodecTable,
+      ttlMs: 15_000,
+      objectBytes: 2_048,
+      codecBitmap: 3,
+      flags: 3,
+    };
+    const cacheAck = {
+      cacheNamespace: 1,
+      cacheKeyHi: 0x01020304n,
+      cacheKeyLo: 0x05060708n,
+      status: CacheAckStatus.Accepted,
+      acceptedTtlMs: 15_000,
+      maxObjectBytes: 8_192,
+      detailCode: 0,
+    };
+    const invalidate = {
+      invalidateScope: CacheInvalidateScope.ObjectKey,
+      cacheNamespace: 1,
+      cacheKeyHi: 0x01020304n,
+      cacheKeyLo: 0x05060708n,
+      reasonCode: 2,
+    };
+    assertEquivalent(decodeCachePutMetadata(encodeCachePutMetadata(cachePut)), cachePut, "CACHE_PUT metadata");
+    assertEquivalent(decodeCacheAckMetadata(encodeCacheAckMetadata(cacheAck)), cacheAck, "CACHE_ACK metadata");
+    assertEquivalent(
+      decodeCacheInvalidateMetadata(encodeCacheInvalidateMetadata(invalidate)),
+      invalidate,
+      "CACHE_INVALIDATE metadata",
+    );
+    return { case_id: "l1.cache.lifecycle.roundtrip", action: "cache-lifecycle-roundtrip", message_count: 3 };
+  },
+  "l1.transport_probe.metadata.roundtrip": () => {
+    const probe = { probeId: 7, probePayloadBytes: 1_200, clientSendTsUs: 100_000n };
+    const ack = { probeId: 7, serverRecvTsUs: 100_800n };
+    assertEquivalent(decodeTransportProbeMetadata(encodeTransportProbeMetadata(probe)), probe, "TRANSPORT_PROBE");
+    assertEquivalent(
+      decodeTransportProbeAckMetadata(encodeTransportProbeAckMetadata(ack)),
+      ack,
+      "TRANSPORT_PROBE_ACK",
+    );
+    return { case_id: "l1.transport_probe.metadata.roundtrip", action: "transport-probe-roundtrip", probe_id: 7 };
+  },
+  "l1.frame_submit.message.parse_emit": (_parameters, _verifyHeader, _verifyTransportSession, frozenCases) => {
+    const frozen = frozenParameter(frozenCases, "l0.frame_submit.metadata.golden", "metadata_hex");
+    const metadata = decodeFrameSubmitMetadata(frozen);
+    assertBytes(encodeFrameSubmitMetadata(metadata), frozen, "FRAME_SUBMIT metadata");
+    const descriptor = {
+      profileId: 2,
+      payloadKind: NnrpPayloadKind.TokenChunk,
+      descriptorFlags: NnrpTypedPayloadDescriptorFlags.Partial,
+      schemaId: 0x1001,
+      schemaVersion: 3,
+      streamSemantics: 2,
+      offset: 0,
+      length: 3,
+    };
+    assertEquivalent(
+      decodeTypedPayloadDescriptor(encodeTypedPayloadDescriptor(descriptor)),
+      descriptor,
+      "typed payload",
+    );
+    return { case_id: "l1.frame_submit.message.parse_emit", action: "frame-submit-parse-emit" };
+  },
+  "l1.result_push.message.parse_emit": (_parameters, _verifyHeader, _verifyTransportSession, frozenCases) => {
+    const frozen = frozenParameter(frozenCases, "l0.result_push.metadata.golden", "metadata_hex");
+    const metadata = decodeResultPushMetadata(frozen);
+    assertBytes(encodeResultPushMetadata(metadata), frozen, "RESULT_PUSH metadata");
+    const reference = {
+      objectKind: NnrpCacheObjectKind.TileIndexBlock,
+      refFlags: 0,
+      cacheNamespace: 7,
+      cacheKeyHi: 0x11223344n,
+      cacheKeyLo: 0x55667788n,
+    };
+    assertEquivalent(decodeObjectReferenceBlock(encodeObjectReferenceBlock(reference)), reference, "object reference");
+    return { case_id: "l1.result_push.message.parse_emit", action: "result-push-parse-emit" };
+  },
+  "l1.result_push.object_reference.resolve": () => {
+    const reference = {
+      objectKind: NnrpCacheObjectKind.TileIndexBlock,
+      refFlags: 0,
+      cacheNamespace: 7,
+      cacheKeyHi: 0x11223344n,
+      cacheKeyLo: 0x55667788n,
+    };
+    const decoded = decodeObjectReferenceBlock(encodeObjectReferenceBlock(reference));
+    const key = `${decoded.cacheNamespace}:${decoded.cacheKeyHi}:${decoded.cacheKeyLo}`;
+    const cache = new Map([[key, bytes("tile-index")]]);
+    assertBytes(cache.get(key)!, bytes("tile-index"), "resolved object reference");
+    cache.clear();
+    if (cache.get(key) !== undefined) throw new Error("missing object reference did not surface as a cache miss");
+    return {
+      case_id: "l1.result_push.object_reference.resolve",
+      action: "result-push-object-reference-resolve",
+      cache_miss_observed: true,
+    };
+  },
   "l1.typed_payload.region.pack": () => {
     const payloadRegion = bytes("tokevent");
     const descriptors = [
@@ -212,6 +439,69 @@ const CASE_EXECUTORS: Readonly<
     const decoded = decodeBaselineTypedPayloadRegion(descriptorRegion, payloadRegion);
     assertEquivalent(decoded, descriptors, "NNRP/1 baseline typed-payload region pack");
     return { case_id: "l1.typed_payload.region.pack", action: "baseline-region-pack", offsets: [0, 3] };
+  },
+  "l3.transport.probe.selection": async () => {
+    const [{ createTcpTransportProvider }, { createQuicTransportProvider }] = await Promise.all([
+      import("@nnrp/transport-tcp"),
+      import("@nnrp/transport-quic"),
+    ]);
+    const providers = [createTcpTransportProvider(), createQuicTransportProvider()];
+    if (providers.some((provider) => !provider.localAvailable)) {
+      throw new Error("transport probe selection requires installed TCP and QUIC providers");
+    }
+    const readiness = providers.map((provider) => ({
+      transportId: provider.kind,
+      providerId: provider.metadata.id,
+      routeResolved: true,
+      securitySatisfied: true,
+    }));
+    const metrics = (medianRttMicroseconds: bigint) => ({
+      sampleCount: 1,
+      successCount: 1,
+      medianThroughputBytesPerSecond: 10_000n,
+      medianRttMicroseconds,
+    });
+    const selected = selectTransport(providers.map(({ descriptor }) => descriptor), {
+      peerSupportedTransports: ["tcp", "quic"],
+      policy: "auto",
+      candidateReadiness: readiness,
+      probeObservations: providers.map((provider) => ({
+        transportId: provider.kind,
+        providerId: provider.metadata.id,
+        state: "succeeded" as const,
+        metrics: metrics(provider.kind === "quic" ? 800n : 1_500n),
+      })),
+    });
+    if (selected.selectedProvider.transportId !== "quic") {
+      throw new Error("transport probe did not prefer the lower-latency QUIC provider");
+    }
+    const fallback = selectTransport(providers.map(({ descriptor }) => descriptor), {
+      peerSupportedTransports: ["tcp", "quic"],
+      policy: "prefer-quic",
+      candidateReadiness: readiness,
+      probeObservations: providers.map((provider) =>
+        provider.kind === "quic"
+          ? { transportId: provider.kind, providerId: provider.metadata.id, state: "failed" as const }
+          : {
+            transportId: provider.kind,
+            providerId: provider.metadata.id,
+            state: "succeeded" as const,
+            metrics: metrics(900n),
+          }
+      ),
+    });
+    if (fallback.selectedProvider.transportId !== "tcp") {
+      throw new Error("transport probe did not fall back to TCP after QUIC failure");
+    }
+    return { case_id: "l3.transport.probe.selection", action: "transport-probe-selection" };
+  },
+  "l3.transport.tcp.session_smoke": async (_parameters, _verifyHeader, verifyTransportSession) => {
+    await verifyAdapterTransportSession("tcp", verifyTransportSession);
+    return { case_id: "l3.transport.tcp.session_smoke", action: "native-role-session-loopback" };
+  },
+  "l3.transport.quic.session_smoke": async (_parameters, _verifyHeader, verifyTransportSession) => {
+    await verifyAdapterTransportSession("quic", verifyTransportSession);
+    return { case_id: "l3.transport.quic.session_smoke", action: "native-role-session-loopback" };
   },
   "l0.typed_payload.descriptor.current.golden": (parameters) => {
     const descriptor = {
@@ -472,6 +762,62 @@ const CASE_EXECUTORS: Readonly<
 
 if (Object.keys(CASE_EXECUTORS).length !== PREVIEW4_IMPLEMENTED_CASE_IDS.length) {
   throw new Error("Preview4 adapter case dispatch is not exhaustive");
+}
+
+function frozenCodecEvidence<T>(
+  caseId: Preview4ImplementedCaseId,
+  parameters: Readonly<Record<string, unknown>>,
+  parameterName: string,
+  decode: (encoded: Uint8Array) => T,
+  encode: (metadata: T) => Uint8Array,
+): Record<string, unknown> {
+  const frozen = hexParameter(parameters, parameterName);
+  assertBytes(encode(decode(frozen)), frozen, `${caseId} frozen bytes`);
+  return { case_id: caseId, action: "released-codec-roundtrip", bytes: frozen.byteLength };
+}
+
+function frozenPacketEvidence<T>(
+  caseId: Preview4ImplementedCaseId,
+  parameters: Readonly<Record<string, unknown>>,
+  decode: (encoded: Uint8Array) => T,
+  encode: (metadata: T) => Uint8Array,
+): Record<string, unknown> {
+  const frozen = hexParameter(parameters, "packet_hex");
+  if (frozen.byteLength <= 40) throw new RangeError(`${caseId} packet must include metadata after the common header`);
+  const emitted = concat(frozen.slice(0, 40), encode(decode(frozen.slice(40))));
+  assertBytes(emitted, frozen, `${caseId} frozen packet`);
+  return { case_id: caseId, action: "released-packet-codec-roundtrip", bytes: frozen.byteLength };
+}
+
+function frozenParameter(
+  frozenCases: ReadonlyMap<string, Readonly<Record<string, unknown>>> | undefined,
+  caseId: string,
+  name: string,
+): Uint8Array {
+  const parameters = frozenCases?.get(caseId);
+  if (parameters === undefined) throw new Error(`suite plan does not contain required frozen case ${caseId}`);
+  return hexParameter(parameters, name);
+}
+
+function expectProtocolFailure(operation: () => unknown, label: string): void {
+  try {
+    operation();
+  } catch {
+    return;
+  }
+  throw new Error(`${label} accepted invalid metadata`);
+}
+
+async function verifyAdapterTransportSession(
+  transport: "tcp" | "quic",
+  verifier: ((transport: "tcp" | "quic") => void | Promise<void>) | undefined,
+): Promise<void> {
+  if (verifier !== undefined) {
+    await verifier(transport);
+    return;
+  }
+  const { verifyNativeTransportCell } = await import("./check-native-transport-loopback.ts");
+  await verifyNativeTransportCell(transport);
 }
 
 function roundTripControl(

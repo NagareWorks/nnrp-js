@@ -264,7 +264,7 @@ Deno.test("@nnrp/browser-client selects its installed compatible browser provide
     peerSupportedTransports: peer.transports,
     policy: "auto",
     candidateReadiness: [{
-      kind: "websocket",
+      transportId: "websocket",
       providerId: "browser.preferred",
       routeResolved: true,
       securitySatisfied: true,

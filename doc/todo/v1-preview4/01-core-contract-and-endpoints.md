@@ -64,7 +64,7 @@
   - [x] Export validated `NnrpEndpoint` and `NnrpProviderEndpoint` values instead of projecting raw `URL` or provider
         strings as the frozen endpoint types.
   - [x] Export `NnrpTransportProviderDescriptor`, `NnrpTransportSelectionOptions`, and the exact frozen
-        `NnrpTransportSelection` result shape.
+        `NnrpTransportSelection` result shape, keeping provider-owned `name` distinct from protocol `transportId`.
   - [x] Export `NnrpConnectionLifecycle` and `NnrpSessionLifecycle` with the frozen states, counters, and transition
         invariants.
   - [x] Update selection options, candidate diagnostics, and endpoint resolution results without duplicate role-local

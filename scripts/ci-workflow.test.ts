@@ -12,8 +12,8 @@ const browserRoleIntegration = await Deno.readTextFile(
   "packages/browser-client/test/browser-role.integration.test.ts",
 );
 
-const DOC_REVISION = "ec9c801c5249c3d5efd923f108ae4ebd74b11aa9";
-const CONFORMANCE_REVISION = "05dc6d8283d0941b129f1c5a93e399b97153d38b";
+const DOC_REVISION = "3439ded0d318bd736f6485b17f2563fae77627bf";
+const CONFORMANCE_REVISION = "0ae3bd5d8ecaa387822888868e8676f0a3596bcd";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
@@ -67,12 +67,25 @@ Deno.test("CI gates Preview4 with suite-owned adapter and wire conformance", () 
   assertStringIncludes(ciWorkflow, "uses: ./.conformance/.github/actions/run-conformance");
   assertStringIncludes(ciWorkflow, "protocol-version: nnrp-1-preview4");
   assertStringIncludes(ciWorkflow, "capabilities-path: conformance/nnrp-1-preview4.capabilities.json");
+  assertStringIncludes(ciWorkflow, 'require-complete-capability-coverage: "true"');
   assertStringIncludes(ciWorkflow, "deno task conformance:suite");
   assertStringIncludes(ciWorkflow, "- suite-conformance");
   assertStringIncludes(ciWorkflow, "suite-conformance did not pass");
   assertStringIncludes(preview4Adapter, "const CASE_EXECUTORS");
   assertStringIncludes(preview4Contract, '"l1.control.recoverable-error"');
-  assertEquals(JSON.parse(preview4Capabilities).supports.length, 19);
+  const capabilities = JSON.parse(preview4Capabilities).supports;
+  assertEquals(capabilities.length, 28);
+  assertEquals(capabilities.slice(0, 9), [
+    "handshake.basic",
+    "session.open_close",
+    "session.resume",
+    "flow_update",
+    "frame_submit.tensor.inline",
+    "result_push.basic",
+    "cache.lifecycle",
+    "transport.tcp",
+    "transport.quic",
+  ]);
 });
 
 Deno.test("CI compares the public API against the frozen nnrp-doc contract", () => {

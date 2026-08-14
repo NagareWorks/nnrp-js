@@ -222,13 +222,13 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
     policy: "auto",
     candidateReadiness: [
       {
-        kind: "tcp",
+        transportId: "tcp",
         providerId: "nnrp.transport.tcp.native",
         routeResolved: true,
         securitySatisfied: true,
       },
       {
-        kind: "quic",
+        transportId: "quic",
         providerId: "nnrp.transport.quic.native",
         routeResolved: true,
         securitySatisfied: true,
@@ -236,7 +236,7 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
     ],
     probeObservations: [
       {
-        kind: "tcp",
+        transportId: "tcp",
         providerId: "nnrp.transport.tcp.native",
         state: "succeeded",
         metrics: {
@@ -247,7 +247,7 @@ Deno.test("@nnrp/native-client selects the best installed transport provider", a
         },
       },
       {
-        kind: "quic",
+        transportId: "quic",
         providerId: "nnrp.transport.quic.native",
         state: "succeeded",
         metrics: {
@@ -521,13 +521,13 @@ Deno.test("@nnrp/native-client diagnoses configured routes whose providers are n
           createTcpTransportProvider({ available: false, binding: fakeTransportBinding("tcp") }),
         ],
       }),
-    NnrpTransportError,
+    NnrpTransportSelectionError,
   );
-  assertEquals(error.diagnostic.code, "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT");
-  assertEquals(error instanceof NnrpTransportSelectionError, true);
+  assertEquals(error.code, "NO_VIABLE_TRANSPORT");
+  assertEquals(error.diagnostic, "No viable transport provider remains after applying policy and evidence.");
   assertEquals(
-    (error as NnrpTransportSelectionError).candidates.map((candidate) => [
-      candidate.kind,
+    error.candidates.map((candidate) => [
+      candidate.transportId,
       candidate.rejectionReason,
     ]),
     [

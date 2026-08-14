@@ -52,7 +52,7 @@ permissions:
   id-token: write
 
 env:
-  NNRP_CONFORMANCE_SOURCE_COMMIT: 05dc6d8283d0941b129f1c5a93e399b97153d38b
+  NNRP_CONFORMANCE_SOURCE_COMMIT: 0ae3bd5d8ecaa387822888868e8676f0a3596bcd
   NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.22' }}
   NNRP_JS_RUST_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_run_id || '31666415612' }}
   NNRP_JS_RUST_ARTIFACT_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_commit || '295f5b65ac71885b5c1b54d927b2595005038481' }}
@@ -147,6 +147,7 @@ jobs:
         with:
           protocol-version: nnrp-1-preview4
           capabilities-path: conformance/nnrp-1-preview4.capabilities.json
+          require-complete-capability-coverage: "true"
           working-directory: .
           artifact-name: nnrp-js-preview4-release-conformance
           adapter-command: >-

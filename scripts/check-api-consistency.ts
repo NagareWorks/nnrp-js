@@ -16,6 +16,10 @@ import { EXPECTED_JAVASCRIPT_PROJECTIONS, projectionMapsEqual } from "./frozen-j
 
 const failures: string[] = [];
 
+function arraysEqual<T>(left: readonly T[] | undefined, right: readonly T[]): boolean {
+  return left !== undefined && left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 interface FrozenContractField {
   readonly name: string;
   readonly type: string;
@@ -23,9 +27,13 @@ interface FrozenContractField {
 
 interface FrozenContractType {
   readonly fields: readonly FrozenContractField[];
+  readonly nameSemantics?: string;
   readonly variants?: readonly string[];
   readonly variantTypes?: Readonly<Record<string, string | null>>;
   readonly validation?: Readonly<Record<string, string>>;
+  readonly stateConstraint?: readonly string[];
+  readonly peerSupportedTransportsSemantics?: string;
+  readonly requestedMaxFrameBytesZeroRule?: string;
 }
 
 type FrozenProjectionValue = string | readonly string[] | FrozenProjectionMap;
@@ -107,6 +115,8 @@ async function checkFrozenMachineContract(): Promise<void> {
     "@nnrp/native-server": nativeServerDeclaration,
   });
   checkBaselineMetadataCodecExports(contract.languageProjections.javascript, coreDeclaration);
+  checkFrozenTransportSurfaces(contract, coreSource);
+  checkFrozenTransportSurfaces(contract, coreDeclaration);
 
   checkProjection(contract, "runtimeFrameHeader", "@nnrp/core.NnrpRuntimeFrameHeader");
   checkProjection(contract, "runtimeEvent", "@nnrp/core.NnrpRuntimeEvent");
@@ -151,6 +161,7 @@ async function checkFrozenMachineContract(): Promise<void> {
       traceId: "bigint",
     },
   );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportProviderCost", []);
   checkInterfaceFields(
     coreSource,
     "NnrpRuntimeEvent",
@@ -298,6 +309,175 @@ function checkFrozenDataPlaneValidation(contract: FrozenSdkContract, coreSource:
     '"NNRP_RESULT_PARTIAL_COVERAGE_INVALID"',
     '"NNRP_RESULT_TENSOR_COVERAGE_INVALID"',
     '"NNRP_RESULT_TENSOR_FIELDS_INVALID"',
+  ]);
+}
+
+function checkFrozenTransportSurfaces(contract: FrozenSdkContract, coreSource: string): void {
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportProviderCost",
+    contractFields(contract, "ProviderCost"),
+    { modelId: "number", units: "bigint" },
+  );
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportProviderLimits",
+    contractFields(contract, "ProviderLimits"),
+    { maxFrameBytes: "bigint" },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportProviderLimits", []);
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportProviderMetadata",
+    contractFields(contract, "TransportProviderMetadata"),
+    {
+      id: "string",
+      cost: "NnrpTransportProviderCost",
+      preferenceRank: "number",
+      limits: "NnrpTransportProviderLimits",
+      limitations: "readonly NnrpTransportProviderLimitation[]",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportProviderMetadata", []);
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportProviderDescriptor",
+    contractFields(contract, "TransportProviderDescriptor"),
+    {
+      name: "string",
+      version: "string",
+      transportId: "NnrpTransportKind",
+      kind: "NnrpTransportProviderKind",
+      available: "boolean",
+      libraryPath: "string",
+      metadata: "NnrpTransportProviderMetadata",
+      diagnostic: "string",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportProviderDescriptor", ["libraryPath", "diagnostic"]);
+  if (
+    contract.types.TransportProviderDescriptor?.nameSemantics !==
+      "provider-owned package or display name; protocol transport identity is transport_id and selection must not derive it from name"
+  ) {
+    failures.push("frozen TransportProviderDescriptor name semantics drifted");
+  }
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportCandidateReadiness",
+    contractFields(contract, "TransportCandidateReadiness"),
+    {
+      transportId: "NnrpTransportKind",
+      providerId: "string",
+      routeResolved: "boolean",
+      securitySatisfied: "boolean",
+      diagnostic: "string",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportCandidateReadiness", ["diagnostic"]);
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportProbeMetrics",
+    ["sampleCount", "successCount", "medianThroughputBytesPerSecond", "medianRttMicroseconds"],
+    {
+      sampleCount: "number",
+      successCount: "number",
+      medianThroughputBytesPerSecond: "bigint",
+      medianRttMicroseconds: "bigint",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportProbeMetrics", []);
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportProbeObservation",
+    contractFields(contract, "TransportProbeObservation"),
+    {
+      transportId: "NnrpTransportKind",
+      providerId: "string",
+      state: '"succeeded" | "failed"',
+      metrics: "NnrpTransportProbeMetrics",
+      diagnostic: "string",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportProbeObservation", ["metrics", "diagnostic"]);
+  if (!arraysEqual(contract.types.TransportProbeObservation?.stateConstraint, ["succeeded", "failed"])) {
+    failures.push("frozen TransportProbeObservation state constraint must remain succeeded or failed");
+  }
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportCandidate",
+    contractFields(contract, "TransportCandidate"),
+    {
+      transportId: "NnrpTransportKind",
+      provider: "NnrpTransportProviderMetadata",
+      localAvailable: "boolean",
+      peerSupported: "boolean",
+      withinLimits: "boolean",
+      probeState: "NnrpTransportProbeState",
+      probe: "NnrpTransportProbeMetrics",
+      selectionRank: "number",
+      rejectionReason: "NnrpTransportRejectionReason",
+      diagnostic: "string",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportCandidate", [
+    "probe",
+    "selectionRank",
+    "rejectionReason",
+    "diagnostic",
+  ]);
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportSelection",
+    contractFields(contract, "TransportSelection"),
+    {
+      selectedProvider: "NnrpTransportProviderDescriptor",
+      candidates: "readonly NnrpTransportCandidate[]",
+      policy: "NnrpTransportPolicy",
+      diagnostic: "string",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportSelection", ["diagnostic"]);
+  checkInterfaceFields(
+    coreSource,
+    "NnrpTransportSelectionOptions",
+    contractFields(contract, "TransportSelectionOptions"),
+    {
+      peerSupportedTransports: "readonly NnrpTransportKind[]",
+      policy: "NnrpTransportPolicy",
+      requestedMaxFrameBytes: "bigint",
+      candidateReadiness: "readonly NnrpTransportCandidateReadiness[]",
+      probeObservations: "readonly NnrpTransportProbeObservation[]",
+    },
+  );
+  checkOptionalInterfaceFields(coreSource, "NnrpTransportSelectionOptions", ["requestedMaxFrameBytes"]);
+  const selectionOptionsContract = contract.types.TransportSelectionOptions;
+  if (
+    selectionOptionsContract?.peerSupportedTransportsSemantics !==
+      "set; duplicates have no effect and input order is not semantically significant"
+  ) {
+    failures.push("frozen peerSupportedTransports set semantics drifted");
+  }
+  if (
+    selectionOptionsContract?.requestedMaxFrameBytesZeroRule !==
+      "zero is a valid requested size and must not be rejected or treated as absent"
+  ) {
+    failures.push("frozen requestedMaxFrameBytes zero rule drifted");
+  }
+  checkClassFields(
+    coreSource,
+    "NnrpTransportSelectionError",
+    ["code", "policy", "transportId", "candidates"],
+    {
+      code: "NnrpTransportSelectionErrorCode",
+      policy: "NnrpTransportPolicy",
+      transportId: "NnrpTransportKind",
+      candidates: "readonly NnrpTransportCandidate[]",
+    },
+    ["policy", "transportId"],
+  );
+  checkRequiredSourceFragments("NnrpTransportSelectionError", coreSource, [
+    "extends NnrpTransportError<string>",
+    "diagnostic: string",
   ]);
 }
 
@@ -922,6 +1102,44 @@ function checkInterfaceFields(
   }
 }
 
+function checkOptionalInterfaceFields(
+  source: string,
+  interfaceName: string,
+  expectedOptionalFields: readonly string[],
+): void {
+  const declaration = interfaceDeclaration(source, interfaceName);
+  if (declaration === undefined) return;
+  const actual = [...declaration.matchAll(/readonly\s+([A-Za-z0-9_]+)\?\s*:/g)].map((match) => match[1]!);
+  checkExactMembers(`${interfaceName} optional`, actual, expectedOptionalFields);
+}
+
+function checkClassFields(
+  source: string,
+  className: string,
+  expectedFields: readonly string[],
+  expectedTypes: Readonly<Record<string, string>>,
+  expectedOptionalFields: readonly string[] = [],
+): void {
+  const declaration = classDeclaration(source, className);
+  if (declaration === undefined) return;
+  const constructorIndex = declaration.search(/(?:public\s+)?constructor\s*\(/);
+  const fieldsSource = constructorIndex < 0 ? declaration : declaration.slice(0, constructorIndex);
+  const actual = new Map<string, string>();
+  const optional: string[] = [];
+  for (const match of fieldsSource.matchAll(/(?:public\s+)?readonly\s+([A-Za-z0-9_]+)(\?)?\s*:\s*([^;]+);/g)) {
+    actual.set(match[1]!, normalizeType(match[3]!));
+    if (match[2] !== undefined) optional.push(match[1]!);
+  }
+  checkExactMembers(className, [...actual.keys()], expectedFields);
+  checkExactMembers(`${className} optional`, optional, expectedOptionalFields);
+  for (const [field, expectedType] of Object.entries(expectedTypes)) {
+    const actualType = actual.get(field);
+    if (actualType !== normalizeType(expectedType)) {
+      failures.push(`${className}.${field} must be ${expectedType}, received ${actualType ?? "missing"}`);
+    }
+  }
+}
+
 function checkTaggedUnion(
   source: string,
   typeName: string,
@@ -1024,9 +1242,14 @@ function interfaceDeclaration(source: string, interfaceName: string): string | u
 }
 
 function classDeclaration(source: string, className: string): string | undefined {
-  const declaredMarker = `export declare class ${className} {`;
-  const sourceMarker = `export class ${className} {`;
-  return bracedDeclaration(source, source.includes(declaredMarker) ? declaredMarker : sourceMarker, className);
+  const match = new RegExp(
+    `export\\s+(?:declare\\s+)?class\\s+${className}(?:<[^>{}]+>)?(?:\\s+extends\\s+[^\\{]+)?\\s*\\{`,
+  ).exec(source);
+  if (match === null) {
+    failures.push(`frozen JavaScript surface is missing ${className}`);
+    return undefined;
+  }
+  return bracedDeclaration(source, match[0], className);
 }
 
 function bracedDeclaration(source: string, marker: string, declarationName: string): string | undefined {
