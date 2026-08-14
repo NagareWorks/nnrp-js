@@ -1633,19 +1633,19 @@ export interface NnrpTransportProbeMetrics {
 }
 
 export interface NnrpTransportCandidateReadiness {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly providerId: string;
   readonly routeResolved: boolean;
   readonly securitySatisfied: boolean;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export interface NnrpTransportProbeObservation {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly providerId: string;
   readonly state: "succeeded" | "failed";
   readonly metrics?: NnrpTransportProbeMetrics;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export interface NnrpTransportClientSecurity {
@@ -1677,7 +1677,7 @@ export type NnrpClientProviderRoutes = Readonly<Partial<Record<NnrpTransportKind
 export type NnrpServerProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpServerProviderRoute>>>;
 
 export interface NnrpTransportCandidate {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly provider: NnrpTransportProviderMetadata;
   readonly localAvailable: boolean;
   readonly peerSupported: boolean;
@@ -1686,7 +1686,7 @@ export interface NnrpTransportCandidate {
   readonly probe?: NnrpTransportProbeMetrics;
   readonly selectionRank?: number;
   readonly rejectionReason?: NnrpTransportRejectionReason;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export interface NnrpTransportEndpoint {
@@ -1879,10 +1879,10 @@ export interface NnrpTransportSelectionSummary {
 }
 
 export interface NnrpRejectedTransportCandidate {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly provider: NnrpTransportProviderMetadata;
   readonly reason: NnrpTransportRejectionReason;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export const NNRP_STANDARD_INPUT_PROFILES = ["tensor", "token", "structured_event", "tool_delta"] as const;
@@ -2395,11 +2395,11 @@ export interface NnrpSessionPatchResult {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
-export class NnrpError extends Error {
-  public readonly diagnostic: NnrpDiagnostic;
+export class NnrpError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic> extends Error {
+  public readonly diagnostic: TDiagnostic;
 
-  public constructor(diagnostic: NnrpDiagnostic) {
-    super(diagnostic.message);
+  public constructor(diagnostic: TDiagnostic) {
+    super(typeof diagnostic === "string" ? diagnostic : diagnostic.message);
     this.name = "NnrpError";
     this.diagnostic = diagnostic;
   }
@@ -2412,23 +2412,26 @@ export class NnrpCapabilityError extends NnrpError {
   }
 }
 
-export class NnrpTransportError extends NnrpError {
-  public constructor(diagnostic: NnrpDiagnostic) {
+export class NnrpTransportError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic>
+  extends NnrpError<TDiagnostic> {
+  public constructor(diagnostic: TDiagnostic) {
     super(diagnostic);
     this.name = "NnrpTransportError";
   }
 }
 
-export class NnrpTransportSelectionError extends NnrpTransportError {
+export class NnrpTransportSelectionError extends NnrpTransportError<string> {
   public readonly code: NnrpTransportSelectionErrorCode;
   public readonly policy?: NnrpTransportPolicy;
+  public readonly transportId?: NnrpTransportKind;
   public readonly candidates: readonly NnrpTransportCandidate[];
 
   public constructor(
     code: NnrpTransportSelectionErrorCode,
-    diagnostic: NnrpDiagnostic,
+    diagnostic: string,
     evidence: {
       readonly policy?: NnrpTransportPolicy;
+      readonly transportId?: NnrpTransportKind;
       readonly candidates?: readonly NnrpTransportCandidate[];
     } = {},
   ) {
@@ -2436,6 +2439,7 @@ export class NnrpTransportSelectionError extends NnrpTransportError {
     this.name = "NnrpTransportSelectionError";
     this.code = code;
     if (evidence.policy !== undefined) this.policy = evidence.policy;
+    if (evidence.transportId !== undefined) this.transportId = evidence.transportId;
     this.candidates = Object.freeze([...(evidence.candidates ?? [])]);
   }
 }
@@ -2770,7 +2774,7 @@ export function selectTransport(
   const selected = ordered[0];
   if (selected === undefined) throw transportSelectionError(policy, annotatedCandidates);
   const selectedProvider = providers.find((provider) =>
-    provider.transportId === selected.kind && provider.metadata.id === selected.provider.id
+    provider.transportId === selected.transportId && provider.metadata.id === selected.provider.id
   );
   if (selectedProvider === undefined) {
     throw invalidTransportEvidence("Selected candidate does not resolve to a provider descriptor.", policy);
@@ -2797,10 +2801,12 @@ export function createTransportCandidates(
   const readinessByKey = new Map(
     options.candidateReadiness.map((
       readiness,
-    ) => [transportEvidenceKey(readiness.kind, readiness.providerId), readiness]),
+    ) => [transportEvidenceKey(readiness.transportId, readiness.providerId), readiness]),
   );
   const observationByKey = new Map(
-    observations.map((observation) => [transportEvidenceKey(observation.kind, observation.providerId), observation]),
+    observations.map((
+      observation,
+    ) => [transportEvidenceKey(observation.transportId, observation.providerId), observation]),
   );
   return providers.map((provider) => {
     validateTransportProviderDescriptor(provider);
@@ -2813,17 +2819,10 @@ export function createTransportCandidates(
       : !readiness.securitySatisfied
       ? "security-unsatisfied"
       : undefined;
-    const diagnostic = observation?.diagnostic ?? readiness.diagnostic ??
-      (provider.diagnostic === undefined ? undefined : {
-        code: "NNRP_TRANSPORT_PROVIDER_UNAVAILABLE",
-        message: provider.diagnostic,
-        source: "transport",
-        retryable: false,
-        transport: provider.transportId,
-      } satisfies NnrpDiagnostic);
+    const diagnostic = observation?.diagnostic ?? readiness.diagnostic ?? provider.diagnostic;
 
     return {
-      kind: provider.transportId,
+      transportId: provider.transportId,
       provider: provider.metadata,
       localAvailable: provider.available,
       peerSupported: options.peerSupportedTransports.includes(provider.transportId),
@@ -2850,7 +2849,7 @@ export function createTransportSelectionSummary(
         candidate.rejectionReason !== undefined
       )
       .map((candidate) => ({
-        kind: candidate.kind,
+        transportId: candidate.transportId,
         provider: candidate.provider,
         reason: candidate.rejectionReason,
         ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
@@ -4035,7 +4034,7 @@ function transportRejectionReason(
   policy: NnrpTransportPolicy,
 ): NnrpTransportRejectionReason | undefined {
   const forcedKind = forcedTransportKind(policy);
-  if (forcedKind !== undefined && candidate.kind !== forcedKind) {
+  if (forcedKind !== undefined && candidate.transportId !== forcedKind) {
     return "policy-disallowed";
   }
   if (!candidate.localAvailable) {
@@ -4073,7 +4072,7 @@ function compareTransportCandidates(
     throw transportContractError(
       "NNRP_TRANSPORT_PROBE_METRICS_MISSING",
       "Successful transport candidates require probe metrics before comparison.",
-      leftProbe === undefined ? left.kind : right.kind,
+      leftProbe === undefined ? left.transportId : right.transportId,
     );
   }
 
@@ -4081,9 +4080,9 @@ function compareTransportCandidates(
     compareBigInt(rightProbe.medianThroughputBytesPerSecond, leftProbe.medianThroughputBytesPerSecond) ||
     compareBigInt(leftProbe.medianRttMicroseconds, rightProbe.medianRttMicroseconds) ||
     compareProviderCost(left.provider.cost, right.provider.cost) ||
-    comparePreferredTransport(left.kind, right.kind, policy) ||
+    comparePreferredTransport(left.transportId, right.transportId, policy) ||
     left.provider.preferenceRank - right.provider.preferenceRank ||
-    transportNumericId(left.kind) - transportNumericId(right.kind) ||
+    transportNumericId(left.transportId) - transportNumericId(right.transportId) ||
     compareBytewise(left.provider.id, right.provider.id);
 }
 
@@ -4104,12 +4103,12 @@ function comparePreferredTransport(
 }
 
 function compareRejectedTransportCandidates(left: NnrpTransportCandidate, right: NnrpTransportCandidate): number {
-  return transportNumericId(left.kind) - transportNumericId(right.kind) ||
+  return transportNumericId(left.transportId) - transportNumericId(right.transportId) ||
     compareBytewise(left.provider.id, right.provider.id);
 }
 
 function candidateIdentity(candidate: NnrpTransportCandidate): string {
-  return `${transportNumericId(candidate.kind)}\0${candidate.provider.id}`;
+  return `${transportNumericId(candidate.transportId)}\0${candidate.provider.id}`;
 }
 
 function transportNumericId(kind: NnrpTransportKind): number {
@@ -4143,21 +4142,21 @@ function compareBytewise(left: string, right: string): number {
 }
 
 function validateTransportCandidate(candidate: NnrpTransportCandidate): void {
-  validateTransportProviderMetadata(candidate.provider, candidate.kind);
+  validateTransportProviderMetadata(candidate.provider, candidate.transportId);
   if (candidate.probeState === "succeeded") {
     if (candidate.probe === undefined) {
       throw transportContractError(
         "NNRP_TRANSPORT_PROBE_METRICS_MISSING",
         "A succeeded transport probe must include metrics.",
-        candidate.kind,
+        candidate.transportId,
       );
     }
-    validateTransportProbeMetrics(candidate.probe, candidate.kind);
+    validateTransportProbeMetrics(candidate.probe, candidate.transportId);
   } else if (candidate.probe !== undefined) {
     throw transportContractError(
       "NNRP_TRANSPORT_PROBE_STATE_INVALID",
       "Probe metrics are allowed only when probeState is succeeded.",
-      candidate.kind,
+      candidate.transportId,
     );
   }
 }
@@ -4167,10 +4166,10 @@ function validateTransportSelectionCandidates(candidates: readonly NnrpTransport
   const providerIds = new Set<string>();
   for (const candidate of candidates) {
     validateTransportCandidate(candidate);
-    if (kinds.has(candidate.kind) || providerIds.has(candidate.provider.id)) {
+    if (kinds.has(candidate.transportId) || providerIds.has(candidate.provider.id)) {
       throw invalidTransportEvidence("Transport candidates must contain unique transport kinds and provider ids.");
     }
-    kinds.add(candidate.kind);
+    kinds.add(candidate.transportId);
     providerIds.add(candidate.provider.id);
   }
 }
@@ -4200,7 +4199,7 @@ function validateTransportSelectionEvidence(
   const readinessKeys = new Set<string>();
   for (const record of readiness) {
     validateTransportCandidateReadiness(record);
-    const key = transportEvidenceKey(record.kind, record.providerId);
+    const key = transportEvidenceKey(record.transportId, record.providerId);
     if (!providerKeys.has(key)) {
       throw invalidTransportEvidence("Candidate readiness contains an unmatched provider identity.", policy);
     }
@@ -4216,7 +4215,7 @@ function validateTransportSelectionEvidence(
   const observationKeys = new Set<string>();
   for (const observation of observations) {
     validateTransportProbeObservation(observation);
-    const key = transportEvidenceKey(observation.kind, observation.providerId);
+    const key = transportEvidenceKey(observation.transportId, observation.providerId);
     if (!providerKeys.has(key)) {
       throw invalidTransportEvidence("Probe observations contain an unmatched provider identity.", policy);
     }
@@ -4229,8 +4228,9 @@ function validateTransportSelectionEvidence(
 
 function validateTransportCandidateReadiness(readiness: NnrpTransportCandidateReadiness): void {
   if (
-    !NNRP_TRANSPORT_KINDS.has(readiness.kind) || !isNonEmptyAscii(readiness.providerId) ||
-    typeof readiness.routeResolved !== "boolean" || typeof readiness.securitySatisfied !== "boolean"
+    !NNRP_TRANSPORT_KINDS.has(readiness.transportId) || !isNonEmptyAscii(readiness.providerId) ||
+    typeof readiness.routeResolved !== "boolean" || typeof readiness.securitySatisfied !== "boolean" ||
+    (readiness.diagnostic !== undefined && typeof readiness.diagnostic !== "string")
   ) {
     throw invalidTransportEvidence("Candidate readiness contains an invalid provider identity or readiness value.");
   }
@@ -4238,8 +4238,9 @@ function validateTransportCandidateReadiness(readiness: NnrpTransportCandidateRe
 
 function validateTransportProbeObservation(observation: NnrpTransportProbeObservation): void {
   if (
-    !NNRP_TRANSPORT_KINDS.has(observation.kind) || !isNonEmptyAscii(observation.providerId) ||
-    (observation.state !== "succeeded" && observation.state !== "failed")
+    !NNRP_TRANSPORT_KINDS.has(observation.transportId) || !isNonEmptyAscii(observation.providerId) ||
+    (observation.state !== "succeeded" && observation.state !== "failed") ||
+    (observation.diagnostic !== undefined && typeof observation.diagnostic !== "string")
   ) {
     throw invalidTransportEvidence("Probe observation contains an invalid provider identity or state.");
   }
@@ -4247,7 +4248,7 @@ function validateTransportProbeObservation(observation: NnrpTransportProbeObserv
     if (observation.metrics === undefined) {
       throw invalidTransportEvidence("Succeeded probe observations require metrics.");
     }
-    validateTransportProbeMetrics(observation.metrics, observation.kind);
+    validateTransportProbeMetrics(observation.metrics, observation.transportId);
   } else if (observation.metrics !== undefined) {
     throw invalidTransportEvidence("Failed probe observations must not include metrics.");
   }
@@ -4258,12 +4259,11 @@ function transportEvidenceKey(kind: NnrpTransportKind, providerId: string): stri
 }
 
 function invalidTransportEvidence(message: string, policy?: NnrpTransportPolicy): NnrpTransportSelectionError {
-  return new NnrpTransportSelectionError("INVALID_EVIDENCE", {
-    code: "NNRP_TRANSPORT_SELECTION_INVALID_EVIDENCE",
+  return new NnrpTransportSelectionError(
+    "INVALID_EVIDENCE",
     message,
-    source: "transport",
-    retryable: false,
-  }, { ...(policy === undefined ? {} : { policy }) });
+    { ...(policy === undefined ? {} : { policy }) },
+  );
 }
 
 function transportSelectionError(
@@ -4272,30 +4272,19 @@ function transportSelectionError(
 ): NnrpTransportSelectionError {
   const forcedKind = forcedTransportKind(policy);
   if (forcedKind !== undefined) {
-    const candidate = candidates.find((value) => value.kind === forcedKind);
+    const candidate = candidates.find((value) => value.transportId === forcedKind);
     const reason = candidate?.rejectionReason;
     return new NnrpTransportSelectionError(
       "FORCED_TRANSPORT_UNAVAILABLE",
-      {
-        code: "NNRP_TRANSPORT_SELECTION_FORCED_UNAVAILABLE",
-        message: reason === undefined
-          ? `Forced transport is not available: ${forcedKind}.`
-          : `Forced transport ${forcedKind} was rejected: ${reason}.`,
-        source: "transport",
-        retryable: false,
-        transport: forcedKind,
-      },
-      { policy, candidates },
+      reason === undefined
+        ? `Forced transport is not available: ${forcedKind}.`
+        : `Forced transport ${forcedKind} was rejected: ${reason}.`,
+      { policy, transportId: forcedKind, candidates },
     );
   }
   return new NnrpTransportSelectionError(
     "NO_VIABLE_TRANSPORT",
-    {
-      code: "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT",
-      message: "No viable transport provider remains after applying policy and evidence.",
-      source: "transport",
-      retryable: false,
-    },
+    "No viable transport provider remains after applying policy and evidence.",
     { policy, candidates },
   );
 }

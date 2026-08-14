@@ -25,6 +25,7 @@ import {
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
+  NnrpTransportSelectionError,
   type NnrpTransportServer,
   ObjectReleaseReason,
   OwnershipHint,
@@ -252,7 +253,7 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
     peerSupportedTransports: ["tcp", "quic"],
     policy: "auto",
     candidateReadiness: [{
-      kind: "tcp",
+      transportId: "tcp",
       providerId: "nnrp.transport.tcp.native",
       routeResolved: true,
       securitySatisfied: true,
@@ -274,9 +275,13 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
         candidateReadiness: [],
         probeObservations: [],
       }),
-    NnrpTransportError,
+    NnrpTransportSelectionError,
   );
-  assertEquals(noProviderError.diagnostic.code, "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT");
+  assertEquals(noProviderError.code, "NO_VIABLE_TRANSPORT");
+  assertEquals(
+    noProviderError.diagnostic,
+    "No viable transport provider remains after applying policy and evidence.",
+  );
 });
 
 Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed providers", async () => {

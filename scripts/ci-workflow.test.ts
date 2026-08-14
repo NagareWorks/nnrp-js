@@ -12,7 +12,7 @@ const browserRoleIntegration = await Deno.readTextFile(
   "packages/browser-client/test/browser-role.integration.test.ts",
 );
 
-const DOC_REVISION = "ec9c801c5249c3d5efd923f108ae4ebd74b11aa9";
+const DOC_REVISION = "3439ded0d318bd736f6485b17f2563fae77627bf";
 const CONFORMANCE_REVISION = "05dc6d8283d0941b129f1c5a93e399b97153d38b";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {

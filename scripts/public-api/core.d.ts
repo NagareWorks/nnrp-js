@@ -713,18 +713,18 @@ export interface NnrpTransportProbeMetrics {
     readonly medianRttMicroseconds: bigint;
 }
 export interface NnrpTransportCandidateReadiness {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly providerId: string;
     readonly routeResolved: boolean;
     readonly securitySatisfied: boolean;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export interface NnrpTransportProbeObservation {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly providerId: string;
     readonly state: "succeeded" | "failed";
     readonly metrics?: NnrpTransportProbeMetrics;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export interface NnrpTransportClientSecurity {
     readonly mode: "client";
@@ -748,7 +748,7 @@ export interface NnrpServerProviderRoute {
 export type NnrpClientProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpClientProviderRoute>>>;
 export type NnrpServerProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpServerProviderRoute>>>;
 export interface NnrpTransportCandidate {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
     readonly localAvailable: boolean;
     readonly peerSupported: boolean;
@@ -757,7 +757,7 @@ export interface NnrpTransportCandidate {
     readonly probe?: NnrpTransportProbeMetrics;
     readonly selectionRank?: number;
     readonly rejectionReason?: NnrpTransportRejectionReason;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export interface NnrpTransportEndpoint {
     readonly endpoint: string | URL;
@@ -850,10 +850,10 @@ export interface NnrpTransportSelectionSummary {
     readonly candidates: readonly NnrpTransportCandidate[];
 }
 export interface NnrpRejectedTransportCandidate {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
     readonly reason: NnrpTransportRejectionReason;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
@@ -1360,22 +1360,24 @@ export interface NnrpSessionPatchResult {
     readonly diagnostic?: NnrpDiagnostic;
     readonly metadata?: Readonly<Record<string, string>>;
 }
-export declare class NnrpError extends Error {
-    readonly diagnostic: NnrpDiagnostic;
-    constructor(diagnostic: NnrpDiagnostic);
+export declare class NnrpError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic> extends Error {
+    readonly diagnostic: TDiagnostic;
+    constructor(diagnostic: TDiagnostic);
 }
 export declare class NnrpCapabilityError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
 }
-export declare class NnrpTransportError extends NnrpError {
-    constructor(diagnostic: NnrpDiagnostic);
+export declare class NnrpTransportError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic> extends NnrpError<TDiagnostic> {
+    constructor(diagnostic: TDiagnostic);
 }
-export declare class NnrpTransportSelectionError extends NnrpTransportError {
+export declare class NnrpTransportSelectionError extends NnrpTransportError<string> {
     readonly code: NnrpTransportSelectionErrorCode;
     readonly policy?: NnrpTransportPolicy;
+    readonly transportId?: NnrpTransportKind;
     readonly candidates: readonly NnrpTransportCandidate[];
-    constructor(code: NnrpTransportSelectionErrorCode, diagnostic: NnrpDiagnostic, evidence?: {
+    constructor(code: NnrpTransportSelectionErrorCode, diagnostic: string, evidence?: {
         readonly policy?: NnrpTransportPolicy;
+        readonly transportId?: NnrpTransportKind;
         readonly candidates?: readonly NnrpTransportCandidate[];
     });
 }
