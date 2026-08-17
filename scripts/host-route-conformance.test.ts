@@ -8,6 +8,7 @@ import {
   validateHostRouteScenario,
 } from "./host-route-conformance.ts";
 import {
+  acceptServerSessionsSequentially,
   browserTreeTerminationCommand,
   clientLocator,
   providerForRoute,
@@ -175,6 +176,48 @@ Deno.test("host-route target observes an injected terminal listener before healt
     },
   });
   assertEquals(serverPolicy(scenario.host_route.routes), "prefer-tcp");
+});
+
+Deno.test("host-route server closes each accepted session before accepting the next route", async () => {
+  const events: string[] = [];
+  let releaseFirstClose: () => void = () => undefined;
+  let reportFirstCloseStarted: () => void = () => undefined;
+  const firstCloseGate = new Promise<void>((resolvePromise) => {
+    releaseFirstClose = resolvePromise;
+  });
+  const firstCloseStarted = new Promise<void>((resolvePromise) => {
+    reportFirstCloseStarted = resolvePromise;
+  });
+
+  const result = acceptServerSessionsSequentially(
+    2,
+    (index) => {
+      events.push(`accept-${index}`);
+      return Promise.resolve(index);
+    },
+    async (session) => {
+      events.push(`close-${session}-start`);
+      if (session === 0) {
+        reportFirstCloseStarted();
+        await firstCloseGate;
+      }
+      events.push(`close-${session}-end`);
+      return session === 0 ? "tcp" : "ipc";
+    },
+  );
+
+  await firstCloseStarted;
+  assertEquals(events, ["accept-0", "close-0-start"]);
+  releaseFirstClose();
+  assertEquals(await result, ["tcp", "ipc"]);
+  assertEquals(events, [
+    "accept-0",
+    "close-0-start",
+    "close-0-end",
+    "accept-1",
+    "close-1-start",
+    "close-1-end",
+  ]);
 });
 
 Deno.test("browser host-route results preserve the suite scenario identity", () => {

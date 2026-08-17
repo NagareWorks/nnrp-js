@@ -455,28 +455,29 @@ async function runServerCase(
       }),
     ]);
     await writeReadyReport(scenario, fixture, bound, options.readyOutput);
-    const accepted: NnrpTransportKind[] = [];
-    const sessions = [];
-    for (let index = 0; index < fixture.routes.length; index += 1) {
-      const outcome = index === 0 ? await firstAccept : await server.accept().then(
-        (session) => ({ session } as const),
-        (error: unknown) => ({ error } as const),
-      );
-      if ("error" in outcome) throw outcome.error;
-      const session = outcome.session;
-      accepted.push(session.activeTransport);
-      sessions.push(session);
-    }
-    await Promise.all(sessions.map(async (session) => {
-      const event = await receiveServerRuntimeEvent(
-        session,
-        hostRouteTimeoutMillis(scenario, SERVER_CLOSE_FALLBACK_MILLISECONDS),
-      );
-      if (event.header.messageType !== NnrpMessageType.SessionClose) {
-        throw new Error(`Expected peer close, received message ${event.header.messageType}.`);
-      }
-      await session.close();
-    }));
+    const accepted = await acceptServerSessionsSequentially(
+      fixture.routes.length,
+      async (index) => {
+        const outcome = index === 0 ? await firstAccept : await server.accept().then(
+          (session) => ({ session } as const),
+          (error: unknown) => ({ error } as const),
+        );
+        if ("error" in outcome) throw outcome.error;
+        return outcome.session;
+      },
+      async (session) => {
+        const transport = session.activeTransport;
+        const event = await receiveServerRuntimeEvent(
+          session,
+          hostRouteTimeoutMillis(scenario, SERVER_CLOSE_FALLBACK_MILLISECONDS),
+        );
+        if (event.header.messageType !== NnrpMessageType.SessionClose) {
+          throw new Error(`Expected peer close, received message ${event.header.messageType}.`);
+        }
+        await session.close();
+        return transport;
+      },
+    );
     return passedHostRouteResult(
       scenario,
       "success",
@@ -486,6 +487,22 @@ async function runServerCase(
     await server.close().catch(() => undefined);
     await runtime.close().catch(() => undefined);
   }
+}
+
+export async function acceptServerSessionsSequentially<TSession>(
+  expectedSessions: number,
+  accept: (index: number) => Promise<TSession>,
+  observeAndClose: (session: TSession, index: number) => Promise<NnrpTransportKind>,
+): Promise<readonly NnrpTransportKind[]> {
+  if (!Number.isSafeInteger(expectedSessions) || expectedSessions < 0) {
+    throw new TypeError("Expected server session count must be a non-negative safe integer.");
+  }
+  const accepted: NnrpTransportKind[] = [];
+  for (let index = 0; index < expectedSessions; index += 1) {
+    const session = await accept(index);
+    accepted.push(await observeAndClose(session, index));
+  }
+  return accepted;
 }
 
 export function providerForRoute(route: HostProviderRoute): HostTransportProvider {
