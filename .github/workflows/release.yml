@@ -173,6 +173,8 @@ jobs:
           deno task benchmark:privacy artifacts/release-benchmark-results.json
       - name: Pack GitHub release assets
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_tag && inputs.publish_github_release && inputs.publish_to_npm && !inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -192,6 +194,7 @@ jobs:
       - name: Publish packages
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_to_npm)
         env:
+          GH_TOKEN: ${{ github.token }}
           NPM_TAG: ${{ inputs.npm_tag || 'preview' }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
         shell: bash

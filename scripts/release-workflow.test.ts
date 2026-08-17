@@ -112,6 +112,7 @@ Deno.test("release sanitizes Python linker state across packaging subprocesses",
     const firstDenoIndex = step.indexOf("deno ");
     assertEquals(sanitizeIndex >= 0, true);
     assertEquals(firstDenoIndex > sanitizeIndex, true);
+    assertStringIncludes(step, "GH_TOKEN: ${{ github.token }}");
     assertStringIncludes(step, "deno task artifacts:prepare");
     assertStringIncludes(step, "scripts/publish-packages.ts");
   }
