@@ -8,6 +8,7 @@ import {
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportProviderCost,
+  type NnrpTransportProviderMetadata,
   type NnrpTransportServer,
 } from "@nnrp/core";
 import { connectBrowserWebSocket, websocketUnavailableDiagnostic } from "./browser.js";
@@ -52,15 +53,25 @@ export function createWebSocketTransportProvider(
   const browser = !nativeHost && socketCtor !== undefined;
   const available = options.available ?? (native || browser);
   const diagnostic = options.diagnostic ?? loaded.diagnostic ?? websocketUnavailableDiagnostic();
+  const metadata = {
+    id: native ? "nnrp.transport.websocket.native" : "nnrp.transport.websocket.browser-wasm",
+    cost: options.cost ?? { modelId: 0, units: 0n },
+    preferenceRank: options.preferenceRank ?? 3,
+    limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+    limitations: native ? ["requires-tcp", "native-host-only"] : ["requires-tcp", "browser-host-only"],
+  } satisfies NnrpTransportProviderMetadata;
   return {
     kind: "websocket",
-    metadata: {
-      id: native ? "nnrp.transport.websocket.native" : "nnrp.transport.websocket.browser-wasm",
-      cost: options.cost ?? { modelId: 0, units: 0n },
-      preferenceRank: options.preferenceRank ?? 3,
-      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
-      limitations: native ? ["requires-tcp", "native-host-only"] : ["requires-tcp", "browser-host-only"],
+    descriptor: {
+      name: "@nnrp/transport-websocket",
+      version: "1.0.0-preview.4.5",
+      transportId: "websocket",
+      kind: native ? "native-dynamic" : "wasm",
+      available,
+      metadata,
+      ...(available ? {} : { diagnostic: diagnostic.message }),
     },
+    metadata,
     localAvailable: available,
     ...(available ? {} : { diagnostic }),
     endpointSchemes: ["ws", "wss"],

@@ -11,6 +11,8 @@ Deno.test("@nnrp/transport-websocket browser entry owns browser provider constru
   });
 
   assertEquals(provider.localAvailable, true);
+  assertEquals(provider.descriptor.kind, "wasm");
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
   assertEquals(provider.metadata, {
     id: "nnrp.transport.websocket.browser-wasm",
     cost: { modelId: 7, units: 8n },
@@ -63,6 +65,8 @@ Deno.test("@nnrp/transport-websocket browser entry preserves explicit native bin
   };
   const provider = createWebSocketTransportProvider({ binding });
 
+  assertEquals(provider.descriptor.kind, "native-dynamic");
+  assertEquals(provider.descriptor.metadata === provider.metadata, true);
   assertEquals(provider.metadata.id, "nnrp.transport.websocket.native");
   assertEquals(provider.metadata.limitations, ["requires-tcp", "native-host-only"]);
   assertEquals((await provider.probe({ endpoint: "ws://127.0.0.1/native-entry" })).successCount, 1);

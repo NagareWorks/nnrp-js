@@ -8,6 +8,7 @@ import {
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportProviderCost,
+  type NnrpTransportProviderMetadata,
   type NnrpTransportServer,
 } from "@nnrp/core";
 import { loadPackagedQuicBinding } from "./native.js";
@@ -41,15 +42,25 @@ export function createQuicTransportProvider(
     : loadPackagedQuicBinding();
   const available = options.available ?? loaded.binding !== undefined;
   const diagnostic = options.diagnostic ?? loaded.diagnostic ?? unavailableDiagnostic();
+  const metadata = {
+    id: "nnrp.transport.quic.native",
+    cost: options.cost ?? { modelId: 0, units: 0n },
+    preferenceRank: options.preferenceRank ?? 1,
+    limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+    limitations: ["requires-udp", "native-host-only"],
+  } satisfies NnrpTransportProviderMetadata;
   return {
     kind: "quic",
-    metadata: {
-      id: "nnrp.transport.quic.native",
-      cost: options.cost ?? { modelId: 0, units: 0n },
-      preferenceRank: options.preferenceRank ?? 1,
-      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
-      limitations: ["requires-udp", "native-host-only"],
+    descriptor: {
+      name: "@nnrp/transport-quic",
+      version: "1.0.0-preview.4.5",
+      transportId: "quic",
+      kind: "native-dynamic",
+      available,
+      metadata,
+      ...(available ? {} : { diagnostic: diagnostic.message }),
     },
+    metadata,
     localAvailable: available,
     ...(available ? {} : { diagnostic }),
     endpointSchemes: ["quic"],

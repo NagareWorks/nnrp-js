@@ -8,6 +8,7 @@ import {
   type NnrpTransportProbeOptions,
   type NnrpTransportProvider,
   type NnrpTransportProviderCost,
+  type NnrpTransportProviderMetadata,
   type NnrpTransportServer,
 } from "@nnrp/core";
 import { loadPackagedIpcBinding } from "./native.js";
@@ -39,19 +40,29 @@ export function createIpcTransportProvider(options: NnrpIpcTransportProviderOpti
     : loadPackagedIpcBinding();
   const available = options.available ?? loaded.binding !== undefined;
   const diagnostic = options.diagnostic ?? loaded.diagnostic ?? unavailableDiagnostic();
+  const metadata = {
+    id: "nnrp.transport.ipc.native",
+    cost: options.cost ?? { modelId: 0, units: 0n },
+    preferenceRank: options.preferenceRank ?? 0,
+    limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
+    limitations: [
+      "local-host-only",
+      "native-host-only",
+      platform === "windows" ? "windows-named-pipe" : "unix-domain-socket",
+    ],
+  } satisfies NnrpTransportProviderMetadata;
   return {
     kind: "ipc",
-    metadata: {
-      id: "nnrp.transport.ipc.native",
-      cost: options.cost ?? { modelId: 0, units: 0n },
-      preferenceRank: options.preferenceRank ?? 0,
-      limits: { maxFrameBytes: options.maxFrameBytes ?? 67_108_864n },
-      limitations: [
-        "local-host-only",
-        "native-host-only",
-        platform === "windows" ? "windows-named-pipe" : "unix-domain-socket",
-      ],
+    descriptor: {
+      name: "@nnrp/transport-ipc",
+      version: "1.0.0-preview.4.5",
+      transportId: "ipc",
+      kind: "native-dynamic",
+      available,
+      metadata,
+      ...(available ? {} : { diagnostic: diagnostic.message }),
     },
+    metadata,
     localAvailable: available,
     ...(available ? {} : { diagnostic }),
     endpointSchemes: ["unix", "npipe"],

@@ -1,8 +1,11 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import {
   createTokenSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  type NnrpClientEvent,
   NnrpMessageType,
+  type NnrpRuntimeEvent,
   type NnrpTransportConnection,
 } from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
@@ -53,17 +56,17 @@ async function run(): Promise<void> {
   try {
     ({ client, session } = await connectAndSubmit(runtime, providerEndpoint));
     observe("received", "REQUEST", { operation_id: "301", frame_id: 301 });
-    const progress = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    const progress = expectRuntimeClientEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }));
     assertRuntimeMetadata(progress, "progress");
     observe("sent", "PROGRESS", { operation_id: progress.metadata.value.operationId.toString() });
-    const credit = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    const credit = expectRuntimeClientEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }));
     assertMessageType(credit.header.messageType, NnrpMessageType.CreditUpdate, "CREDIT_UPDATE");
     assertRuntimeMetadata(credit, "pressure");
     observe("sent", "CREDIT_UPDATE", { max_in_flight: credit.metadata.value.creditWindow.toString() });
-    const partial = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    const partial = expectRuntimeClientEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }));
     assertRuntimeMetadata(partial, "partial_result");
     observe("sent", "PARTIAL_RESULT", { operation_id: partial.metadata.value.operationId.toString() });
-    const result = await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS });
+    const result = expectRuntimeClientEvent(await session.nextEvent({ timeoutMillis: EVENT_TIMEOUT_MILLIS }));
     assertMessageType(result.header.messageType, NnrpMessageType.ResultPush, "RESULT_PUSH");
     assertRuntimeTail(result, "body");
     if (!equalBytes(result.tail.body, RESPONSE_BODY)) {
@@ -87,6 +90,13 @@ async function run(): Promise<void> {
     await client?.close().catch(() => undefined);
     await runtime.close().catch(() => undefined);
   }
+}
+
+function expectRuntimeClientEvent(event: NnrpClientEvent): NnrpRuntimeEvent {
+  if (event.type !== "runtime") {
+    throw new Error(`browser wire target expected runtime event, got lifecycle ${event.event.state}`);
+  }
+  return event.event;
 }
 
 function createObservedProvider() {
@@ -120,8 +130,8 @@ async function connectAndSubmit(
   let lastError: unknown;
   for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt++) {
     const client = runtime.connect({
-      endpoint: "nnrp://localhost/session/default",
-      providerRoutes: { websocket: { endpoint: providerEndpoint } },
+      endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/session/default"),
+      providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
       transportPolicy: "force-websocket",
     });
     let session: Awaited<ReturnType<typeof client.openSession>> | undefined;

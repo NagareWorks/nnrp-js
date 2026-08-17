@@ -97,6 +97,62 @@ export declare enum NnrpSessionPriorityClass {
     Balanced = 1,
     Background = 2
 }
+export interface ClientHelloMetadata {
+    readonly minVersionMajor: number;
+    readonly maxVersionMajor: number;
+    readonly supportedWireFormatBitmap: number;
+    readonly supportedProfileBitmap: number;
+    readonly supportedPayloadKindBitmap: number;
+    readonly supportedCodecBitmap: number;
+    readonly supportedCompressionBitmap: number;
+    readonly supportedDtypeBitmap: number;
+    readonly supportedLayoutBitmap: number;
+    readonly cacheDigestBitmap: number;
+    readonly cacheObjectBitmap: number;
+    readonly cacheNamespaceCount: number;
+    readonly maxLaneCount: number;
+    readonly maxCacheEntries: number;
+    readonly maxCacheBytes: number;
+    readonly targetCadenceX100: number;
+    readonly latencyBudgetMs: number;
+    readonly qualityTier: number;
+    readonly degradePolicy: number;
+    readonly requestedSessionId: number;
+    readonly authBytes: number;
+    readonly controlExtensionBytes: number;
+}
+export declare enum SessionPatchAckStatus {
+    Accepted = 0,
+    PartiallyApplied = 1,
+    Rejected = 2
+}
+export declare enum SessionPatchRejectReason {
+    None = 0,
+    UnsupportedField = 1,
+    InvalidRange = 2,
+    UnsupportedStrategy = 3,
+    InvalidLaneMask = 4,
+    RateLimited = 5
+}
+export interface SessionPatchAckMetadata {
+    readonly ackStatus: SessionPatchAckStatus;
+    readonly rejectReason: SessionPatchRejectReason;
+    readonly appliedPatchMask: number;
+    readonly rejectedPatchMask: number;
+    readonly retryAfterMs: number;
+    readonly effectiveProfileId: number;
+    readonly effectiveTargetCadenceX100: number;
+    readonly effectiveQualityTier: number;
+    readonly effectiveDegradePolicy: number;
+    readonly effectiveLaneMask: bigint;
+    readonly effectiveCodecBitmap: number;
+    readonly effectiveCompressionBitmap: number;
+    readonly profilePatchAckBytes: number;
+}
+export declare function encodeClientHelloMetadata(metadata: ClientHelloMetadata): Uint8Array;
+export declare function decodeClientHelloMetadata(encoded: Uint8Array): ClientHelloMetadata;
+export declare function encodeSessionPatchAckMetadata(metadata: SessionPatchAckMetadata): Uint8Array;
+export declare function decodeSessionPatchAckMetadata(encoded: Uint8Array): SessionPatchAckMetadata;
 export interface NnrpSessionOpenMetadata {
     readonly requestedSessionId: number;
     readonly profileId: number;
@@ -275,6 +331,14 @@ export interface CacheObjectId {
     readonly cacheKeyLo: bigint;
     readonly objectKind: NnrpCacheObjectKind;
 }
+export interface NnrpCacheObjectVersion {
+    readonly objectId: CacheObjectId;
+    readonly objectVersion: bigint;
+    readonly schemaId: number;
+    readonly schemaVersion: number;
+}
+export type NnrpCacheLeaseOutcome = "valid" | "expired" | "renewed" | "released" | "missing";
+export type NnrpCacheInvalidationReason = "explicit" | "dependency-invalidated" | "lease-expired" | "version-mismatch" | "schema-mismatch";
 export interface ObjectDescriptorMetadata {
     readonly objectId: bigint;
     readonly objectKind: RuntimeObjectKind;
@@ -340,12 +404,59 @@ export interface DecodedRuntimeObjectMetadata {
     readonly tail: Uint8Array;
 }
 export interface CacheInvalidateMetadata {
-    readonly invalidateScope: number;
+    readonly invalidateScope: CacheInvalidateScope;
     readonly cacheNamespace: number;
     readonly cacheKeyHi: bigint;
     readonly cacheKeyLo: bigint;
     readonly reasonCode: number;
 }
+export declare enum CacheAckStatus {
+    Accepted = 0,
+    Rejected = 1,
+    Replaced = 2
+}
+export declare enum CacheInvalidateScope {
+    WholeSession = 0,
+    Namespace = 1,
+    ObjectKind = 2,
+    ObjectKey = 3
+}
+export interface CachePutMetadata {
+    readonly cacheNamespace: number;
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
+    readonly objectKind: NnrpCacheObjectKind;
+    readonly ttlMs: number;
+    readonly objectBytes: number;
+    readonly codecBitmap: number;
+    readonly flags: number;
+}
+export interface CacheAckMetadata {
+    readonly cacheNamespace: number;
+    readonly cacheKeyHi: bigint;
+    readonly cacheKeyLo: bigint;
+    readonly status: CacheAckStatus;
+    readonly acceptedTtlMs: number;
+    readonly maxObjectBytes: number;
+    readonly detailCode: number;
+}
+export interface TransportProbeMetadata {
+    readonly probeId: number;
+    readonly probePayloadBytes: number;
+    readonly clientSendTsUs: bigint;
+}
+export interface TransportProbeAckMetadata {
+    readonly probeId: number;
+    readonly serverRecvTsUs: bigint;
+}
+export declare function encodeCachePutMetadata(metadata: CachePutMetadata): Uint8Array;
+export declare function decodeCachePutMetadata(encoded: Uint8Array): CachePutMetadata;
+export declare function encodeCacheAckMetadata(metadata: CacheAckMetadata): Uint8Array;
+export declare function decodeCacheAckMetadata(encoded: Uint8Array): CacheAckMetadata;
+export declare function encodeTransportProbeMetadata(metadata: TransportProbeMetadata): Uint8Array;
+export declare function decodeTransportProbeMetadata(encoded: Uint8Array): TransportProbeMetadata;
+export declare function encodeTransportProbeAckMetadata(metadata: TransportProbeAckMetadata): Uint8Array;
+export declare function decodeTransportProbeAckMetadata(encoded: Uint8Array): TransportProbeAckMetadata;
 export declare class CacheLease {
     readonly objectId: CacheObjectId;
     readonly objectVersion: bigint;
@@ -358,6 +469,32 @@ export declare class CacheLease {
     get expiresAtMillis(): bigint;
     isExpiredAt(nowMillis: bigint): boolean;
     validateVersion(expectedVersion: bigint): void;
+}
+export declare class NnrpCacheLeaseResult {
+    readonly objectId: CacheObjectId;
+    readonly outcome: NnrpCacheLeaseOutcome;
+    readonly lease?: CacheLease;
+    readonly objectVersion?: NnrpCacheObjectVersion;
+    readonly diagnostic?: string;
+    constructor(options: {
+        readonly objectId: CacheObjectId;
+        readonly outcome: NnrpCacheLeaseOutcome;
+        readonly lease?: CacheLease;
+        readonly objectVersion?: NnrpCacheObjectVersion;
+        readonly diagnostic?: string;
+    });
+}
+export declare class NnrpCachePolicyOptions {
+    readonly enabled: boolean;
+    readonly reuseScope?: CacheReuseScope;
+    readonly expirationHintMs: bigint;
+    readonly invalidationReason: NnrpCacheInvalidationReason;
+    constructor(options: {
+        readonly enabled: boolean;
+        readonly reuseScope?: CacheReuseScope;
+        readonly expirationHintMs?: bigint;
+        readonly invalidationReason?: NnrpCacheInvalidationReason;
+    });
 }
 export interface ControlRequestMetadata {
     readonly operationId: bigint;
@@ -479,10 +616,46 @@ export interface DecodedRuntimeControlMetadata {
 }
 export type NnrpBuildMode = "backend-native" | "browser-wasm";
 export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
+export type NnrpConnectionLifecycleState = "open" | "closing" | "closed";
+export type NnrpSessionLifecycleState = "open" | "resumed" | "closing" | "draining" | "closed";
+export declare class NnrpSessionLifecycle {
+    readonly sessionId: number;
+    readonly state: NnrpSessionLifecycleState;
+    readonly profileId: number;
+    readonly priorityClass: NnrpSessionPriorityClass;
+    readonly schemaId: number;
+    readonly schemaVersion: number;
+    readonly maxInFlightOperations: number;
+    readonly routeScopeId: number;
+    readonly lastOperationId: bigint;
+    readonly sessionErrorCode: number;
+    constructor(options: {
+        readonly sessionId: number;
+        readonly state: NnrpSessionLifecycleState;
+        readonly profileId: number;
+        readonly priorityClass: NnrpSessionPriorityClass;
+        readonly schemaId: number;
+        readonly schemaVersion: number;
+        readonly maxInFlightOperations: number;
+        readonly routeScopeId: number;
+        readonly lastOperationId: bigint;
+        readonly sessionErrorCode: number;
+    });
+    get acceptsSessionScopedMessages(): boolean;
+    get acceptsNewOperations(): boolean;
+}
+export declare class NnrpConnectionLifecycle {
+    readonly state: NnrpConnectionLifecycleState;
+    readonly sessions: readonly NnrpSessionLifecycle[];
+    constructor(options: {
+        readonly state: NnrpConnectionLifecycleState;
+        readonly sessions?: readonly NnrpSessionLifecycle[];
+    });
+}
 export type NnrpTransportPolicy = "auto" | "prefer-quic" | "prefer-tcp" | "prefer-ipc" | "prefer-websocket" | "force-quic" | "force-tcp" | "force-ipc" | "force-websocket";
 export type NnrpOperationId = bigint;
 export type NnrpOperationState = "accepted" | "running" | "partial" | "waiting-tool" | "superseded" | "cancelled" | "failed" | "completed";
-export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "payload.typed" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
+export type NnrpCapability = "client.session" | "server.session" | "native.loader" | "wasm.loader" | "transport.tcp" | "transport.quic" | "transport.ipc" | "transport.websocket" | "flow.update" | "result.hint" | "cache" | "schema" | "recovery" | "handshake.basic" | "session.open_close" | "session.resume" | "flow_update" | "frame_submit.tensor.inline" | "result_push.basic" | "cache.lifecycle" | "payload.typed" | "control.cancel_abort" | "control.supersede" | "control.priority_update" | "control.deadline_expire" | "control.progress_partial" | "control.credit_backpressure" | "control.capability_costs" | "control.route_execution_hint" | "control.trace_context" | "control.result_drop_reason" | "control.degrade_profile" | "control.budget_update" | "control.recoverable_error" | "object.lifecycle" | "object.delta" | "object.cost" | "object.ownership" | "cache.reference";
 export type NnrpDiagnosticSource = "core" | "native" | "wasm" | "transport" | "protocol" | "runtime";
 export interface NnrpDiagnostic {
     readonly code: string;
@@ -516,6 +689,17 @@ export interface NnrpTransportProviderMetadata {
     readonly limits: NnrpTransportProviderLimits;
     readonly limitations: readonly NnrpTransportProviderLimitation[];
 }
+export type NnrpTransportProviderKind = "pure-rust" | "native-dynamic" | "wasm";
+export interface NnrpTransportProviderDescriptor {
+    readonly name: string;
+    readonly version: string;
+    readonly transportId: NnrpTransportKind;
+    readonly kind: NnrpTransportProviderKind;
+    readonly available: boolean;
+    readonly libraryPath?: string;
+    readonly metadata: NnrpTransportProviderMetadata;
+    readonly diagnostic?: string;
+}
 export interface NnrpTransportProviderObservation {
     readonly kind: NnrpTransportKind;
     readonly metadata: NnrpTransportProviderMetadata;
@@ -529,18 +713,18 @@ export interface NnrpTransportProbeMetrics {
     readonly medianRttMicroseconds: bigint;
 }
 export interface NnrpTransportCandidateReadiness {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly providerId: string;
     readonly routeResolved: boolean;
     readonly securitySatisfied: boolean;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export interface NnrpTransportProbeObservation {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly providerId: string;
     readonly state: "succeeded" | "failed";
     readonly metrics?: NnrpTransportProbeMetrics;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export interface NnrpTransportClientSecurity {
     readonly mode: "client";
@@ -554,17 +738,17 @@ export interface NnrpTransportServerSecurity {
 }
 export type NnrpTransportSecurity = NnrpTransportClientSecurity | NnrpTransportServerSecurity;
 export interface NnrpClientProviderRoute {
-    readonly endpoint?: string | URL;
+    readonly endpoint?: NnrpProviderEndpoint;
     readonly security?: NnrpTransportClientSecurity;
 }
 export interface NnrpServerProviderRoute {
-    readonly endpoint?: string | URL;
+    readonly endpoint?: NnrpProviderEndpoint;
     readonly security?: NnrpTransportServerSecurity;
 }
 export type NnrpClientProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpClientProviderRoute>>>;
 export type NnrpServerProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpServerProviderRoute>>>;
 export interface NnrpTransportCandidate {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
     readonly localAvailable: boolean;
     readonly peerSupported: boolean;
@@ -573,7 +757,7 @@ export interface NnrpTransportCandidate {
     readonly probe?: NnrpTransportProbeMetrics;
     readonly selectionRank?: number;
     readonly rejectionReason?: NnrpTransportRejectionReason;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export interface NnrpTransportEndpoint {
     readonly endpoint: string | URL;
@@ -592,6 +776,30 @@ export interface NnrpTransportReceiveOptions {
 }
 export interface NnrpTransportAcceptOptions {
     readonly timeoutMillis?: number;
+}
+export declare class NnrpEndpoint {
+    #private;
+    readonly uri: string;
+    constructor(uri: string | URL);
+    static parse(uri: string | URL): NnrpEndpoint;
+    get protocol(): "nnrp:" | "nnrps:";
+    get host(): string;
+    get hostname(): string;
+    get port(): string;
+    get pathname(): string;
+    get search(): string;
+    get hash(): string;
+    get secure(): boolean;
+    toString(): string;
+}
+export declare class NnrpProviderEndpoint {
+    readonly uri: string;
+    readonly scheme: "tcp" | "quic" | "unix" | "npipe" | "ws" | "wss";
+    constructor(uri: string | URL);
+    static parse(uri: string | URL): NnrpProviderEndpoint;
+    matchesTransport(transport: NnrpTransportKind): boolean;
+    get secure(): boolean;
+    toString(): string;
 }
 export interface NnrpTransportConnection {
     readonly kind: NnrpTransportKind;
@@ -615,23 +823,24 @@ export interface NnrpNativeTransportBinding {
     listen(options: NnrpTransportEndpoint): Promise<NnrpTransportServer>;
 }
 export interface NnrpTransportProvider extends NnrpTransportProviderObservation {
+    readonly descriptor: NnrpTransportProviderDescriptor;
     readonly endpointSchemes: readonly string[];
     probe?(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
     connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
     listen?(options: NnrpTransportEndpoint): NnrpTransportServer | Promise<NnrpTransportServer>;
 }
 export interface NnrpTransportSelection {
-    readonly selected: NnrpTransportCandidate | null;
+    readonly selectedProvider: NnrpTransportProviderDescriptor;
     readonly candidates: readonly NnrpTransportCandidate[];
     readonly policy: NnrpTransportPolicy;
+    readonly diagnostic?: string;
 }
-export interface NnrpTransportCandidateOptions {
-    readonly local: NnrpCapabilityManifest;
-    readonly peer: NnrpCapabilityManifest;
-    readonly providers: readonly NnrpTransportProviderObservation[];
+export interface NnrpTransportSelectionOptions {
+    readonly peerSupportedTransports: readonly NnrpTransportKind[];
+    readonly policy: NnrpTransportPolicy;
     readonly requestedMaxFrameBytes?: bigint;
     readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
+    readonly probeObservations: readonly NnrpTransportProbeObservation[];
 }
 export type NnrpTransportSelectionErrorCode = "INVALID_EVIDENCE" | "FORCED_TRANSPORT_UNAVAILABLE" | "NO_VIABLE_TRANSPORT";
 export interface NnrpTransportSelectionSummary {
@@ -641,10 +850,10 @@ export interface NnrpTransportSelectionSummary {
     readonly candidates: readonly NnrpTransportCandidate[];
 }
 export interface NnrpRejectedTransportCandidate {
-    readonly kind: NnrpTransportKind;
+    readonly transportId: NnrpTransportKind;
     readonly provider: NnrpTransportProviderMetadata;
     readonly reason: NnrpTransportRejectionReason;
-    readonly diagnostic?: NnrpDiagnostic;
+    readonly diagnostic?: string;
 }
 export declare const NNRP_STANDARD_INPUT_PROFILES: readonly ["tensor", "token", "structured_event", "tool_delta"];
 export type NnrpInputProfile = (typeof NNRP_STANDARD_INPUT_PROFILES)[number];
@@ -1069,6 +1278,13 @@ export interface NnrpOperationLifecycleEvent {
     readonly operationId: bigint;
     readonly state: NnrpOperationState;
 }
+export type NnrpClientEvent = {
+    readonly type: "runtime";
+    readonly event: NnrpRuntimeEvent;
+} | {
+    readonly type: "lifecycle";
+    readonly event: NnrpOperationLifecycleEvent;
+};
 export type NnrpTerminalEvent = {
     readonly type: "runtime";
     readonly event: NnrpRuntimeEvent;
@@ -1144,20 +1360,26 @@ export interface NnrpSessionPatchResult {
     readonly diagnostic?: NnrpDiagnostic;
     readonly metadata?: Readonly<Record<string, string>>;
 }
-export declare class NnrpError extends Error {
-    readonly diagnostic: NnrpDiagnostic;
-    constructor(diagnostic: NnrpDiagnostic);
+export declare class NnrpError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic> extends Error {
+    readonly diagnostic: TDiagnostic;
+    constructor(diagnostic: TDiagnostic);
 }
 export declare class NnrpCapabilityError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
 }
-export declare class NnrpTransportError extends NnrpError {
-    constructor(diagnostic: NnrpDiagnostic);
+export declare class NnrpTransportError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic> extends NnrpError<TDiagnostic> {
+    constructor(diagnostic: TDiagnostic);
 }
-export declare class NnrpTransportSelectionError extends NnrpTransportError {
+export declare class NnrpTransportSelectionError extends NnrpTransportError<string> {
     readonly code: NnrpTransportSelectionErrorCode;
-    readonly selection?: NnrpTransportSelection;
-    constructor(code: NnrpTransportSelectionErrorCode, diagnostic: NnrpDiagnostic, selection?: NnrpTransportSelection);
+    readonly policy?: NnrpTransportPolicy;
+    readonly transportId?: NnrpTransportKind;
+    readonly candidates: readonly NnrpTransportCandidate[];
+    constructor(code: NnrpTransportSelectionErrorCode, diagnostic: string, evidence?: {
+        readonly policy?: NnrpTransportPolicy;
+        readonly transportId?: NnrpTransportKind;
+        readonly candidates?: readonly NnrpTransportCandidate[];
+    });
 }
 export declare class NnrpTimeoutError extends NnrpError {
     constructor(diagnostic: NnrpDiagnostic);
@@ -1189,11 +1411,11 @@ export interface NnrpCapabilityManifestOptions {
 export declare function createCapabilityManifest(options: NnrpCapabilityManifestOptions): NnrpCapabilityManifest;
 export declare function createBackendNativeManifest(capabilities?: readonly NnrpCapability[]): NnrpCapabilityManifest;
 export declare function createBrowserWasmManifest(capabilities?: readonly NnrpCapability[]): NnrpCapabilityManifest;
-export declare function selectTransport(candidates: readonly NnrpTransportCandidate[], policy?: NnrpTransportPolicy): NnrpTransportSelection;
-export declare function createTransportCandidates(options: NnrpTransportCandidateOptions): readonly NnrpTransportCandidate[];
+export declare function selectTransport(providers: readonly NnrpTransportProviderDescriptor[], options: NnrpTransportSelectionOptions): NnrpTransportSelection;
+export declare function createTransportCandidates(providers: readonly NnrpTransportProviderDescriptor[], options: NnrpTransportSelectionOptions): readonly NnrpTransportCandidate[];
 export declare function createTransportSelectionSummary(selection: NnrpTransportSelection): NnrpTransportSelectionSummary;
-export declare function parseApplicationEndpoint(endpoint: string | URL): URL;
-export declare function resolveProviderEndpoint(endpoint: string | URL, transport: NnrpTransportKind, providerEndpoint?: string | URL): string;
+export declare function parseApplicationEndpoint(endpoint: string | URL): NnrpEndpoint;
+export declare function resolveProviderEndpoint(endpoint: NnrpEndpoint, transport: NnrpTransportKind, providerEndpoint?: NnrpProviderEndpoint): string;
 export interface NormalizeSubmitRequestOptions {
     readonly copyPayloads?: boolean;
 }
@@ -1207,6 +1429,8 @@ export declare const NNRP_DEFAULT_SUBMIT_POLICY: NnrpSubmitPolicy;
 export declare function createTensorSubmitRequest(input: NnrpTensorSubmitInput): NnrpSubmitRequest;
 export declare function createTokenSubmitRequest(input: NnrpTokenSubmitInput): NnrpSubmitRequest;
 export declare function createTypedPayloadSubmitRequest(input: NnrpTypedPayloadSubmitInput): NnrpSubmitRequest;
+export declare function encodeFrameSubmitMetadata(metadata: NnrpFrameSubmitMetadata): Uint8Array;
+export declare function decodeFrameSubmitMetadata(payload: Uint8Array): NnrpFrameSubmitMetadata;
 export declare function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array;
 export declare function encodeSubmitPayload(request: NnrpSubmitRequest): Uint8Array;
 export declare function decodeSubmitPayload(payload: Uint8Array): {
@@ -1215,6 +1439,8 @@ export declare function decodeSubmitPayload(payload: Uint8Array): {
     readonly body: Uint8Array;
 };
 export declare function encodeResultPushPayload(metadata: NnrpResultPushMetadata, body?: Uint8Array): Uint8Array;
+export declare function encodeResultPushMetadata(metadata: NnrpResultPushMetadata): Uint8Array;
+export declare function decodeResultPushMetadata(payload: Uint8Array): NnrpResultPushMetadata;
 export declare function decodeResultPushPayload(payload: Uint8Array): {
     readonly metadata: NnrpResultPushMetadata;
     readonly body: Uint8Array;
@@ -1223,10 +1449,16 @@ export declare function decodeNnrpRuntimeEvent(header: NnrpRuntimeFrameHeader, p
 export declare function createNnrpResultFromRuntimeEvent(operationId: bigint, event: NnrpRuntimeEvent): NnrpResult;
 export declare function createNnrpResultFromLifecycle(event: NnrpOperationLifecycleEvent): NnrpResult;
 export declare function normalizeSubmitRequest(request: NnrpSubmitRequest, options?: NormalizeSubmitRequestOptions): NnrpNormalizedSubmitRequest;
+export declare function encodeResultHintMetadata(metadata: NnrpResultHintMetadata): Uint8Array;
+export declare function decodeResultHintMetadata(payload: Uint8Array): NnrpResultHintMetadata;
+export declare function encodeFlowUpdateMetadata(metadata: NnrpFlowUpdateMetadata): Uint8Array;
+export declare function decodeFlowUpdateMetadata(payload: Uint8Array): NnrpFlowUpdateMetadata;
 export declare function createRecoveryToken(token: string | NnrpBinaryPayload, metadata?: Readonly<Record<string, string>>): NnrpRecoveryToken;
 export declare function normalizeSessionMigrationRequest(request: NnrpSessionMigrationRequest): NnrpSessionMigrationRequest;
 export declare function throwIfResultDrop(event: NnrpRuntimeEvent): void;
 export declare function validateEventPollOptions(options?: NnrpEventPollOptions): void;
 export declare function validateSessionMetadata(options?: NnrpSessionMetadataOptions): void;
 export declare function normalizeSessionPatchRequest(request: NnrpSessionPatchRequest): NnrpSessionPatchRequest;
+export declare function encodeObjectReferenceBlock(reference: NnrpObjectReferenceBlock): Uint8Array;
+export declare function decodeObjectReferenceBlock(encoded: Uint8Array): NnrpObjectReferenceBlock;
 //# sourceMappingURL=index.d.ts.map

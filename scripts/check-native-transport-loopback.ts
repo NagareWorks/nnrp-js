@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { createIpcTransportProvider } from "@nnrp/transport-ipc";
 import { type NnrpNativeTransportProvider as NnrpClientTransportProvider, openNativeClient } from "@nnrp/native-client";
 import {
@@ -14,6 +15,7 @@ import {
   MemoryLocationHint,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  type NnrpClientEvent,
   NnrpMessageType,
   type NnrpRuntimeEvent,
   NnrpTransportClientSecurity,
@@ -32,7 +34,8 @@ import {
   type NativeTransportSmokeOptions,
   parseNativeTransportSmokeOptions,
 } from "./native-transport-smoke-options.ts";
-import { createSuccessResult } from "./runtime-event-fixtures.ts";
+import { createSuccessResultReply } from "./runtime-event-fixtures.ts";
+import { receiveServerLifecycleEvent, receiveServerRuntimeEvent } from "./server-event-helpers.ts";
 
 type NativeProvider = NnrpTransportProvider & NnrpClientTransportProvider & NnrpServerTransportProvider;
 
@@ -43,8 +46,8 @@ interface LoopbackSecurity {
 
 interface RoleLoopbackOptions {
   readonly provider: NativeProvider;
-  readonly providerEndpoint: string;
-  readonly endpoint: string;
+  readonly providerEndpoint: FrozenNnrpProviderEndpoint;
+  readonly endpoint: FrozenNnrpEndpoint;
   readonly policy: NnrpTransportPolicy;
   readonly security?: LoopbackSecurity;
 }
@@ -76,7 +79,7 @@ export async function runNativeTransportSmoke(options: NativeTransportSmokeOptio
   const cells: NativeTransportSmokeCell[] = [];
   for (const transport of options.transports) {
     try {
-      await runNativeTransportCell(transport);
+      await verifyNativeTransportCell(transport);
       cells.push({ transport, status: "executed" });
     } catch (error) {
       cells.push({ transport, status: "failed", diagnostic: errorMessage(error) });
@@ -87,15 +90,15 @@ export async function runNativeTransportSmoke(options: NativeTransportSmokeOptio
   await writeNativeTransportSmokeResult(options.resultPath, cells);
 }
 
-async function runNativeTransportCell(transport: NativeTransportKind): Promise<void> {
+export async function verifyNativeTransportCell(transport: NativeTransportKind): Promise<void> {
   if (transport === "tcp") {
     const provider = createTcpTransportProvider();
     const packetEndpoint = await verifyPacketLoopback(provider, "127.0.0.1:0");
     const providerEndpoint = formatHostAndPort(parseHostAndPort(packetEndpoint, "tcp"));
     await verifyRoleLoopback({
       provider,
-      providerEndpoint,
-      endpoint: `nnrp://${providerEndpoint}/session/default`,
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(`tcp://${providerEndpoint}`),
+      endpoint: FrozenNnrpEndpoint.parse(`nnrp://${providerEndpoint}/session/default`),
       policy: "force-tcp",
     });
     return;
@@ -109,8 +112,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
     await verifyPacketLoopback(provider, providerEndpoint);
     await verifyRoleLoopback({
       provider,
-      providerEndpoint,
-      endpoint: "nnrp://localhost/session/default",
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint),
+      endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/session/default"),
       policy: "force-ipc",
     });
     return;
@@ -121,8 +124,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
     const url = new URL(providerEndpoint);
     await verifyRoleLoopback({
       provider,
-      providerEndpoint,
-      endpoint: `nnrp://${url.hostname}:${url.port}/session/default`,
+      providerEndpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint),
+      endpoint: FrozenNnrpEndpoint.parse(`nnrp://${url.hostname}:${url.port}/session/default`),
       policy: "force-websocket",
     });
     return;
@@ -133,8 +136,8 @@ async function runNativeTransportCell(transport: NativeTransportKind): Promise<v
   const providerEndpoint = formatHostAndPort(address);
   await verifyRoleLoopback({
     provider,
-    providerEndpoint,
-    endpoint: `nnrps://localhost:${address.port}/session/default`,
+    providerEndpoint: FrozenNnrpProviderEndpoint.parse(`quic://${providerEndpoint}`),
+    endpoint: FrozenNnrpEndpoint.parse(`nnrps://localhost:${address.port}/session/default`),
     policy: "force-quic",
     security: quicSecurity,
   });
@@ -283,11 +286,12 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
           `(client=${clientSession.sessionId}, server=${serverSession.sessionId})`,
       );
     }
-    const submit = await withTimeout(
-      serverSession.receive({ timeoutMillis }),
+    const operation = await withTimeout(
+      serverSession.receiveSubmit({ timeoutMillis }),
       timeoutMillis,
       `${options.provider.kind} server receive`,
     );
+    const submit = operation.submit;
     if (submit.metadata.type !== "frame_submit") {
       throw new Error(`${options.provider.kind}: expected submit, got ${submit.metadata.type}`);
     }
@@ -302,7 +306,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       flags: 0,
     });
     const priority = await withTimeout(
-      serverSession.receive({ timeoutMillis }),
+      receiveServerRuntimeEvent(serverSession, timeoutMillis),
       timeoutMillis,
       `${options.provider.kind} server priority update`,
     );
@@ -325,7 +329,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       metadataBytes: 1,
     }, new Uint8Array([0xa1]));
     const object = await withTimeout(
-      serverSession.receive({ timeoutMillis }),
+      receiveServerRuntimeEvent(serverSession, timeoutMillis),
       timeoutMillis,
       `${options.provider.kind} server object declaration`,
     );
@@ -350,7 +354,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       flags: 0,
     }, new Uint8Array([0xc1]));
     const cache = await withTimeout(
-      serverSession.receive({ timeoutMillis }),
+      receiveServerRuntimeEvent(serverSession, timeoutMillis),
       timeoutMillis,
       `${options.provider.kind} server cache reference`,
     );
@@ -362,7 +366,7 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       throw new Error(`${options.provider.kind}: cache reference did not round-trip`);
     }
 
-    await serverSession.sendPartialResult({
+    await operation.sendPartialResult({
       operationId,
       resultSequence: 1n,
       objectId: 11n,
@@ -370,10 +374,13 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       bodyBytes: 2,
       flags: 0,
     }, new Uint8Array([0xd1, 0xd2]));
-    const partial = await withTimeout(
-      clientSession.nextEvent({ timeoutMillis }),
-      timeoutMillis,
-      `${options.provider.kind} client partial result`,
+    const partial = expectRuntimeClientEvent(
+      await withTimeout(
+        clientSession.nextEvent({ timeoutMillis }),
+        timeoutMillis,
+        `${options.provider.kind} client partial result`,
+      ),
+      options.provider.kind,
     );
     assertEventType(partial, NnrpMessageType.PartialResult, options.provider.kind);
     if (
@@ -384,9 +391,8 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       throw new Error(`${options.provider.kind}: partial result did not round-trip`);
     }
 
-    await serverSession.sendResult(
-      createSuccessResult(operationId, submit.header.frameId, new TextEncoder().encode("pong")),
-    );
+    const reply = createSuccessResultReply(new TextEncoder().encode("pong"));
+    await operation.sendResult(reply.metadata, reply.body);
     const result = await withTimeout(
       clientSession.nextResult({ timeoutMillis }),
       timeoutMillis,
@@ -399,9 +405,15 @@ async function verifyRoleLoopback(options: RoleLoopbackOptions): Promise<void> {
       throw new Error(`${options.provider.kind}: unexpected result payload`);
     }
 
+    await withTimeout(
+      receiveServerLifecycleEvent(serverSession, timeoutMillis, operationId, "completed"),
+      timeoutMillis,
+      `${options.provider.kind} server completed lifecycle`,
+    );
+
     const clientSessionClose = clientSession.close();
     const closeEvent = await withTimeout(
-      serverSession.receive({ timeoutMillis }),
+      receiveServerRuntimeEvent(serverSession, timeoutMillis),
       timeoutMillis,
       `${options.provider.kind} server close event`,
     );
@@ -439,6 +451,13 @@ function assertEventType(
   if (event.header.messageType !== expected) {
     throw new Error(`${providerKind}: expected ${expected}, got ${event.header.messageType}`);
   }
+}
+
+function expectRuntimeClientEvent(event: NnrpClientEvent, providerKind: string): NnrpRuntimeEvent {
+  if (event.type !== "runtime") {
+    throw new Error(`${providerKind}: expected runtime event, got lifecycle ${event.event.state}`);
+  }
+  return event.event;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMillis: number, label: string): Promise<T> {

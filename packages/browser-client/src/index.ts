@@ -6,8 +6,8 @@ import {
   type CapabilityMetadata,
   type ControlRequestMetadata,
   createBrowserWasmManifest,
+  createNnrpResultFromLifecycle,
   createNnrpResultFromRuntimeEvent,
-  createTransportCandidates,
   createTransportSelectionSummary,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
@@ -23,12 +23,15 @@ import {
   NnrpCacheObjectKind,
   NnrpCapabilityError,
   type NnrpCapabilityManifest,
+  type NnrpClientEvent,
   type NnrpClientProviderRoutes,
+  NnrpEndpoint,
   type NnrpEventPollOptions,
   NnrpFlowScopeKind,
   type NnrpInputProfile,
   NnrpMessageType,
   type NnrpNormalizedSubmitRequest,
+  type NnrpOperationState,
   NnrpProtocolError,
   NnrpRecoveryError,
   type NnrpResult,
@@ -41,15 +44,13 @@ import {
   type NnrpSubmitOptions,
   type NnrpSubmitRequest,
   NnrpTimeoutError,
-  type NnrpTransportCandidate,
-  type NnrpTransportCandidateReadiness,
   type NnrpTransportConnection,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
   type NnrpTransportPolicy,
-  type NnrpTransportProbeObservation,
   type NnrpTransportProvider,
+  type NnrpTransportSelectionOptions,
   type NnrpTransportSelectionSummary,
   normalizeSessionMigrationRequest,
   normalizeSessionPatchRequest,
@@ -60,7 +61,6 @@ import {
   type ObjectReleaseMetadata,
   ObjectReleaseReason,
   OwnershipHint,
-  parseApplicationEndpoint,
   type RouteHintMetadata,
   type RuntimeControlMetadata,
   RuntimeRole,
@@ -273,20 +273,11 @@ export interface NnrpBrowserRuntimeOptions {
 }
 
 export interface NnrpBrowserConnectOptions {
-  readonly endpoint: string;
+  readonly endpoint: NnrpEndpoint;
   readonly providerRoutes?: NnrpClientProviderRoutes;
   readonly transportPolicy?: NnrpTransportPolicy;
   readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
   readonly sessionDefaults?: NnrpBrowserSessionOptions;
-}
-
-export interface NnrpBrowserTransportSelectionOptions {
-  readonly peerManifest: NnrpCapabilityManifest;
-  readonly providers?: readonly NnrpBrowserTransportProvider[];
-  readonly policy?: NnrpTransportPolicy;
-  readonly requestedMaxFrameBytes?: bigint;
-  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
@@ -441,14 +432,11 @@ export class NnrpBrowserRuntime {
     });
   }
 
-  public selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary {
+  public selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary {
     this.#ensureOpen();
 
     return createTransportSelectionSummary(
-      selectTransport(
-        this.#createTransportCandidates(options),
-        options.policy ?? this.#transportPolicy,
-      ),
+      selectTransport(this.#binding.transportProviders.map((provider) => provider.descriptor), options),
     );
   }
 
@@ -508,20 +496,6 @@ export class NnrpBrowserRuntime {
         );
       }
     }
-  }
-
-  #createTransportCandidates(options: NnrpBrowserTransportSelectionOptions): readonly NnrpTransportCandidate[] {
-    const providers = options.providers ?? this.#binding.transportProviders;
-    return createTransportCandidates({
-      local: { ...this.#binding.manifest, transports: providers.map((provider) => provider.kind) },
-      peer: options.peerManifest,
-      providers,
-      ...(options.requestedMaxFrameBytes === undefined
-        ? {}
-        : { requestedMaxFrameBytes: options.requestedMaxFrameBytes }),
-      candidateReadiness: options.candidateReadiness,
-      ...(options.probeObservations === undefined ? {} : { probeObservations: options.probeObservations }),
-    });
   }
 }
 
@@ -608,7 +582,7 @@ export class NnrpBrowserClient {
     return session;
   }
 
-  public nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public nextSessionEvent(sessionId: number, options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     this.#ensureOpen();
     validateEventPollOptions(options);
     const session = this.#sessions.get(sessionId);
@@ -684,7 +658,7 @@ export interface NnrpBrowserClientSessionState {
 }
 
 interface BrowserEventWaiter {
-  readonly resolve: (event: NnrpRuntimeEvent) => void;
+  readonly resolve: (event: NnrpClientEvent) => void;
   readonly reject: (error: unknown) => void;
 }
 
@@ -706,7 +680,7 @@ export class NnrpBrowserClientSession {
   readonly #cancelledOperations = new Set<bigint>();
   readonly #submitCancellationCleanups = new Map<number, () => void>();
   readonly #capacityWaiters: Array<() => void> = [];
-  readonly #eventQueue: NnrpRuntimeEvent[] = [];
+  readonly #eventQueue: NnrpClientEvent[] = [];
   readonly #eventWaiters: BrowserEventWaiter[] = [];
   readonly #resultWaiters = new Map<number, BrowserResultWaiter>();
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
@@ -855,7 +829,7 @@ export class NnrpBrowserClientSession {
       assertClientRuntimeControlMessage(messageType);
       const payload = encodeRuntimeControlMetadata(messageType, metadata, tail);
       this.#observeControlSequence(metadata);
-      return this.#sendRuntimeFrame(messageType, payload).then(
+      return this.#sendRuntimeFrame(messageType, payload, runtimeControlOperationId(messageType, metadata)).then(
         async () => await this.#applySentTerminalControl(messageType, metadata),
       );
     } catch (error) {
@@ -949,7 +923,7 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  public async nextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -957,24 +931,33 @@ export class NnrpBrowserClientSession {
       throw error;
     }
     const event = await this.#readNextEvent(options);
-    await this.#releaseForTerminalControl(event);
+    if (event.type === "runtime") {
+      await this.#releaseForTerminalControl(event.event);
+    } else if (isTerminalOperationState(event.event.state)) {
+      const frameId = this.#frameForOperation(event.event.operationId);
+      if (frameId !== undefined) this.#finishTerminalFrame(frameId);
+    }
     return event;
   }
 
   public async nextResult(options: NnrpEventPollOptions = {}): Promise<NnrpResult> {
     while (true) {
       const event = await this.nextEvent(options);
-      if (isRuntimeTerminalEvent(event)) {
-        const operationId = browserRuntimeEventOperationIds.get(event) ?? terminalOperationId(event);
+      if (event.type === "lifecycle") {
+        if (isTerminalOperationState(event.event.state)) return createNnrpResultFromLifecycle(event.event);
+        continue;
+      }
+      if (isRuntimeTerminalEvent(event.event)) {
+        const operationId = browserRuntimeEventOperationIds.get(event.event) ?? terminalOperationId(event.event);
         if (operationId === undefined) {
           throw new NnrpProtocolError({
             code: "NNRP_TERMINAL_OPERATION_UNKNOWN",
-            message: `Terminal frame ${event.header.frameId} has no associated operation id.`,
+            message: `Terminal frame ${event.event.header.frameId} has no associated operation id.`,
             source: "wasm",
             retryable: false,
           });
         }
-        return createNnrpResultFromRuntimeEvent(operationId, event);
+        return createNnrpResultFromRuntimeEvent(operationId, event.event);
       }
     }
   }
@@ -1026,7 +1009,7 @@ export class NnrpBrowserClientSession {
     };
   }
 
-  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpRuntimeEvent> {
+  public async *events(options: NnrpEventPollOptions = {}): AsyncIterable<NnrpClientEvent> {
     while (!this.closed) {
       yield await this.nextEvent(options);
     }
@@ -1065,7 +1048,7 @@ export class NnrpBrowserClientSession {
     return this.#closed || this.#state.client.closed;
   }
 
-  #readNextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpRuntimeEvent> {
+  #readNextEvent(options: NnrpEventPollOptions = {}): Promise<NnrpClientEvent> {
     try {
       this.#ensureOpen();
       validateEventPollOptions(options);
@@ -1077,7 +1060,7 @@ export class NnrpBrowserClientSession {
     if (queued !== undefined) return Promise.resolve(queued);
 
     let waiter: BrowserEventWaiter;
-    const pending = new Promise<NnrpRuntimeEvent>((resolve, reject) => {
+    const pending = new Promise<NnrpClientEvent>((resolve, reject) => {
       waiter = { resolve, reject };
       this.#eventWaiters.push(waiter);
     });
@@ -1198,6 +1181,7 @@ export class NnrpBrowserClientSession {
       }
       triggered = true;
       this.#cancelledOperations.add(operationId);
+      onCancelled?.(error);
       cleanup();
       const cancellation = this.cancel({
         operationId,
@@ -1207,14 +1191,7 @@ export class NnrpBrowserClientSession {
         flags: 0,
         diagnosticBytes: 0,
       });
-      if (onCancelled === undefined) {
-        void cancellation.catch(() => {});
-      } else {
-        void cancellation.then(
-          () => onCancelled(error),
-          (sendError) => onCancelled(sendError),
-        );
-      }
+      void cancellation.catch(() => {});
     };
     const onAbort = () => trigger(1, submitCancelledError("wasm", options.signal));
 
@@ -1381,7 +1358,7 @@ export class NnrpBrowserClientSession {
       const payload = metadataBody === undefined
         ? encodeRuntimeObjectMetadata(messageType, metadata, tail)
         : encodeRuntimeObjectMetadataSegments(messageType, metadata, [metadataBody, tail]);
-      await this.#sendRuntimeFrame(messageType, payload);
+      await this.#sendRuntimeFrame(messageType, payload, runtimeObjectOperationId(messageType, metadata));
       this.#runtimeObjects.commit(messageType, metadata);
     });
     this.#runtimeObjectQueue = send.catch(() => undefined);
@@ -1426,11 +1403,29 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  #sendRuntimeFrame(messageType: NnrpMessageType, payload: Uint8Array): Promise<void> {
+  #sendRuntimeFrame(
+    messageType: NnrpMessageType,
+    payload: Uint8Array,
+    operationId?: bigint,
+  ): Promise<void> {
     try {
       this.#ensureOpen();
-      const frameId = this.#nextRuntimeFrameId;
-      this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      let frameId: number;
+      if (operationId === undefined) {
+        frameId = this.#nextRuntimeFrameId;
+        this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      } else if (operationId === 0n) {
+        if (!allowsSessionScopedOperation(messageType)) {
+          throw sessionScopedRuntimeOperationError(messageType);
+        }
+        frameId = 0;
+      } else {
+        const operationFrameId = this.#frameForOperation(operationId);
+        if (operationFrameId === undefined) {
+          throw inactiveRuntimeOperationError(messageType, operationId);
+        }
+        frameId = operationFrameId;
+      }
       return this.#role().sendRuntimeFrame(messageType, frameId, payload);
     } catch (error) {
       return Promise.reject(error);
@@ -1458,10 +1453,10 @@ export class NnrpBrowserClientSession {
       const role = this.#role();
       while (!this.#closed && (this.#eventWaiters.length > 0 || this.#resultWaiters.size > 0)) {
         const event = await role.awaitEvent();
-        if (this.#shouldSuppressCancelledPayload(event)) continue;
-        if (isRuntimeTerminalEvent(event)) {
-          const frameId = event.header.frameId;
-          const operationId = terminalOperationId(event, this.#operationByFrame.get(frameId));
+        if (event.type === "runtime" && this.#shouldSuppressCancelledPayload(event.event)) continue;
+        if (event.type === "runtime" && isRuntimeTerminalEvent(event.event)) {
+          const frameId = event.event.header.frameId;
+          const operationId = terminalOperationId(event.event, this.#operationByFrame.get(frameId));
           const waiter = this.#resultWaiters.get(frameId);
           if (waiter !== undefined) {
             if (operationId === undefined) {
@@ -1472,14 +1467,26 @@ export class NnrpBrowserClientSession {
                 retryable: false,
               });
             }
-            browserRuntimeEventOperationIds.set(event, operationId);
+            browserRuntimeEventOperationIds.set(event.event, operationId);
             this.#resultWaiters.delete(frameId);
-            this.completeEvent(event);
-            waiter.resolve(createNnrpResultFromRuntimeEvent(operationId, event));
+            this.completeEvent(event.event);
+            waiter.resolve(createNnrpResultFromRuntimeEvent(operationId, event.event));
             continue;
           }
         }
-        this.completeEvent(event);
+        if (event.type === "lifecycle" && isTerminalOperationState(event.event.state)) {
+          const frameId = this.#frameForOperation(event.event.operationId);
+          const waiter = frameId === undefined ? undefined : this.#resultWaiters.get(frameId);
+          if (frameId !== undefined) {
+            this.#finishTerminalFrame(frameId);
+          }
+          if (frameId !== undefined && waiter !== undefined) {
+            this.#resultWaiters.delete(frameId);
+            waiter.resolve(createNnrpResultFromLifecycle(event.event));
+            continue;
+          }
+        }
+        if (event.type === "runtime") this.completeEvent(event.event);
         const waiter = this.#eventWaiters.shift();
         if (waiter === undefined) this.#eventQueue.push(event);
         else waiter.resolve(event);
@@ -1491,12 +1498,19 @@ export class NnrpBrowserClientSession {
     }
   }
 
-  #takeQueuedEvent(): NnrpRuntimeEvent | undefined {
+  #takeQueuedEvent(): NnrpClientEvent | undefined {
     while (this.#eventQueue.length > 0) {
       const event = this.#eventQueue.shift()!;
-      if (this.#shouldSuppressCancelledPayload(event)) continue;
-      this.completeEvent(event);
+      if (event.type === "runtime" && this.#shouldSuppressCancelledPayload(event.event)) continue;
+      if (event.type === "runtime") this.completeEvent(event.event);
       return event;
+    }
+    return undefined;
+  }
+
+  #frameForOperation(operationId: bigint): number | undefined {
+    for (const [frameId, candidate] of this.#operationByFrame) {
+      if (candidate === operationId) return frameId;
     }
     return undefined;
   }
@@ -1616,7 +1630,7 @@ function validateBrowserTransportProviders(providers: readonly NnrpBrowserTransp
 }
 
 function selectBrowserTransportProvider(
-  endpoint: string | URL,
+  endpoint: NnrpEndpoint,
   providerRoutes: NnrpClientProviderRoutes | undefined,
   providers: readonly NnrpBrowserTransportProvider[],
   policy: NnrpTransportPolicy,
@@ -1633,37 +1647,28 @@ function selectBrowserTransportProvider(
   }
   const securitySatisfied = routeResolved && providerEndpoint !== undefined &&
     !(route !== undefined && "security" in route) && browserRouteSecuritySatisfied(endpoint, providerEndpoint);
-  const observedProviders = providers.length === 0 ? [uninstalledBrowserProviderObservation()] : providers;
-  const selection = selectTransport(
-    createTransportCandidates({
-      local: { ...manifest, transports: ["websocket"] },
-      peer: { ...manifest, transports: ["websocket"] },
-      providers: observedProviders,
-      candidateReadiness: observedProviders.map((provider) => ({
-        kind: provider.kind,
-        providerId: provider.metadata.id,
-        routeResolved,
-        securitySatisfied,
-        ...(!routeResolved || !securitySatisfied
-          ? {
-            diagnostic: {
-              code: !routeResolved
-                ? "NNRP_BROWSER_PROVIDER_ROUTE_UNRESOLVED"
-                : "NNRP_BROWSER_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
-              message: !routeResolved
-                ? "Browser WebSocket provider route is unresolved."
-                : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
-              source: "transport" as const,
-              retryable: false,
-              transport: "websocket" as const,
-            },
-          }
-          : {}),
-      })),
-    }),
+  const descriptors = providers.length === 0
+    ? [uninstalledBrowserProviderDescriptor()]
+    : providers.map((provider) => provider.descriptor);
+  const selection = selectTransport(descriptors, {
+    peerSupportedTransports: manifest.transports,
     policy,
-  );
-  const selected = providers.find((provider) => provider.metadata.id === selection.selected?.provider.id);
+    candidateReadiness: descriptors.map((provider) => ({
+      transportId: provider.transportId,
+      providerId: provider.metadata.id,
+      routeResolved,
+      securitySatisfied,
+      ...(!routeResolved || !securitySatisfied
+        ? {
+          diagnostic: !routeResolved
+            ? "Browser WebSocket provider route is unresolved."
+            : "Browser WebSocket provider route cannot satisfy the application endpoint security intent.",
+        }
+        : {}),
+    })),
+    probeObservations: [],
+  });
+  const selected = providers.find((provider) => provider.metadata.id === selection.selectedProvider.metadata.id);
   if (selected === undefined || providerEndpoint === undefined) {
     throw new NnrpTransportError({
       code: "NNRP_BROWSER_TRANSPORT_SELECTION_INCONSISTENT",
@@ -1690,32 +1695,36 @@ function validateBrowserProviderRoutes(providerRoutes: NnrpClientProviderRoutes 
   }
 }
 
-function browserRouteSecuritySatisfied(applicationEndpoint: string | URL, providerEndpoint: string): boolean {
-  return parseApplicationEndpoint(applicationEndpoint).protocol !== "nnrps:" ||
+function browserRouteSecuritySatisfied(applicationEndpoint: NnrpEndpoint, providerEndpoint: string): boolean {
+  return !applicationEndpoint.secure ||
     new URL(providerEndpoint).protocol === "wss:";
 }
 
-function resolveBrowserWebSocketEndpoint(endpoint: string | URL | undefined): string {
+function resolveBrowserWebSocketEndpoint(endpoint: import("@nnrp/core").NnrpProviderEndpoint | undefined): string {
   if (endpoint === undefined) throw new TypeError("Browser WebSocket routes require an explicit endpoint.");
-  const parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+  const parsed = new URL(endpoint.uri);
   if ((parsed.protocol !== "ws:" && parsed.protocol !== "wss:") || parsed.hostname.length === 0) {
     throw new TypeError("Browser WebSocket routes require a ws:// or wss:// endpoint.");
   }
   return parsed.toString();
 }
 
-function uninstalledBrowserProviderObservation(): NnrpTransportProvider {
+function uninstalledBrowserProviderDescriptor(): import("@nnrp/core").NnrpTransportProviderDescriptor {
+  const metadata = {
+    id: "nnrp.transport.websocket.uninstalled",
+    cost: { modelId: 0, units: 0n },
+    preferenceRank: 0xffff,
+    limits: { maxFrameBytes: 67_108_864n },
+    limitations: ["browser-host-only"] as const,
+  };
   return {
-    kind: "websocket",
-    endpointSchemes: ["ws", "wss"],
-    localAvailable: false,
-    metadata: {
-      id: "nnrp.transport.websocket.uninstalled",
-      cost: { modelId: 0, units: 0n },
-      preferenceRank: 0xffff,
-      limits: { maxFrameBytes: 67_108_864n },
-      limitations: ["browser-host-only"],
-    },
+    name: "@nnrp/transport-websocket",
+    version: "uninstalled",
+    transportId: "websocket",
+    kind: "wasm",
+    available: false,
+    metadata,
+    diagnostic: "Browser WebSocket provider is not installed.",
   };
 }
 
@@ -1759,15 +1768,15 @@ function isBrowserTransportProvider(value: unknown): value is NnrpBrowserTranspo
     typeof provider.localAvailable === "boolean";
 }
 
-function normalizeEndpoint(endpoint: string | URL): string {
-  return endpoint instanceof URL ? endpoint.toString() : endpoint;
+function normalizeEndpoint(endpoint: NnrpEndpoint): string {
+  return endpoint.uri;
 }
 
-function validateEndpoint(endpoint: string | URL): void {
-  if (normalizeEndpoint(endpoint).trim().length === 0) {
+function validateEndpoint(endpoint: NnrpEndpoint): void {
+  if (!(endpoint instanceof NnrpEndpoint)) {
     throw new NnrpCapabilityError({
-      code: "NNRP_WASM_ENDPOINT_EMPTY",
-      message: "NNRP browser endpoint must not be empty.",
+      code: "NNRP_WASM_ENDPOINT_INVALID",
+      message: "NNRP browser endpoint must be an NnrpEndpoint value.",
       source: "wasm",
       retryable: false,
     });
@@ -1875,6 +1884,10 @@ function isRuntimeTerminalEvent(event: NnrpRuntimeEvent): boolean {
   return event.header.messageType === NnrpMessageType.ResultPush ||
     event.header.messageType === NnrpMessageType.ResultDrop ||
     event.header.messageType === NnrpMessageType.ResultDropReason;
+}
+
+function isTerminalOperationState(state: NnrpOperationState): boolean {
+  return state === "superseded" || state === "cancelled" || state === "failed" || state === "completed";
 }
 
 function terminalOperationId(event: NnrpRuntimeEvent, frameOperationId?: bigint): bigint | undefined {
@@ -2121,6 +2134,71 @@ function assertClientRuntimeControlMessage(messageType: NnrpMessageType): void {
   throw new NnrpProtocolError({
     code: "NNRP_CLIENT_RUNTIME_MESSAGE_DIRECTION_INVALID",
     message: `Message type ${messageType} cannot be sent by a client session.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
+function runtimeControlOperationId(
+  messageType: NnrpMessageType,
+  metadata: RuntimeControlMetadata,
+): bigint | undefined {
+  if (messageType === NnrpMessageType.Cancel || messageType === NnrpMessageType.Abort) {
+    return (metadata as ControlRequestMetadata).operationId;
+  }
+  if (
+    messageType === NnrpMessageType.PriorityUpdate ||
+    messageType === NnrpMessageType.Deadline ||
+    messageType === NnrpMessageType.ExpireAt
+  ) {
+    return (metadata as SchedulingMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.Supersede) {
+    return (metadata as SupersedeMetadata).oldOperationId;
+  }
+  if (messageType === NnrpMessageType.BudgetUpdate) {
+    return (metadata as BudgetMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.RouteHint || messageType === NnrpMessageType.ExecutionHint) {
+    return (metadata as RouteHintMetadata).operationId;
+  }
+  return undefined;
+}
+
+function runtimeObjectOperationId(
+  messageType: NnrpMessageType,
+  metadata: RuntimeObjectSendMetadata,
+): bigint | undefined {
+  if (messageType === NnrpMessageType.ObjectRef) {
+    return (metadata as ObjectReferenceMetadata).operationId;
+  }
+  if (messageType === NnrpMessageType.ObjectRelease) {
+    return (metadata as ObjectReleaseMetadata).operationId;
+  }
+  return undefined;
+}
+
+function inactiveRuntimeOperationError(messageType: NnrpMessageType, operationId: bigint): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_RUNTIME_OPERATION_INACTIVE",
+    message: `${NnrpMessageType[messageType]} references inactive operation ${operationId}.`,
+    source: "protocol",
+    retryable: false,
+  });
+}
+
+function allowsSessionScopedOperation(messageType: NnrpMessageType): boolean {
+  return messageType === NnrpMessageType.Cancel ||
+    messageType === NnrpMessageType.Abort ||
+    messageType === NnrpMessageType.BudgetUpdate ||
+    messageType === NnrpMessageType.ObjectRef ||
+    messageType === NnrpMessageType.ObjectRelease;
+}
+
+function sessionScopedRuntimeOperationError(messageType: NnrpMessageType): NnrpProtocolError {
+  return new NnrpProtocolError({
+    code: "NNRP_RUNTIME_OPERATION_SCOPE_INVALID",
+    message: `${NnrpMessageType[messageType]} requires a non-zero operation ID.`,
     source: "protocol",
     retryable: false,
   });

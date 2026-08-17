@@ -1,4 +1,4 @@
-import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCacheObjectKind, type NnrpCapabilityManifest, type NnrpClientProviderRoutes, type NnrpEventPollOptions, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, NnrpSessionPriorityClass, NnrpSessionRecoveryTicket, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportCandidateReadiness, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProbeObservation, type NnrpTransportProvider, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
+import { type BudgetMetadata, type CacheInvalidateMetadata, type CacheMissMetadata, type CacheReferenceMetadata, type CapabilityMetadata, type ControlRequestMetadata, NnrpCacheObjectKind, type NnrpCapabilityManifest, type NnrpClientEvent, type NnrpClientProviderRoutes, NnrpEndpoint, type NnrpEventPollOptions, NnrpMessageType, type NnrpResult, type NnrpRuntimeEvent, type NnrpSessionMigrationRequest, type NnrpSessionPatchRequest, type NnrpSessionPatchResult, NnrpSessionPriorityClass, NnrpSessionRecoveryTicket, type NnrpSubmitOptions, type NnrpSubmitRequest, type NnrpTransportConnection, type NnrpTransportEndpoint, type NnrpTransportKind, type NnrpTransportPolicy, type NnrpTransportProvider, type NnrpTransportSelectionOptions, type NnrpTransportSelectionSummary, type ObjectDeltaMetadata, type ObjectDescriptorMetadata, type ObjectReferenceMetadata, type ObjectReleaseMetadata, type RouteHintMetadata, type RuntimeControlMetadata, type SchedulingMetadata, type SupersedeMetadata, type TraceContextMetadata } from "@nnrp/core";
 import { NnrpWasmBindingUnavailableError } from "./errors.js";
 export { NnrpWasmBindingUnavailableError };
 export interface NnrpBrowserRuntimeOptions {
@@ -9,19 +9,11 @@ export interface NnrpBrowserRuntimeOptions {
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
 }
 export interface NnrpBrowserConnectOptions {
-    readonly endpoint: string;
+    readonly endpoint: NnrpEndpoint;
     readonly providerRoutes?: NnrpClientProviderRoutes;
     readonly transportPolicy?: NnrpTransportPolicy;
     readonly transportProviders?: readonly NnrpBrowserTransportProvider[];
     readonly sessionDefaults?: NnrpBrowserSessionOptions;
-}
-export interface NnrpBrowserTransportSelectionOptions {
-    readonly peerManifest: NnrpCapabilityManifest;
-    readonly providers?: readonly NnrpBrowserTransportProvider[];
-    readonly policy?: NnrpTransportPolicy;
-    readonly requestedMaxFrameBytes?: bigint;
-    readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-    readonly probeObservations?: readonly NnrpTransportProbeObservation[];
 }
 export type NnrpBrowserTransportKind = Extract<NnrpTransportKind, "websocket">;
 export interface NnrpBrowserTransportProvider extends NnrpTransportProvider {
@@ -89,7 +81,7 @@ export declare class NnrpBrowserRuntime {
     get artifact(): NnrpResolvedWasmArtifact | undefined;
     get transportProviders(): readonly NnrpBrowserTransportProvider[];
     connect(options: NnrpBrowserConnectOptions): NnrpBrowserClient;
-    selectTransport(options: NnrpBrowserTransportSelectionOptions): NnrpTransportSelectionSummary;
+    selectTransport(options: NnrpTransportSelectionOptions): NnrpTransportSelectionSummary;
     protocolVersion(): Promise<NnrpWasmProtocolVersion>;
     close(): Promise<void>;
     get closed(): boolean;
@@ -110,7 +102,7 @@ export declare class NnrpBrowserClient {
     get runtime(): NnrpBrowserRuntime;
     openSession(options?: NnrpBrowserSessionOptions): Promise<NnrpBrowserClientSession>;
     resumeSession(ticket: NnrpSessionRecoveryTicket, options?: NnrpBrowserSessionOptions): Promise<NnrpBrowserClientSession>;
-    nextSessionEvent(sessionId: number, options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
+    nextSessionEvent(sessionId: number, options?: NnrpEventPollOptions): Promise<NnrpClientEvent>;
     close(): Promise<void>;
     get closed(): boolean;
 }
@@ -149,11 +141,11 @@ export declare class NnrpBrowserClientSession {
     invalidateCache(metadata: CacheInvalidateMetadata): Promise<void>;
     inFlightFrames(): readonly number[];
     completeEvent(event: NnrpRuntimeEvent): void;
-    nextEvent(options?: NnrpEventPollOptions): Promise<NnrpRuntimeEvent>;
+    nextEvent(options?: NnrpEventPollOptions): Promise<NnrpClientEvent>;
     nextResult(options?: NnrpEventPollOptions): Promise<NnrpResult>;
     migrate(request: NnrpSessionMigrationRequest): Promise<void>;
     patch(request: NnrpSessionPatchRequest): Promise<NnrpSessionPatchResult>;
-    events(options?: NnrpEventPollOptions): AsyncIterable<NnrpRuntimeEvent>;
+    events(options?: NnrpEventPollOptions): AsyncIterable<NnrpClientEvent>;
     recoveryTicket(): NnrpSessionRecoveryTicket | undefined;
     close(): Promise<void>;
     get closed(): boolean;

@@ -8,7 +8,9 @@ import {
   parseReleaseChecksums,
 } from "./rust-artifact-policy.ts";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.23";
+const DEFAULT_RUST_ARTIFACT_RUN_ID = "32009630987";
+const DEFAULT_RUST_ARTIFACT_COMMIT = "00074cf3c09002de940f011e229de729aa377e88";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },
@@ -17,21 +19,25 @@ const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "websocket", packageDir: "packages/transport-websocket" },
 ] as const;
 
-const version = Deno.env.get("NNRP_JS_RUST_ARTIFACT_VERSION") ?? DEFAULT_RUST_ARTIFACT_VERSION;
-const cacheDir = Deno.env.get("NNRP_JS_RUST_ARTIFACT_CACHE") ?? "artifacts/rust-artifacts";
-const workflowRunId = Deno.env.get("NNRP_JS_RUST_ARTIFACT_RUN_ID");
-const workflowCommit = Deno.env.get("NNRP_JS_RUST_ARTIFACT_COMMIT");
-
-if ((workflowRunId === undefined) !== (workflowCommit === undefined)) {
+const artifactVersionOverride = Deno.env.get("NNRP_JS_RUST_ARTIFACT_VERSION");
+const artifactRunIdOverride = Deno.env.get("NNRP_JS_RUST_ARTIFACT_RUN_ID");
+const artifactCommitOverride = Deno.env.get("NNRP_JS_RUST_ARTIFACT_COMMIT");
+const overrideCount = [artifactVersionOverride, artifactRunIdOverride, artifactCommitOverride]
+  .filter((value) => value !== undefined).length;
+if (overrideCount !== 0 && overrideCount !== 3) {
   throw new Error(
-    "NNRP_JS_RUST_ARTIFACT_RUN_ID and NNRP_JS_RUST_ARTIFACT_COMMIT must be set together",
+    "NNRP_JS_RUST_ARTIFACT_VERSION, NNRP_JS_RUST_ARTIFACT_RUN_ID, and " +
+      "NNRP_JS_RUST_ARTIFACT_COMMIT must be overridden together",
   );
 }
 
+const version = artifactVersionOverride ?? DEFAULT_RUST_ARTIFACT_VERSION;
+const cacheDir = Deno.env.get("NNRP_JS_RUST_ARTIFACT_CACHE") ?? "artifacts/rust-artifacts";
+const workflowRunId = artifactRunIdOverride ?? DEFAULT_RUST_ARTIFACT_RUN_ID;
+const workflowCommit = artifactCommitOverride ?? DEFAULT_RUST_ARTIFACT_COMMIT;
+
 await Deno.mkdir(cacheDir, { recursive: true });
-if (workflowRunId !== undefined && workflowCommit !== undefined) {
-  await prepareWorkflowArtifactSource(workflowRunId, workflowCommit, version);
-}
+await prepareWorkflowArtifactSource(workflowRunId, workflowCommit, version);
 const releaseChecksums = await loadReleaseChecksums(version);
 
 for (const transportPackage of transportPackages) {
@@ -78,7 +84,6 @@ async function prepareTransportReleaseAssets(
   artifactVersion: string,
   releaseChecksums: ReadonlyMap<string, string>,
 ): Promise<void> {
-  const missingAssets: string[] = [];
   for (const policy of NATIVE_ARTIFACTS) {
     const assetName =
       `nnrp-ffi-transport-${transportPackage.transport}-native-${policy.artifactTag}-${artifactVersion}.zip`;
@@ -88,41 +93,13 @@ async function prepareTransportReleaseAssets(
     }
     const path = `${cacheDir}/${assetName}`;
     if (!await hasExpectedSha256(path, expectedSha256)) {
-      await Deno.remove(path).catch((error) => {
-        if (!(error instanceof Deno.errors.NotFound)) {
-          throw error;
-        }
-      });
-      missingAssets.push(assetName);
+      throw new Error(`pinned Rust workflow artifact is missing or has an invalid ${assetName}`);
     }
   }
-  if (missingAssets.length === 0) {
-    return;
-  }
-
-  await runConcurrent(missingAssets, 4, async (assetName) => {
-    console.log(`downloading ${assetName}`);
-    await downloadReleaseAsset(assetName, artifactVersion, true);
-  });
-}
-
-async function runConcurrent<T>(
-  values: readonly T[],
-  concurrency: number,
-  operation: (value: T) => Promise<void>,
-): Promise<void> {
-  let nextIndex = 0;
-  const worker = async (): Promise<void> => {
-    while (nextIndex < values.length) {
-      const value = values[nextIndex++]!;
-      await operation(value);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
 }
 
 async function loadReleaseChecksums(artifactVersion: string): Promise<ReadonlyMap<string, string>> {
-  await downloadReleaseAsset("SHA256SUMS", artifactVersion, true);
+  await requireWorkflowAsset("SHA256SUMS", artifactVersion);
   return parseReleaseChecksums(await Deno.readTextFile(`${cacheDir}/SHA256SUMS`));
 }
 
@@ -136,7 +113,7 @@ async function prepareBrowserWasmArtifact(
   if (expectedSha256 === undefined) {
     throw new Error(`SHA256SUMS does not contain ${assetName}`);
   }
-  await downloadReleaseAsset(assetName, artifactVersion, true);
+  await requireWorkflowAsset(assetName, artifactVersion);
   await verifySha256(`${cacheDir}/${assetName}`, expectedSha256);
   await resetDir(extractDir);
   await extractZip(`${cacheDir}/${assetName}`, extractDir);
@@ -179,74 +156,24 @@ async function validateBrowserWasmBinary(path: string, assetName: string): Promi
   }
 }
 
-async function downloadReleaseAsset(
+async function requireWorkflowAsset(
   assetName: string,
   artifactVersion = version,
-  replacePartial = false,
 ): Promise<void> {
   const outputPath = `${cacheDir}/${assetName}`;
-  if (workflowRunId !== undefined) {
-    try {
-      const stat = await Deno.stat(outputPath);
-      if (stat.isFile) {
-        return;
-      }
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    }
-    throw new Error(`Rust workflow artifact ${workflowRunId} does not contain ${assetName}`);
-  }
-
-  if (!replacePartial) {
-    try {
-      const stat = await Deno.stat(outputPath);
-      if (stat.isFile) {
-        return;
-      }
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    }
-  }
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    if (replacePartial) {
-      await Deno.remove(outputPath).catch((error) => {
-        if (!(error instanceof Deno.errors.NotFound)) {
-          throw error;
-        }
-      });
-    }
-
-    const output = await new Deno.Command("gh", {
-      args: [
-        "release",
-        "download",
-        `v${artifactVersion}`,
-        "--repo",
-        "NagareWorks/nnrp-rs",
-        "--pattern",
-        assetName,
-        "--dir",
-        cacheDir,
-      ],
-      stdout: "inherit",
-      stderr: "inherit",
-    }).output();
-
-    if (output.success) {
+  try {
+    const stat = await Deno.stat(outputPath);
+    if (stat.isFile) {
       return;
     }
-    if (attempt < 3) {
-      console.warn(`retrying ${assetName} after failed download attempt ${attempt}`);
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
     }
   }
-
-  throw new Error(`failed to download nnrp-rs release asset ${assetName} after 3 attempts`);
+  throw new Error(
+    `pinned Rust workflow artifact ${workflowRunId} for ${artifactVersion} does not contain ${assetName}`,
+  );
 }
 
 async function prepareWorkflowArtifactSource(

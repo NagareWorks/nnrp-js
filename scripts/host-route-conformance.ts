@@ -26,7 +26,7 @@ export interface HostRouteProfile {
 export const NATIVE_HOST_ROUTE_PROFILES: readonly HostRouteProfile[] = [
   {
     name: "installed-native",
-    expected: 9,
+    expected: 10,
     modes: ["suite_as_client", "suite_as_server"],
     providers: [
       {
@@ -255,7 +255,7 @@ export function createClientRouteEvidence(
   selectedProviderId?: string,
 ): HostRouteEvidence {
   const byIdentity = new Map(
-    candidates.map((candidate) => [identity(candidate.kind, candidate.provider.id), candidate]),
+    candidates.map((candidate) => [identity(candidate.transportId, candidate.provider.id), candidate]),
   );
   const candidateEvidence = fixture.routes.map((route): HostRouteCandidateEvidence => {
     const candidate = byIdentity.get(identity(route.transport, route.provider_id));
@@ -290,7 +290,7 @@ export function createSuccessfulClientRouteEvidence(
   selectedProviderId: string,
 ): HostRouteEvidence {
   const candidates = fixture.routes.map((route): NnrpTransportCandidate => ({
-    kind: route.transport,
+    transportId: route.transport,
     provider: {
       id: route.provider_id,
       cost: { modelId: 0, units: 0n },

@@ -30,10 +30,12 @@
   - [x] Run the suite validator on every produced report.
   - [x] Keep adapter conformance and OpenAI API profile conformance as separate commands/jobs.
   - [x] Consume the suite-owned Preview4 adapter plan instead of generating SDK-owned skip reports.
-  - [x] Require exact equality between the 10 mandatory/optional suite-selected cases and the formal JS adapter catalog.
+  - [x] Require exact equality between all 32 suite-selected cases and the formal JS adapter catalog.
   - [x] Keep `supersede` and `recoverable-error` executable and directly tested while their frozen status remains
         experimental.
-  - [x] Declare the complete 18-capability Preview4 catalog used for adapter case selection.
+  - [x] Declare the complete 28-capability Preview4 catalog used for adapter case selection.
+  - [x] Execute handshake, session, flow, submit/result, object/cache, probe, TCP, and QUIC cases through real released
+        codecs or live provider paths instead of skip reports.
 
 ## CI Coverage
 

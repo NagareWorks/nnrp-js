@@ -1,6 +1,6 @@
-# 10 - SDK Contract V9 Recovery And Multiplexing
+# 10 - SDK Contract V15 Role Events And Multiplexing
 
-This workstream adopts frozen NNRP/1 Preview4 SDK API contract version 9. Public JavaScript APIs remain
+This workstream adopts frozen NNRP/1 Preview4 SDK API contract version 15. Public JavaScript APIs remain
 transport-neutral and never expose native handles, generations, raw recovery tokens, or earlier-preview compatibility
 paths.
 
@@ -8,9 +8,25 @@ paths.
 
 - [x] Add canonical `NnrpSessionRecoveryTicket` with the exact NRTK version 1 encoding and validation rules.
 - [x] Add exact 48-byte `NnrpSessionOpenMetadata` and `NnrpSessionPriorityClass` codec surfaces.
-- [x] Export the frozen v9 core symbols and reject non-canonical ticket or metadata encodings.
-- [x] Upgrade the machine-contract checker from version 8 to version 9.
-- [x] Validate every JavaScript v9 projection, option field, default, role operation, and async semantic.
+- [x] Export the frozen recovery and multiplexing symbols and reject non-canonical ticket or metadata encodings.
+- [x] Upgrade the machine-contract checker to version 15.
+- [x] Validate every JavaScript v15 projection, option field, default, role operation, and async semantic.
+  - [x] Resolve every `@nnrp/*.<symbol>` projection to a real public package export.
+  - [x] Validate projected declaration structure rather than accepting a matching projection-map string alone.
+  - [x] Fail the gate when a role method, option field, default, or async contract is documented but absent from the
+        generated public declaration snapshots.
+- [x] Freeze deterministic pre-dispatch cancellation, post-dispatch cancellation, timeout, and lifecycle-race behavior.
+
+## Closed Role Events
+
+- [x] Expose `@nnrp/core.NnrpClientEvent` as the exact runtime/lifecycle tagged union.
+- [x] Return `NnrpClientEvent` from native and browser event polling and async iteration.
+- [x] Decode native and WASM headerless lifecycle packets without synthesizing wire headers.
+- [x] Expose `@nnrp/native-server.NnrpServerEvent` as the exact submit/runtime/lifecycle tagged union.
+- [x] Expose owning `@nnrp/native-server.NnrpServerOperation` instances for submit delivery and replies.
+- [x] Make `receiveSubmit()` selective without dropping skipped runtime or lifecycle events.
+- [x] Remove session-owned operation reply methods and reject generic-control bypasses.
+- [x] Preserve the exact native operation handle for progress, partial, result, and result-drop sends.
 
 ## Native Client
 
@@ -48,16 +64,17 @@ paths.
 - [x] Preserve package-owned carrier and role behavior in every transport package.
 - [x] Assert ABI sizes, offsets, symbols, and manifest versions on 32-bit and 64-bit layouts.
 - [x] Keep role-level calls coarse; recovery must not add per-frame FFI crossings.
-- [x] Update the browser-client WASM import/export contract for v9 session open, resume, and recovery tickets.
+- [x] Update the browser-client WASM import/export contract for frozen session open, resume, and recovery tickets.
 
 ## Validation And Release
 
 - [x] Add unit coverage for canonical tickets, option validation, async handshake, resume, policy, and multi-session
       use.
-- [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against audited Rust release `1.0.0-preview.4.22` at merge commit
-      `784a4a354f4e6a73798248f93cf574bd7a5af829`.
+- [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against successful full-matrix Rust workflow artifact run
+      `32009630987` at merge commit `00074cf3c09002de940f011e229de729aa377e88`.
 - [x] Run suite-owned adapter conformance and native/browser independent-process wire E2E without skips.
 - [x] Run format, lint, typecheck, tests, total and incremental coverage, build, package, and installed-package gates.
 - [x] Inspect every staged npm package and verify only provider packages contain their owned native artifacts.
-- [x] Update README, release notes, examples, and public API snapshots only after implementation matches contract v9.
-- [x] Pin the audited Rust ABI 4.4 release artifact version to `1.0.0-preview.4.22`.
+- [x] Update README, release notes, examples, and public API snapshots after implementation matches contract v15.
+- [x] Pin audited Rust `1.0.0-preview.4.23`, whose tag, source commit, workflow artifacts, and ABI 4.4 manifest identify
+      the same server-operation lifetime implementation.

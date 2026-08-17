@@ -1,10 +1,11 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint } from "@nnrp/core";
 import { NnrpNativeBindingUnavailableError, openNativeClient } from "@nnrp/native-client";
 import { createTokenSubmitRequest, NNRP_DEFAULT_SUBMIT_HEADER, NNRP_DEFAULT_SUBMIT_POLICY } from "@nnrp/core";
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const client = await openNativeClient({
-  endpoint: "nnrp://127.0.0.1:4433/session/default",
+  endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
   transports: [createTcpTransportProvider(), createQuicTransportProvider()],
   transportPolicy: "auto",
 });

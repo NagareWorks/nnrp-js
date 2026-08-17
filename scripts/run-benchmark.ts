@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { resolve } from "node:path";
 import {
   createTokenSubmitRequest,
@@ -19,11 +20,12 @@ import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { openNativeBenchmarkFfi } from "./benchmark-native-ffi.ts";
 import { createBenchmarkReport, parseCommandOptions, selectBuildModes, writeJson } from "./sdk-reporting.ts";
-import { createSuccessResult } from "./runtime-event-fixtures.ts";
+import { createSuccessResultReply } from "./runtime-event-fixtures.ts";
+import { awaitClientResultAndServerCompletion, receiveServerRuntimeEvent } from "./server-event-helpers.ts";
 
 const RESULT_SCHEMA_URL =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/benchmark-results.schema.json";
-const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22";
+const RUST_ARTIFACT_VERSION = "1.0.0-preview.4.23";
 const DEFAULT_DURATION_SECONDS = 3;
 const DEFAULT_WARMUP_ITERATIONS = 100;
 const DEFAULT_PAYLOAD_BYTES = 1024;
@@ -184,7 +186,7 @@ async function runRuntimeControlLoop(scenario: BenchmarkScenario): Promise<Bench
       deadlineUnixMs: 0n,
       flags: 0,
     });
-    const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+    const event = await receiveServerRuntimeEvent(pair.serverSession, 5_000);
     if (event.header.messageType !== NnrpMessageType.PriorityUpdate) {
       throw new Error(`expected priority-update, got ${event.header.messageType}`);
     }
@@ -211,7 +213,7 @@ async function runRuntimeObjectReferenceLoop(scenario: BenchmarkScenario): Promi
       flags: 0,
       metadataBytes: 0,
     });
-    const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+    const event = await receiveServerRuntimeEvent(pair.serverSession, 5_000);
     if (event.header.messageType !== NnrpMessageType.ObjectRef) {
       throw new Error(`expected object-ref, got ${event.header.messageType}`);
     }
@@ -240,7 +242,7 @@ async function runRuntimeObjectDeltaLoop(scenario: BenchmarkScenario): Promise<B
       flags: 0,
       metadataBytes: 0,
     }, delta);
-    const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+    const event = await receiveServerRuntimeEvent(pair.serverSession, 5_000);
     if (event.header.messageType !== NnrpMessageType.ObjectDelta) {
       throw new Error(`expected object-delta, got ${event.header.messageType}`);
     }
@@ -304,8 +306,8 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     transportPolicy: "force-websocket",
   });
   const server = serverRuntime.listen({
-    endpoint: "nnrp://localhost/benchmark-browser",
-    providerRoutes: { websocket: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/benchmark-browser"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
     transportPolicy: "force-websocket",
   });
   const accepting = server.accept();
@@ -317,30 +319,34 @@ async function runBrowserWasmWebSocketLoop(scenario: BenchmarkScenario): Promise
     transportPolicy: "force-websocket",
   });
   const client = browserRuntime.connect({
-    endpoint: "nnrp://localhost/benchmark-browser",
-    providerRoutes: { websocket: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://localhost/benchmark-browser"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
   });
   const session = await client.openSession();
   const payload = new Uint8Array(payloadBytes(scenario.workload.payload));
   const serverSessionPromise = accepting;
   const bootstrap = session.submit(tokenSubmit(1n, 1, payload));
   const serverSession = await serverSessionPromise;
-  const bootstrapEvent = await serverSession.receive({ timeoutMillis: 5_000 });
+  const bootstrapOperation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+  const bootstrapEvent = bootstrapOperation.submit;
   if (bootstrapEvent.header.messageType !== NnrpMessageType.FrameSubmit) {
     throw new Error(`expected bootstrap submit, got ${bootstrapEvent.header.messageType}`);
   }
-  await serverSession.sendResult(createSuccessResult(1n, 1, payload));
-  await bootstrap;
+  const bootstrapReply = createSuccessResultReply(payload);
+  await bootstrapOperation.sendResult(bootstrapReply.metadata, bootstrapReply.body);
+  await awaitClientResultAndServerCompletion(serverSession, bootstrap, 5_000, 1n);
   let frameId = 1;
   const operation = async () => {
     frameId += 1;
     const pending = session.submit(tokenSubmit(BigInt(frameId), frameId, payload));
-    const event = await serverSession.receive({ timeoutMillis: 5_000 });
+    const serverOperation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+    const event = serverOperation.submit;
     if (event.header.messageType !== NnrpMessageType.FrameSubmit) {
       throw new Error(`expected submit, got ${event.header.messageType}`);
     }
-    await serverSession.sendResult(createSuccessResult(BigInt(frameId), frameId, payload));
-    await pending;
+    const reply = createSuccessResultReply(payload);
+    await serverOperation.sendResult(reply.metadata, reply.body);
+    await awaitClientResultAndServerCompletion(serverSession, pending, 5_000, BigInt(frameId));
   };
   try {
     return await measureAsyncScenario(scenario, operation, payload.byteLength, "browser WASM role over real WebSocket");
@@ -358,19 +364,22 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   const provider = nativeProvider(transport);
   if (!provider.localAvailable) throw new Error(`${transport} provider is unavailable`);
   const providerEndpoint = transport === "ipc" ? transportEndpoint("ipc") : await reserveEndpoint(provider, transport);
+  const providerRouteEndpoint = FrozenNnrpProviderEndpoint.parse(
+    transport === "tcp" ? `tcp://${providerEndpoint}` : providerEndpoint,
+  );
   const policy = `force-${transport}` as const;
   const endpoint = `nnrp://localhost/benchmark-${transport}`;
   const serverRuntime = await openBackendRuntime({ transports: [provider], transportPolicy: policy });
   const server = serverRuntime.listen({
-    endpoint,
-    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse(endpoint),
+    providerRoutes: { [transport]: { endpoint: providerRouteEndpoint } },
     transportPolicy: policy,
   });
   const accepting = server.accept();
   await delay(25);
   const client = await openNativeClient({
-    endpoint,
-    providerRoutes: { [transport]: { endpoint: providerEndpoint } },
+    endpoint: FrozenNnrpEndpoint.parse(endpoint),
+    providerRoutes: { [transport]: { endpoint: providerRouteEndpoint } },
     transports: [provider],
     transportPolicy: policy,
   });
@@ -378,12 +387,14 @@ async function openNativeRolePair(transport: "tcp" | "ipc" | "websocket"): Promi
   const payload = new Uint8Array(1);
   const bootstrap = clientSession.submit(tokenSubmit(1n, 1, payload));
   const serverSession = await accepting;
-  const event = await serverSession.receive({ timeoutMillis: 5_000 });
+  const bootstrapOperation = await serverSession.receiveSubmit({ timeoutMillis: 5_000 });
+  const event = bootstrapOperation.submit;
   if (event.header.messageType !== NnrpMessageType.FrameSubmit) {
     throw new Error(`expected bootstrap submit, got ${event.header.messageType}`);
   }
-  await serverSession.sendResult(createSuccessResult(1n, 1, payload));
-  await bootstrap;
+  const reply = createSuccessResultReply(payload);
+  await bootstrapOperation.sendResult(reply.metadata, reply.body);
+  await awaitClientResultAndServerCompletion(serverSession, bootstrap, 5_000, 1n);
   return {
     clientSession,
     serverSession,
@@ -412,7 +423,7 @@ async function declareBenchmarkObject(pair: NativeRolePair, size: number): Promi
     lifetimeHintMs: 60_000,
     metadataBytes: 0,
   });
-  const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+  const event = await receiveServerRuntimeEvent(pair.serverSession, 5_000);
   if (event.header.messageType !== NnrpMessageType.ObjectDeclare) {
     throw new Error(`expected object-declare, got ${event.header.messageType}`);
   }
@@ -420,7 +431,7 @@ async function declareBenchmarkObject(pair: NativeRolePair, size: number): Promi
 
 async function startBenchmarkOperation(pair: NativeRolePair, operationId: bigint, frameId: number): Promise<void> {
   await pair.clientSession.submitNoWait(tokenSubmit(operationId, frameId, new Uint8Array(1)));
-  const event = await pair.serverSession.receive({ timeoutMillis: 5_000 });
+  const event = (await pair.serverSession.receiveSubmit({ timeoutMillis: 5_000 })).submit;
   if (event.header.messageType !== NnrpMessageType.FrameSubmit) {
     throw new Error(`expected active submit, got ${event.header.messageType}`);
   }

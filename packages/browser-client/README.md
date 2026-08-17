@@ -19,7 +19,9 @@ import {
   createTypedPayloadSubmitRequest,
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
+  NnrpEndpoint,
   NnrpPayloadKind,
+  NnrpProviderEndpoint,
 } from "@nnrp/core";
 import { openBrowserRuntime } from "@nnrp/browser-client";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
@@ -29,8 +31,8 @@ const runtime = await openBrowserRuntime({
 });
 
 const client = runtime.connect({
-  endpoint: "nnrps://example.test/session/default",
-  providerRoutes: { websocket: { endpoint: "wss://example.test/nnrp" } },
+  endpoint: NnrpEndpoint.parse("nnrps://example.test/session/default"),
+  providerRoutes: { websocket: { endpoint: NnrpProviderEndpoint.parse("wss://example.test/nnrp") } },
 });
 const session = await client.openSession();
 

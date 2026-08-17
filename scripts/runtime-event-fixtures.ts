@@ -65,6 +65,16 @@ export function createSuccessResult(
   return createNnrpResultFromRuntimeEvent(operationId, event);
 }
 
+export function createSuccessResultReply(
+  body: Uint8Array,
+  metadata: Partial<NnrpResultPushMetadata> = {},
+): { readonly metadata: NnrpResultPushMetadata; readonly body: Uint8Array } {
+  return {
+    metadata: { ...DEFAULT_RESULT_PUSH_METADATA, ...metadata },
+    body,
+  };
+}
+
 const DEFAULT_RESULT_PUSH_METADATA: NnrpResultPushMetadata = Object.freeze({
   statusCode: 0,
   resultFlags: 0,

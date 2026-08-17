@@ -1,8 +1,9 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import {
   CacheMissReason,
   CacheReuseScope,
-  createBackendNativeManifest,
   createTokenSubmitRequest,
+  decodeNnrpRuntimeEvent,
   decodeRuntimeObjectMetadata,
   encodeCacheInvalidateMetadata,
   encodeRuntimeControlMetadata,
@@ -18,11 +19,13 @@ import {
   NnrpMessageType,
   type NnrpNativeTransportBinding,
   NnrpProtocolError,
+  type NnrpRuntimeEvent,
   type NnrpSessionOpenMetadata,
   NnrpStandardProfile,
   type NnrpTransportEndpoint,
   NnrpTransportError,
   type NnrpTransportKind,
+  NnrpTransportSelectionError,
   type NnrpTransportServer,
   ObjectReleaseReason,
   OwnershipHint,
@@ -33,14 +36,22 @@ import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
   type NnrpNativeRuntimeCapabilities,
   type NnrpNativeTransportProvider,
+  type NnrpServerSession,
   openBackendRuntime,
   validateNativeRuntimeCapabilities,
 } from "../src/index.ts";
 import { createQuicTransportProvider } from "@nnrp/transport-quic";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
-import { createSuccessResult } from "../../../scripts/runtime-event-fixtures.ts";
+import { createSuccessResultReply } from "../../../scripts/runtime-event-fixtures.ts";
 
 const SERVER_ROLE_ADOPT = Symbol.for("nnrp.internal.native.server-role-adopt.v1");
+
+async function receiveRuntimeEvent(session: NnrpServerSession): Promise<NnrpRuntimeEvent> {
+  const event = await session.nextEvent();
+  if (event.type === "runtime") return event.event;
+  if (event.type === "submit") return event.operation.submit;
+  throw new Error(`expected runtime event, received lifecycle state ${event.event.state}`);
+}
 
 interface ObservedServerRoleOptions {
   readonly supportedProfiles: readonly number[];
@@ -81,7 +92,7 @@ Deno.test("@nnrp/native-server opens backend runtime and listens with explicit p
     ],
   });
   const server = runtime.listen({
-    endpoint: "nnrp://0.0.0.0:4433/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default"),
     providerRoutes: { quic: { security: testServerSecurity() } },
     transportPolicy: "force-quic",
   });
@@ -129,7 +140,7 @@ Deno.test("@nnrp/native-server passes frozen session defaults and async admissio
     transportPolicy: "force-tcp",
   });
   const server = runtime.listen({
-    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
     sessionDefaults: {
       supportedProfiles: [NnrpStandardProfile.Token, NnrpStandardProfile.Tensor],
       supportedCacheObjects: [1, 3],
@@ -198,7 +209,7 @@ Deno.test("@nnrp/native-server forwards accept timeout and keeps the default pol
     })],
     transportPolicy: "force-tcp",
   });
-  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
   const session = await server.accept({ timeoutMs: 1_250 });
 
   if (adopted === undefined) throw new Error("server role options were not observed");
@@ -239,13 +250,15 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
     transports: [createTcpTransportProvider({ binding: fakeTransportBinding("tcp") })],
   });
   const tcpSummary = tcpRuntime.selectTransport({
-    peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
+    peerSupportedTransports: ["tcp", "quic"],
+    policy: "auto",
     candidateReadiness: [{
-      kind: "tcp",
+      transportId: "tcp",
       providerId: "nnrp.transport.tcp.native",
       routeResolved: true,
       securitySatisfied: true,
     }],
+    probeObservations: [],
   });
 
   assertEquals(tcpSummary.selected, "tcp");
@@ -257,12 +270,18 @@ Deno.test("@nnrp/native-server selects only installed transport providers", asyn
   const noProviderError = assertThrows(
     () =>
       noProviderRuntime.selectTransport({
-        peerManifest: createBackendNativeManifest(["transport.tcp", "transport.quic"]),
+        peerSupportedTransports: ["tcp", "quic"],
+        policy: "auto",
         candidateReadiness: [],
+        probeObservations: [],
       }),
-    NnrpTransportError,
+    NnrpTransportSelectionError,
   );
-  assertEquals(noProviderError.diagnostic.code, "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT");
+  assertEquals(noProviderError.code, "NO_VIABLE_TRANSPORT");
+  assertEquals(
+    noProviderError.diagnostic,
+    "No viable transport provider remains after applying policy and evidence.",
+  );
 });
 
 Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed providers", async () => {
@@ -271,7 +290,11 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
   });
 
   const error = assertThrows(
-    () => runtime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default", transportPolicy: "force-quic" }),
+    () =>
+      runtime.listen({
+        endpoint: FrozenNnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default"),
+        transportPolicy: "force-quic",
+      }),
     NnrpTransportError,
   );
 
@@ -281,7 +304,7 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
   const endpointError = assertThrows(
     () =>
       runtime.listen({
-        endpoint: "nnrp://0.0.0.0:4433/session/default",
+        endpoint: FrozenNnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default"),
         providerRoutes: { udp: { endpoint: "127.0.0.1:4433" } } as never,
       }),
     NnrpTransportError,
@@ -292,7 +315,7 @@ Deno.test("@nnrp/native-server rejects listen policies unsatisfied by installed 
     transports: [fakeRoleProvider("tcp"), fakeRoleProvider("tcp")],
   });
   const duplicateError = assertThrows(
-    () => duplicateRuntime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default" }),
+    () => duplicateRuntime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default") }),
     NnrpTransportError,
   );
   assertEquals(duplicateError.diagnostic.code, "NNRP_NATIVE_TRANSPORT_PROVIDER_DUPLICATE");
@@ -337,8 +360,8 @@ Deno.test("@nnrp/native-server passes route-local security to its provider role 
     transportPolicy: "force-quic",
   });
   const server = runtime.listen({
-    endpoint: "nnrps://runtime.example/session/default",
-    providerRoutes: { quic: { endpoint: "127.0.0.1:45443", security } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrps://runtime.example/session/default"),
+    providerRoutes: { quic: { endpoint: FrozenNnrpProviderEndpoint.parse("quic://127.0.0.1:45443"), security } },
   });
   const session = await server.accept();
 
@@ -362,10 +385,10 @@ Deno.test("@nnrp/native-server isolates TCP TLS and QUIC credentials across one 
     ],
   });
   const server = runtime.listen({
-    endpoint: "nnrp://runtime.example/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://runtime.example/session/default"),
     providerRoutes: {
-      tcp: { endpoint: "127.0.0.1:45444", security: tcpSecurity },
-      quic: { endpoint: "127.0.0.1:45443", security: quicSecurity },
+      tcp: { endpoint: FrozenNnrpProviderEndpoint.parse("tcp://127.0.0.1:45444"), security: tcpSecurity },
+      quic: { endpoint: FrozenNnrpProviderEndpoint.parse("quic://127.0.0.1:45443"), security: quicSecurity },
     },
   });
   await server.accept();
@@ -384,8 +407,8 @@ Deno.test("@nnrp/native-server allows an ephemeral TCP bind route", async () => 
     transportPolicy: "force-tcp",
   });
   const server = runtime.listen({
-    endpoint: "nnrp://runtime.example/session/default",
-    providerRoutes: { tcp: { endpoint: "127.0.0.1:0" } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://runtime.example/session/default"),
+    providerRoutes: { tcp: { endpoint: FrozenNnrpProviderEndpoint.parse("tcp://127.0.0.1:0") } },
   });
   const session = await server.accept();
 
@@ -404,10 +427,10 @@ Deno.test("@nnrp/native-server opens IPC and plain WebSocket together under nnrp
     ],
   });
   const server = runtime.listen({
-    endpoint: "nnrp://runtime.example/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://runtime.example/session/default"),
     providerRoutes: {
-      ipc: { endpoint: "unix:///run/nnrp.sock" },
-      websocket: { endpoint: "ws://127.0.0.1:45445/nnrp" },
+      ipc: { endpoint: FrozenNnrpProviderEndpoint.parse("unix:///run/nnrp.sock") },
+      websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("ws://127.0.0.1:45445/nnrp") },
     },
   });
   await server.accept();
@@ -426,17 +449,17 @@ Deno.test("@nnrp/native-server rejects insecure listener routes under nnrps", as
   const cases = [
     {
       kind: "tcp",
-      route: { endpoint: "127.0.0.1:45444" },
+      route: { endpoint: FrozenNnrpProviderEndpoint.parse("tcp://127.0.0.1:45444") },
       code: "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
     },
     {
       kind: "ipc",
-      route: { endpoint: "unix:///run/nnrp.sock" },
+      route: { endpoint: FrozenNnrpProviderEndpoint.parse("unix:///run/nnrp.sock") },
       code: "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
     },
     {
       kind: "websocket",
-      route: { endpoint: "ws://127.0.0.1:45445/nnrp" },
+      route: { endpoint: FrozenNnrpProviderEndpoint.parse("ws://127.0.0.1:45445/nnrp") },
       code: "NNRP_NATIVE_PROVIDER_ROUTE_SECURITY_UNSATISFIED",
     },
   ] as const;
@@ -444,7 +467,7 @@ Deno.test("@nnrp/native-server rejects insecure listener routes under nnrps", as
   for (const { kind, route, code } of cases) {
     const runtime = await openBackendRuntime({ transports: [fakeRoleProvider(kind)] });
     const server = runtime.listen({
-      endpoint: "nnrps://runtime.example/session/default",
+      endpoint: FrozenNnrpEndpoint.parse("nnrps://runtime.example/session/default"),
       providerRoutes: { [kind]: route },
       transportPolicy: `force-${kind}`,
     });
@@ -458,8 +481,8 @@ Deno.test("@nnrp/native-server rejects insecure listener routes under nnrps", as
 Deno.test("@nnrp/native-server rejects configured routes whose providers are not installed", async () => {
   const runtime = await openBackendRuntime({ transports: [fakeRoleProvider("tcp")] });
   const server = runtime.listen({
-    endpoint: "nnrp://runtime.example/session/default",
-    providerRoutes: { websocket: { endpoint: "ws://runtime.example/nnrp" } },
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://runtime.example/session/default"),
+    providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse("ws://runtime.example/nnrp") } },
   });
 
   const error = await assertRejects(() => server.accept(), NnrpTransportError);
@@ -481,10 +504,10 @@ Deno.test("@nnrp/native-server opens every eligible listener and preserves prefe
     transportPolicy: "prefer-quic",
   });
   const server = runtime.listen({
-    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
     providerRoutes: {
-      quic: { endpoint: "127.0.0.1:45443", security: testServerSecurity() },
-      tcp: { endpoint: "127.0.0.1:45444" },
+      quic: { endpoint: FrozenNnrpProviderEndpoint.parse("quic://127.0.0.1:45443"), security: testServerSecurity() },
+      tcp: { endpoint: FrozenNnrpProviderEndpoint.parse("tcp://127.0.0.1:45444") },
     },
   });
 
@@ -516,10 +539,10 @@ Deno.test("@nnrp/native-server isolates equal wire session ids across provider r
     transportPolicy: "prefer-tcp",
   });
   const server = runtime.listen({
-    endpoint: "nnrp://runtime.example/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://runtime.example/session/default"),
     providerRoutes: {
-      tcp: { endpoint: "127.0.0.1:45444" },
-      ipc: { endpoint: "npipe://nnrp-native-server-routing" },
+      tcp: { endpoint: FrozenNnrpProviderEndpoint.parse("tcp://127.0.0.1:45444") },
+      ipc: { endpoint: FrozenNnrpProviderEndpoint.parse("npipe://nnrp-native-server-routing") },
     },
   });
 
@@ -527,8 +550,8 @@ Deno.test("@nnrp/native-server isolates equal wire session ids across provider r
   const second = await server.accept();
   assertEquals(first.sessionId, 7);
   assertEquals(second.sessionId, 7);
-  assertEquals((await first.receive()).header.traceId, 11n);
-  assertEquals((await second.receive()).header.traceId, 22n);
+  assertEquals((await receiveRuntimeEvent(first)).header.traceId, 11n);
+  assertEquals((await receiveRuntimeEvent(second)).header.traceId, 22n);
 
   await server.close();
   await runtime.close();
@@ -543,7 +566,7 @@ Deno.test("@nnrp/native-server rolls back an atomic listener set when one provid
     ],
   });
   const server = runtime.listen({
-    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
     providerRoutes: { quic: { security: testServerSecurity() } },
   });
 
@@ -563,7 +586,7 @@ Deno.test("@nnrp/native-server closes the atomic listener set after a terminal l
     ],
   });
   const server = runtime.listen({
-    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
     providerRoutes: { quic: { security: testServerSecurity() } },
   });
 
@@ -585,7 +608,7 @@ Deno.test("@nnrp/native-server force policy opens only the named eligible listen
     ],
   });
   const server = runtime.listen({
-    endpoint: "nnrp://127.0.0.1:4433/session/default",
+    endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
     transportPolicy: "force-tcp",
   });
 
@@ -612,7 +635,7 @@ Deno.test("@nnrp/native-server rejects carriers without server role adoption", a
     transports: [createTcpTransportProvider({ binding })],
     transportPolicy: "force-tcp",
   });
-  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
 
   const error = await assertRejects(() => server.accept(), NnrpCapabilityError);
   assertEquals(error.diagnostic.code, "NNRP_NATIVE_ROLE_ADOPTION_UNAVAILABLE");
@@ -717,15 +740,15 @@ Deno.test("@nnrp/native-server decodes ordered control, object, and cache role e
     transports: [createTcpTransportProvider({ binding: roleServerBinding(events) })],
     transportPolicy: "force-tcp",
   });
-  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
   const session = await server.accept();
 
-  const cancel = await session.receive();
-  const priority = await session.receive();
-  const capability = await session.receive();
-  const declaration = await session.receive();
-  const delta = await session.receive();
-  const invalidation = await session.receive();
+  const cancel = await receiveRuntimeEvent(session);
+  const priority = await receiveRuntimeEvent(session);
+  const capability = await receiveRuntimeEvent(session);
+  const declaration = await receiveRuntimeEvent(session);
+  const delta = await receiveRuntimeEvent(session);
+  const invalidation = await receiveRuntimeEvent(session);
 
   assertEquals(cancel.metadata.type, "control_request");
   assertEquals(cancel.tail, { type: "diagnostic", diagnostic: new Uint8Array([4, 5]) });
@@ -748,27 +771,38 @@ Deno.test("@nnrp/native-server decodes ordered control, object, and cache role e
 
 Deno.test("@nnrp/native-server enforces terminal result ordering without blocking terminal evidence", async () => {
   const runtimeFrames: NnrpMessageType[] = [];
+  const observedHandles: Array<{ readonly id: bigint; readonly generation: number; readonly flags: number }> = [];
   let resultCount = 0;
+  const operationHandle = { kind: 4, id: 900n, generation: 3, flags: 0xa5 };
   const runtime = await openBackendRuntime({
     transports: [
       createTcpTransportProvider({
         binding: roleServerBinding(
-          [roleSubmitEvent(9n, 7)],
+          [
+            roleSubmitEvent(9n, 7, operationHandle),
+            roleSubmitEvent(10n, 8, { kind: 4, id: 901n, generation: 4, flags: 0x5a }),
+          ],
           {
-            onResult: () => resultCount++,
-            onRuntimeFrame: (messageType) => runtimeFrames.push(messageType as NnrpMessageType),
+            onResult: (handle) => {
+              resultCount++;
+              observedHandles.push(handle);
+            },
+            onRuntimeFrame: (handle, messageType) => {
+              runtimeFrames.push(messageType as NnrpMessageType);
+              observedHandles.push(handle);
+            },
           },
         ),
       }),
     ],
     transportPolicy: "force-tcp",
   });
-  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
   const session = await server.accept();
-  const submit = await session.receive();
-  assertEquals(submit.metadata.type, "frame_submit");
+  const operation = await session.receiveSubmit();
+  assertEquals(operation.submit.metadata.type, "frame_submit");
 
-  await session.sendProgress({
+  await operation.sendProgress({
     operationId: 9n,
     progressSequence: 1n,
     stageCode: 1,
@@ -776,12 +810,21 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
     objectId: 0n,
     bodyBytes: 0,
   });
-  await session.sendResult(createSuccessResult(9n, 7, new Uint8Array([1])));
+  await operation.sendPartialResult({
+    operationId: 9n,
+    resultSequence: 1n,
+    objectId: 0n,
+    deltaSequence: 0n,
+    bodyBytes: 1,
+    flags: 0,
+  }, new Uint8Array([0x2a]));
+  const result = createSuccessResultReply(new Uint8Array([1]));
+  await operation.sendResult(result.metadata, result.body);
   assertEquals(resultCount, 1);
 
   const progressError = await assertRejects(
     () =>
-      session.sendPartialResult({
+      operation.sendPartialResult({
         operationId: 9n,
         resultSequence: 2n,
         objectId: 0n,
@@ -794,7 +837,7 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
   assertEquals(progressError.diagnostic.code, "NNRP_SERVER_INCREMENTAL_AFTER_TERMINAL");
 
   const duplicateError = await assertRejects(
-    () => session.sendResult(createSuccessResult(9n, 7, new Uint8Array([2]))),
+    () => operation.sendResult(createSuccessResultReply(new Uint8Array([2])).metadata, new Uint8Array([2])),
     NnrpProtocolError,
   );
   assertEquals(duplicateError.diagnostic.code, "NNRP_SERVER_RESULT_TERMINAL_DUPLICATE");
@@ -807,19 +850,120 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
     flags: 0,
     bodyBytes: 0,
   });
-  await session.sendResultDropReason({
-    operationId: 9n,
-    resultSequence: 3n,
+  const dropError = await assertRejects(
+    () =>
+      operation.sendResultDrop({
+        operationId: 9n,
+        resultSequence: 3n,
+        dropReasonCode: 4,
+        sourceRole: RuntimeRole.Server,
+        flags: 0,
+        diagnosticBytes: 0,
+      }),
+    NnrpProtocolError,
+  );
+  assertEquals(dropError.diagnostic.code, "NNRP_SERVER_RESULT_TERMINAL_DUPLICATE");
+
+  const droppedOperation = await session.receiveSubmit();
+  await droppedOperation.sendResultDrop({
+    operationId: 10n,
+    resultSequence: 1n,
     dropReasonCode: 4,
     sourceRole: RuntimeRole.Server,
     flags: 0,
-    diagnosticBytes: 0,
-  });
+    diagnosticBytes: 1,
+  }, new Uint8Array([0x2b]));
+
   assertEquals(runtimeFrames, [
     NnrpMessageType.Progress,
+    NnrpMessageType.PartialResult,
     NnrpMessageType.TraceContext,
     NnrpMessageType.ResultDropReason,
   ]);
+  assertEquals(observedHandles, [
+    operationHandle,
+    operationHandle,
+    operationHandle,
+    { kind: 3, id: 1n, generation: 1, flags: 0 },
+    { kind: 4, id: 901n, generation: 4, flags: 0x5a },
+  ]);
+
+  await session.close();
+  await server.close();
+  await runtime.close();
+});
+
+Deno.test("@nnrp/native-server receiveSubmit retains skipped runtime and lifecycle events", async () => {
+  const runtime = await openBackendRuntime({
+    transports: [
+      fakeRoleProvider("tcp", {
+        events: [
+          roleRuntimeEvent(
+            NnrpMessageType.Cancel,
+            encodeRuntimeControlMetadata(NnrpMessageType.Cancel, {
+              operationId: 71n,
+              controlSequence: 1n,
+              reasonCode: 2,
+              sourceRole: RuntimeRole.Client,
+              flags: 0,
+              diagnosticBytes: 0,
+            }),
+          ),
+          roleLifecycleEvent(71n, 5),
+          roleSubmitEvent(72n, 8, { kind: 4, id: 720n, generation: 2, flags: 0x40 }),
+        ],
+      }),
+    ],
+    transportPolicy: "force-tcp",
+  });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
+  const session = await server.accept();
+
+  const operation = await session.receiveSubmit();
+  assertEquals(operation.operationId, 72n);
+  assertEquals(operation.frameId, 8);
+  assertEquals((await session.nextEvent()).type, "runtime");
+  assertEquals(await session.nextEvent(), {
+    type: "lifecycle",
+    event: { operationId: 71n, state: "cancelled" },
+  });
+
+  await session.close();
+  await server.close();
+  await runtime.close();
+});
+
+Deno.test("@nnrp/native-server reports missing submit ownership from legacy FFI receive", async () => {
+  const submit = createTokenSubmitRequest({
+    identity: { operationId: 72n, frameId: 8, header: NNRP_DEFAULT_SUBMIT_HEADER },
+    policy: NNRP_DEFAULT_SUBMIT_POLICY,
+    chunks: [{ payload: new Uint8Array() }],
+  });
+  const runtime = await openBackendRuntime({
+    transports: [fakeRoleProvider("tcp")],
+    transportPolicy: "force-tcp",
+    ffi: {
+      mode: "test",
+      accept: () => ({ sessionId: 41, activeTransport: "tcp" }),
+      receive: () =>
+        decodeNnrpRuntimeEvent({
+          versionMajor: 1,
+          wireFormat: 0,
+          messageType: NnrpMessageType.FrameSubmit,
+          flags: 0,
+          sessionId: 41,
+          frameId: 8,
+          viewId: 0,
+          routeId: 0,
+          traceId: 0n,
+        }, encodeSubmitPayload(submit)),
+    },
+  });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
+  const session = await server.accept();
+
+  const error = await assertRejects(() => session.nextEvent(), NnrpProtocolError);
+  assertEquals(error.diagnostic.code, "NNRP_NATIVE_SUBMIT_OPERATION_MISSING");
 
   await session.close();
   await server.close();
@@ -842,25 +986,10 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
       },
     },
   });
-  const session = await runtime.listen({ endpoint: "nnrp://0.0.0.0:4433/session/default" }).accept();
+  const session = await runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://0.0.0.0:4433/session/default") })
+    .accept();
   assertEquals(session.sessionId, 41);
   const one = new Uint8Array([1]);
-  await session.sendProgress({
-    operationId: 1n,
-    progressSequence: 2n,
-    stageCode: 3,
-    percentX100: 4,
-    objectId: 5n,
-    bodyBytes: 1,
-  }, one);
-  await session.sendPartialResult({
-    operationId: 1n,
-    resultSequence: 2n,
-    objectId: 3n,
-    deltaSequence: 4n,
-    bodyBytes: 1,
-    flags: 0,
-  }, one);
   const pressure = {
     scopeId: 1n,
     creditWindow: 2n,
@@ -871,14 +1000,6 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   } as const;
   await session.sendBackpressure(pressure);
   await session.sendCreditUpdate(pressure);
-  await session.sendResultDropReason({
-    operationId: 1n,
-    resultSequence: 2n,
-    dropReasonCode: 3,
-    sourceRole: RuntimeRole.Server,
-    flags: 0,
-    diagnosticBytes: 1,
-  }, one);
   await session.sendTraceContext({
     traceId: 1n,
     spanId: 2n,
@@ -909,14 +1030,18 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     flags: 0,
     diagnosticBytes: 1,
   }, one);
-  await session.sendControl(NnrpMessageType.Progress, {
-    operationId: 1n,
-    progressSequence: 3n,
-    stageCode: 4,
-    percentX100: 5,
-    objectId: 6n,
-    bodyBytes: 1,
-  }, one);
+  await assertRejects(
+    () =>
+      session.sendControl(NnrpMessageType.Progress, {
+        operationId: 1n,
+        progressSequence: 3n,
+        stageCode: 4,
+        percentX100: 5,
+        objectId: 6n,
+        bodyBytes: 1,
+      }, one),
+    NnrpProtocolError,
+  );
   await session.declareObject({
     objectId: 1n,
     objectKind: RuntimeObjectKind.Tensor,
@@ -997,15 +1122,11 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
   });
 
   assertEquals(seen.map(({ messageType }) => messageType), [
-    NnrpMessageType.Progress,
-    NnrpMessageType.PartialResult,
     NnrpMessageType.Backpressure,
     NnrpMessageType.CreditUpdate,
-    NnrpMessageType.ResultDropReason,
     NnrpMessageType.TraceContext,
     NnrpMessageType.ErrorRecoverable,
     NnrpMessageType.RetryAfter,
-    NnrpMessageType.Progress,
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
     NnrpMessageType.ObjectRelease,
@@ -1015,7 +1136,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpMessageType.CacheMiss,
     NnrpMessageType.CacheInvalidate,
   ]);
-  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 17 }, (_, index) => index + 1));
+  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 13 }, (_, index) => index + 1));
   assertEquals(
     decodeRuntimeObjectMetadata(
       NnrpMessageType.ObjectPatch,
@@ -1051,7 +1172,7 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
     transports: [
       createTcpTransportProvider({
         binding: roleServerBinding(events, {
-          onRuntimeFrame: (messageType, payload) =>
+          onRuntimeFrame: (_handle, messageType, payload) =>
             runtimeFrames.push({
               messageType: messageType as NnrpMessageType,
               payload,
@@ -1061,7 +1182,7 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
     ],
     transportPolicy: "force-tcp",
   });
-  const server = runtime.listen({ endpoint: "nnrp://127.0.0.1:4433/session/default" });
+  const server = runtime.listen({ endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default") });
   const session = await server.accept();
   const reference = {
     objectId: 51n,
@@ -1109,7 +1230,7 @@ Deno.test("@nnrp/native-server releases operation-owned objects on peer cancella
     "does not advance 1",
   );
 
-  assertEquals((await session.receive()).metadata.type, "control_request");
+  assertEquals((await receiveRuntimeEvent(session)).metadata.type, "control_request");
   assertEquals(runtimeFrames.map(({ messageType }) => messageType), [
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
@@ -1155,7 +1276,11 @@ function roleRuntimeEvent(messageType: NnrpMessageType, payload: Uint8Array) {
   };
 }
 
-function roleSubmitEvent(operationId: bigint, frameId: number) {
+function roleSubmitEvent(
+  operationId: bigint,
+  frameId: number,
+  operation = { kind: 4, id: operationId, generation: 1, flags: 0 },
+) {
   const payload = encodeSubmitPayload(createTokenSubmitRequest({
     identity: { operationId, frameId, header: NNRP_DEFAULT_SUBMIT_HEADER },
     policy: NNRP_DEFAULT_SUBMIT_POLICY,
@@ -1165,6 +1290,17 @@ function roleSubmitEvent(operationId: bigint, frameId: number) {
     ...roleRuntimeEvent(NnrpMessageType.FrameSubmit, payload),
     kind: 5,
     frameId,
+    operation,
+  };
+}
+
+function roleLifecycleEvent(operationId: bigint, state: number) {
+  return {
+    ...roleRuntimeEvent(NnrpMessageType.FrameSubmit, new Uint8Array([state])),
+    kind: 14,
+    headerPresent: false,
+    relatedOperationId: operationId,
+    payload: new Uint8Array([state]),
   };
 }
 
@@ -1184,17 +1320,26 @@ function fakeRoleProvider(
     readonly events?: ReturnType<typeof roleRuntimeEvent>[];
   } = {},
 ): NnrpNativeTransportProvider {
+  const metadata = {
+    id: `test-${kind}`,
+    cost: { modelId: 0, units: 0n },
+    preferenceRank: options.preferenceRank ?? 0,
+    limits: { maxFrameBytes: 64n * 1024n * 1024n },
+    limitations: [] as const,
+  };
   return {
     kind,
+    descriptor: {
+      name: `@nnrp/transport-${kind}`,
+      version: "test",
+      transportId: kind,
+      kind: "native-dynamic",
+      available: true,
+      metadata,
+    },
     endpointSchemes: ["nnrp", "nnrps"],
     localAvailable: true,
-    metadata: {
-      id: `test-${kind}`,
-      cost: { modelId: 0, units: 0n },
-      preferenceRank: options.preferenceRank ?? 0,
-      limits: { maxFrameBytes: 64n * 1024n * 1024n },
-      limitations: [],
-    },
+    metadata,
     probe: () =>
       Promise.resolve({
         sampleCount: 1,
@@ -1251,8 +1396,12 @@ function testServerSecurity(seed = 1) {
 function roleServerBinding(
   events: ReturnType<typeof roleRuntimeEvent>[],
   callbacks: {
-    readonly onResult?: () => void;
-    readonly onRuntimeFrame?: (messageType: number, payload: Uint8Array) => void;
+    readonly onResult?: (handle: { kind: number; id: bigint; generation: number; flags: number }) => void;
+    readonly onRuntimeFrame?: (
+      handle: { kind: number; id: bigint; generation: number; flags: number },
+      messageType: number,
+      payload: Uint8Array,
+    ) => void;
   } = {},
 ): NnrpNativeTransportBinding {
   return {
@@ -1271,12 +1420,17 @@ function roleServerBinding(
                 handle: { kind: 3, id: 1n, generation: 1, flags: 0 },
                 sessionId: 51,
                 poll: () => Promise.resolve(events.splice(0, 1)),
-                sendResult: () => {
-                  callbacks.onResult?.();
+                sendResult: (handle: { kind: number; id: bigint; generation: number; flags: number }) => {
+                  callbacks.onResult?.(handle);
                   return Promise.resolve();
                 },
-                sendRuntimeFrame: (messageType: number, _frameId: number, payload: Uint8Array) => {
-                  callbacks.onRuntimeFrame?.(messageType, payload);
+                sendRuntimeFrame: (
+                  _handle: { kind: number; id: bigint; generation: number; flags: number },
+                  messageType: number,
+                  _frameId: number,
+                  payload: Uint8Array,
+                ) => {
+                  callbacks.onRuntimeFrame?.(_handle, messageType, payload);
                   return Promise.resolve();
                 },
                 close: () => Promise.resolve(),

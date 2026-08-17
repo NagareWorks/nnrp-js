@@ -298,6 +298,167 @@ export enum NnrpSessionPriorityClass {
   Background = 2,
 }
 
+export interface ClientHelloMetadata {
+  readonly minVersionMajor: number;
+  readonly maxVersionMajor: number;
+  readonly supportedWireFormatBitmap: number;
+  readonly supportedProfileBitmap: number;
+  readonly supportedPayloadKindBitmap: number;
+  readonly supportedCodecBitmap: number;
+  readonly supportedCompressionBitmap: number;
+  readonly supportedDtypeBitmap: number;
+  readonly supportedLayoutBitmap: number;
+  readonly cacheDigestBitmap: number;
+  readonly cacheObjectBitmap: number;
+  readonly cacheNamespaceCount: number;
+  readonly maxLaneCount: number;
+  readonly maxCacheEntries: number;
+  readonly maxCacheBytes: number;
+  readonly targetCadenceX100: number;
+  readonly latencyBudgetMs: number;
+  readonly qualityTier: number;
+  readonly degradePolicy: number;
+  readonly requestedSessionId: number;
+  readonly authBytes: number;
+  readonly controlExtensionBytes: number;
+}
+
+export enum SessionPatchAckStatus {
+  Accepted = 0,
+  PartiallyApplied = 1,
+  Rejected = 2,
+}
+
+export enum SessionPatchRejectReason {
+  None = 0,
+  UnsupportedField = 1,
+  InvalidRange = 2,
+  UnsupportedStrategy = 3,
+  InvalidLaneMask = 4,
+  RateLimited = 5,
+}
+
+export interface SessionPatchAckMetadata {
+  readonly ackStatus: SessionPatchAckStatus;
+  readonly rejectReason: SessionPatchRejectReason;
+  readonly appliedPatchMask: number;
+  readonly rejectedPatchMask: number;
+  readonly retryAfterMs: number;
+  readonly effectiveProfileId: number;
+  readonly effectiveTargetCadenceX100: number;
+  readonly effectiveQualityTier: number;
+  readonly effectiveDegradePolicy: number;
+  readonly effectiveLaneMask: bigint;
+  readonly effectiveCodecBitmap: number;
+  readonly effectiveCompressionBitmap: number;
+  readonly profilePatchAckBytes: number;
+}
+
+export function encodeClientHelloMetadata(metadata: ClientHelloMetadata): Uint8Array {
+  validateClientHelloMetadata(metadata);
+  const encoded = new Uint8Array(64);
+  const view = new DataView(encoded.buffer);
+  view.setUint8(0, metadata.minVersionMajor);
+  view.setUint8(1, metadata.maxVersionMajor);
+  view.setUint16(2, metadata.supportedWireFormatBitmap, true);
+  view.setUint32(4, metadata.supportedProfileBitmap, true);
+  view.setUint32(8, metadata.supportedPayloadKindBitmap, true);
+  view.setUint32(12, metadata.supportedCodecBitmap, true);
+  view.setUint32(16, metadata.supportedCompressionBitmap, true);
+  view.setUint32(20, metadata.supportedDtypeBitmap, true);
+  view.setUint32(24, metadata.supportedLayoutBitmap, true);
+  view.setUint16(28, metadata.cacheDigestBitmap, true);
+  view.setUint16(30, metadata.cacheObjectBitmap, true);
+  view.setUint16(32, metadata.cacheNamespaceCount, true);
+  view.setUint16(34, metadata.maxLaneCount, true);
+  view.setUint32(36, metadata.maxCacheEntries, true);
+  view.setUint32(40, metadata.maxCacheBytes, true);
+  view.setUint16(44, metadata.targetCadenceX100, true);
+  view.setUint16(46, metadata.latencyBudgetMs, true);
+  view.setUint16(48, metadata.qualityTier, true);
+  view.setUint16(50, metadata.degradePolicy, true);
+  view.setUint32(52, metadata.requestedSessionId, true);
+  view.setUint32(56, metadata.authBytes, true);
+  view.setUint32(60, metadata.controlExtensionBytes, true);
+  return encoded;
+}
+
+export function decodeClientHelloMetadata(encoded: Uint8Array): ClientHelloMetadata {
+  requireExactRuntimePayload(encoded, 64, "CLIENT_HELLO");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  const metadata: ClientHelloMetadata = {
+    minVersionMajor: view.getUint8(0),
+    maxVersionMajor: view.getUint8(1),
+    supportedWireFormatBitmap: view.getUint16(2, true),
+    supportedProfileBitmap: view.getUint32(4, true),
+    supportedPayloadKindBitmap: view.getUint32(8, true),
+    supportedCodecBitmap: view.getUint32(12, true),
+    supportedCompressionBitmap: view.getUint32(16, true),
+    supportedDtypeBitmap: view.getUint32(20, true),
+    supportedLayoutBitmap: view.getUint32(24, true),
+    cacheDigestBitmap: view.getUint16(28, true),
+    cacheObjectBitmap: view.getUint16(30, true),
+    cacheNamespaceCount: view.getUint16(32, true),
+    maxLaneCount: view.getUint16(34, true),
+    maxCacheEntries: view.getUint32(36, true),
+    maxCacheBytes: view.getUint32(40, true),
+    targetCadenceX100: view.getUint16(44, true),
+    latencyBudgetMs: view.getUint16(46, true),
+    qualityTier: view.getUint16(48, true),
+    degradePolicy: view.getUint16(50, true),
+    requestedSessionId: view.getUint32(52, true),
+    authBytes: view.getUint32(56, true),
+    controlExtensionBytes: view.getUint32(60, true),
+  };
+  validateClientHelloMetadata(metadata);
+  return metadata;
+}
+
+export function encodeSessionPatchAckMetadata(metadata: SessionPatchAckMetadata): Uint8Array {
+  validateSessionPatchAckMetadata(metadata);
+  const encoded = new Uint8Array(48);
+  const view = new DataView(encoded.buffer);
+  view.setUint16(0, metadata.ackStatus, true);
+  view.setUint16(2, metadata.rejectReason, true);
+  view.setUint32(4, metadata.appliedPatchMask, true);
+  view.setUint32(8, metadata.rejectedPatchMask, true);
+  view.setUint32(12, metadata.retryAfterMs, true);
+  view.setUint16(16, metadata.effectiveProfileId, true);
+  view.setUint32(20, metadata.effectiveTargetCadenceX100, true);
+  view.setUint16(24, metadata.effectiveQualityTier, true);
+  view.setUint16(26, metadata.effectiveDegradePolicy, true);
+  view.setBigUint64(28, metadata.effectiveLaneMask, true);
+  view.setUint32(36, metadata.effectiveCodecBitmap, true);
+  view.setUint32(40, metadata.effectiveCompressionBitmap, true);
+  view.setUint32(44, metadata.profilePatchAckBytes, true);
+  return encoded;
+}
+
+export function decodeSessionPatchAckMetadata(encoded: Uint8Array): SessionPatchAckMetadata {
+  requireExactRuntimePayload(encoded, 48, "SESSION_PATCH_ACK");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  if (view.getUint16(18, true) !== 0) {
+    throw runtimeEventError("NNRP_SESSION_PATCH_ACK_RESERVED", "SESSION_PATCH_ACK reserved field must be zero.");
+  }
+  const metadata: SessionPatchAckMetadata = {
+    ackStatus: view.getUint16(0, true) as SessionPatchAckStatus,
+    rejectReason: view.getUint16(2, true) as SessionPatchRejectReason,
+    appliedPatchMask: view.getUint32(4, true),
+    rejectedPatchMask: view.getUint32(8, true),
+    retryAfterMs: view.getUint32(12, true),
+    effectiveProfileId: view.getUint16(16, true),
+    effectiveTargetCadenceX100: view.getUint32(20, true),
+    effectiveQualityTier: view.getUint16(24, true),
+    effectiveDegradePolicy: view.getUint16(26, true),
+    effectiveLaneMask: view.getBigUint64(28, true),
+    effectiveCodecBitmap: view.getUint32(36, true),
+    effectiveCompressionBitmap: view.getUint32(40, true),
+    profilePatchAckBytes: view.getUint32(44, true),
+  };
+  validateSessionPatchAckMetadata(metadata);
+  return metadata;
+}
+
 export interface NnrpSessionOpenMetadata {
   readonly requestedSessionId: number;
   readonly profileId: number;
@@ -626,6 +787,22 @@ export interface CacheObjectId {
   readonly objectKind: NnrpCacheObjectKind;
 }
 
+export interface NnrpCacheObjectVersion {
+  readonly objectId: CacheObjectId;
+  readonly objectVersion: bigint;
+  readonly schemaId: number;
+  readonly schemaVersion: number;
+}
+
+export type NnrpCacheLeaseOutcome = "valid" | "expired" | "renewed" | "released" | "missing";
+
+export type NnrpCacheInvalidationReason =
+  | "explicit"
+  | "dependency-invalidated"
+  | "lease-expired"
+  | "version-mismatch"
+  | "schema-mismatch";
+
 export interface ObjectDescriptorMetadata {
   readonly objectId: bigint;
   readonly objectKind: RuntimeObjectKind;
@@ -705,11 +882,166 @@ export interface DecodedRuntimeObjectMetadata {
 }
 
 export interface CacheInvalidateMetadata {
-  readonly invalidateScope: number;
+  readonly invalidateScope: CacheInvalidateScope;
   readonly cacheNamespace: number;
   readonly cacheKeyHi: bigint;
   readonly cacheKeyLo: bigint;
   readonly reasonCode: number;
+}
+
+export enum CacheAckStatus {
+  Accepted = 0,
+  Rejected = 1,
+  Replaced = 2,
+}
+
+export enum CacheInvalidateScope {
+  WholeSession = 0,
+  Namespace = 1,
+  ObjectKind = 2,
+  ObjectKey = 3,
+}
+
+export interface CachePutMetadata {
+  readonly cacheNamespace: number;
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
+  readonly objectKind: NnrpCacheObjectKind;
+  readonly ttlMs: number;
+  readonly objectBytes: number;
+  readonly codecBitmap: number;
+  readonly flags: number;
+}
+
+export interface CacheAckMetadata {
+  readonly cacheNamespace: number;
+  readonly cacheKeyHi: bigint;
+  readonly cacheKeyLo: bigint;
+  readonly status: CacheAckStatus;
+  readonly acceptedTtlMs: number;
+  readonly maxObjectBytes: number;
+  readonly detailCode: number;
+}
+
+export interface TransportProbeMetadata {
+  readonly probeId: number;
+  readonly probePayloadBytes: number;
+  readonly clientSendTsUs: bigint;
+}
+
+export interface TransportProbeAckMetadata {
+  readonly probeId: number;
+  readonly serverRecvTsUs: bigint;
+}
+
+export function encodeCachePutMetadata(metadata: CachePutMetadata): Uint8Array {
+  validateCachePutMetadata(metadata);
+  const encoded = new Uint8Array(40);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.cacheNamespace, true);
+  view.setUint32(4, metadata.objectKind, true);
+  view.setBigUint64(8, metadata.cacheKeyHi, true);
+  view.setBigUint64(16, metadata.cacheKeyLo, true);
+  view.setUint32(24, metadata.ttlMs, true);
+  view.setUint32(28, metadata.objectBytes, true);
+  view.setUint32(32, metadata.codecBitmap, true);
+  view.setUint32(36, metadata.flags, true);
+  return encoded;
+}
+
+export function decodeCachePutMetadata(encoded: Uint8Array): CachePutMetadata {
+  requireExactRuntimePayload(encoded, 40, "CACHE_PUT");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  const metadata: CachePutMetadata = {
+    cacheNamespace: view.getUint32(0, true),
+    objectKind: view.getUint32(4, true) as NnrpCacheObjectKind,
+    cacheKeyHi: view.getBigUint64(8, true),
+    cacheKeyLo: view.getBigUint64(16, true),
+    ttlMs: view.getUint32(24, true),
+    objectBytes: view.getUint32(28, true),
+    codecBitmap: view.getUint32(32, true),
+    flags: view.getUint32(36, true),
+  };
+  validateCachePutMetadata(metadata);
+  return metadata;
+}
+
+export function encodeCacheAckMetadata(metadata: CacheAckMetadata): Uint8Array {
+  validateCacheAckMetadata(metadata);
+  const encoded = new Uint8Array(40);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.cacheNamespace, true);
+  view.setUint32(4, metadata.status, true);
+  view.setBigUint64(8, metadata.cacheKeyHi, true);
+  view.setBigUint64(16, metadata.cacheKeyLo, true);
+  view.setUint32(24, metadata.acceptedTtlMs, true);
+  view.setUint32(28, metadata.maxObjectBytes, true);
+  view.setUint32(32, metadata.detailCode, true);
+  return encoded;
+}
+
+export function decodeCacheAckMetadata(encoded: Uint8Array): CacheAckMetadata {
+  requireExactRuntimePayload(encoded, 40, "CACHE_ACK");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  if (view.getUint32(36, true) !== 0) {
+    throw runtimeObjectError("NNRP_CACHE_ACK_RESERVED_NONZERO", "CACHE_ACK reserved field must be zero.");
+  }
+  const metadata: CacheAckMetadata = {
+    cacheNamespace: view.getUint32(0, true),
+    status: view.getUint32(4, true) as CacheAckStatus,
+    cacheKeyHi: view.getBigUint64(8, true),
+    cacheKeyLo: view.getBigUint64(16, true),
+    acceptedTtlMs: view.getUint32(24, true),
+    maxObjectBytes: view.getUint32(28, true),
+    detailCode: view.getUint32(32, true),
+  };
+  validateCacheAckMetadata(metadata);
+  return metadata;
+}
+
+export function encodeTransportProbeMetadata(metadata: TransportProbeMetadata): Uint8Array {
+  validateTransportProbeMetadata(metadata);
+  const encoded = new Uint8Array(16);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.probeId, true);
+  view.setUint32(4, metadata.probePayloadBytes, true);
+  view.setBigUint64(8, metadata.clientSendTsUs, true);
+  return encoded;
+}
+
+export function decodeTransportProbeMetadata(encoded: Uint8Array): TransportProbeMetadata {
+  requireExactRuntimePayload(encoded, 16, "TRANSPORT_PROBE");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  const metadata: TransportProbeMetadata = {
+    probeId: view.getUint32(0, true),
+    probePayloadBytes: view.getUint32(4, true),
+    clientSendTsUs: view.getBigUint64(8, true),
+  };
+  validateTransportProbeMetadata(metadata);
+  return metadata;
+}
+
+export function encodeTransportProbeAckMetadata(metadata: TransportProbeAckMetadata): Uint8Array {
+  validateTransportProbeAckMetadata(metadata);
+  const encoded = new Uint8Array(16);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.probeId, true);
+  view.setBigUint64(8, metadata.serverRecvTsUs, true);
+  return encoded;
+}
+
+export function decodeTransportProbeAckMetadata(encoded: Uint8Array): TransportProbeAckMetadata {
+  requireExactRuntimePayload(encoded, 16, "TRANSPORT_PROBE_ACK");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  if (view.getUint32(4, true) !== 0) {
+    throw runtimeEventError("NNRP_TRANSPORT_PROBE_ACK_RESERVED", "TRANSPORT_PROBE_ACK reserved field must be zero.");
+  }
+  const metadata: TransportProbeAckMetadata = {
+    probeId: view.getUint32(0, true),
+    serverRecvTsUs: view.getBigUint64(8, true),
+  };
+  validateTransportProbeAckMetadata(metadata);
+  return metadata;
 }
 
 export class CacheLease {
@@ -767,6 +1099,97 @@ export class CacheLease {
         `Cache lease covers object version ${this.objectVersion}, received ${expectedVersion}.`,
       );
     }
+  }
+}
+
+export class NnrpCacheLeaseResult {
+  public readonly objectId: CacheObjectId;
+  public readonly outcome: NnrpCacheLeaseOutcome;
+  public readonly lease?: CacheLease;
+  public readonly objectVersion?: NnrpCacheObjectVersion;
+  public readonly diagnostic?: string;
+
+  public constructor(options: {
+    readonly objectId: CacheObjectId;
+    readonly outcome: NnrpCacheLeaseOutcome;
+    readonly lease?: CacheLease;
+    readonly objectVersion?: NnrpCacheObjectVersion;
+    readonly diagnostic?: string;
+  }) {
+    validateCacheObjectId(options.objectId);
+    if (!NNRP_CACHE_LEASE_OUTCOMES.has(options.outcome)) {
+      throw runtimeObjectError("NNRP_CACHE_LEASE_OUTCOME_INVALID", "Cache lease outcome is not recognized.");
+    }
+    if (options.lease !== undefined && !cacheObjectIdsEqual(options.lease.objectId, options.objectId)) {
+      throw runtimeObjectError(
+        "NNRP_CACHE_LEASE_IDENTITY_MISMATCH",
+        "Cache lease identity must match result identity.",
+      );
+    }
+    if (options.objectVersion !== undefined) {
+      validateCacheObjectVersion(options.objectVersion);
+      if (!cacheObjectIdsEqual(options.objectVersion.objectId, options.objectId)) {
+        throw runtimeObjectError(
+          "NNRP_CACHE_VERSION_IDENTITY_MISMATCH",
+          "Cache object version identity must match result identity.",
+        );
+      }
+    }
+    if (options.diagnostic !== undefined && options.diagnostic.trim().length === 0) {
+      throw runtimeObjectError("NNRP_CACHE_DIAGNOSTIC_INVALID", "Cache diagnostic must not be empty when present.");
+    }
+
+    this.objectId = Object.freeze({ ...options.objectId });
+    this.outcome = options.outcome;
+    if (options.lease !== undefined) this.lease = options.lease;
+    if (options.objectVersion !== undefined) {
+      this.objectVersion = Object.freeze({
+        ...options.objectVersion,
+        objectId: Object.freeze({ ...options.objectVersion.objectId }),
+      });
+    }
+    if (options.diagnostic !== undefined) this.diagnostic = options.diagnostic;
+  }
+}
+
+export class NnrpCachePolicyOptions {
+  public readonly enabled: boolean;
+  public readonly reuseScope?: CacheReuseScope;
+  public readonly expirationHintMs: bigint;
+  public readonly invalidationReason: NnrpCacheInvalidationReason;
+
+  public constructor(options: {
+    readonly enabled: boolean;
+    readonly reuseScope?: CacheReuseScope;
+    readonly expirationHintMs?: bigint;
+    readonly invalidationReason?: NnrpCacheInvalidationReason;
+  }) {
+    const expirationHintMs = options.expirationHintMs ?? 0n;
+    const invalidationReason = options.invalidationReason ?? "explicit";
+    validateU64BigInt("expirationHintMs", expirationHintMs);
+    if (!NNRP_CACHE_INVALIDATION_REASONS.has(invalidationReason)) {
+      throw runtimeObjectError(
+        "NNRP_CACHE_INVALIDATION_REASON_INVALID",
+        "Cache invalidation reason is not recognized.",
+      );
+    }
+    if (options.reuseScope !== undefined && !isCacheReuseScope(options.reuseScope)) {
+      throw runtimeObjectError("NNRP_CACHE_REUSE_SCOPE_INVALID", "Cache reuse scope is not recognized.");
+    }
+    if (!options.enabled && (options.reuseScope !== undefined || expirationHintMs !== 0n)) {
+      throw runtimeObjectError(
+        "NNRP_CACHE_POLICY_INVALID",
+        "Disabled cache policy must not carry a reuse scope or expiration hint.",
+      );
+    }
+    if (options.enabled && options.reuseScope === undefined) {
+      throw runtimeObjectError("NNRP_CACHE_POLICY_INVALID", "Enabled cache policy requires a reuse scope.");
+    }
+
+    this.enabled = options.enabled;
+    if (options.reuseScope !== undefined) this.reuseScope = options.reuseScope;
+    this.expirationHintMs = expirationHintMs;
+    this.invalidationReason = invalidationReason;
   }
 }
 
@@ -920,7 +1343,108 @@ export type NnrpBuildMode = "backend-native" | "browser-wasm";
 
 export type NnrpTransportKind = "tcp" | "quic" | "ipc" | "websocket";
 
+export type NnrpConnectionLifecycleState = "open" | "closing" | "closed";
+
+export type NnrpSessionLifecycleState = "open" | "resumed" | "closing" | "draining" | "closed";
+
+export class NnrpSessionLifecycle {
+  public readonly sessionId: number;
+  public readonly state: NnrpSessionLifecycleState;
+  public readonly profileId: number;
+  public readonly priorityClass: NnrpSessionPriorityClass;
+  public readonly schemaId: number;
+  public readonly schemaVersion: number;
+  public readonly maxInFlightOperations: number;
+  public readonly routeScopeId: number;
+  public readonly lastOperationId: bigint;
+  public readonly sessionErrorCode: number;
+
+  public constructor(options: {
+    readonly sessionId: number;
+    readonly state: NnrpSessionLifecycleState;
+    readonly profileId: number;
+    readonly priorityClass: NnrpSessionPriorityClass;
+    readonly schemaId: number;
+    readonly schemaVersion: number;
+    readonly maxInFlightOperations: number;
+    readonly routeScopeId: number;
+    readonly lastOperationId: bigint;
+    readonly sessionErrorCode: number;
+  }) {
+    validateLifecycleU32("sessionId", options.sessionId, true);
+    validateLifecycleU16("profileId", options.profileId);
+    validateLifecycleU32("schemaId", options.schemaId);
+    validateLifecycleU32("schemaVersion", options.schemaVersion);
+    validateLifecycleU16("maxInFlightOperations", options.maxInFlightOperations);
+    validateLifecycleU32("routeScopeId", options.routeScopeId);
+    validateU64BigInt("lastOperationId", options.lastOperationId);
+    validateLifecycleU32("sessionErrorCode", options.sessionErrorCode);
+    if (!NNRP_SESSION_LIFECYCLE_STATES.has(options.state)) {
+      throw lifecycleError("NNRP_SESSION_LIFECYCLE_STATE_INVALID", "Session lifecycle state is not recognized.");
+    }
+    if (!Object.values(NnrpSessionPriorityClass).includes(options.priorityClass)) {
+      throw lifecycleError("NNRP_SESSION_PRIORITY_INVALID", "Session priority class is not recognized.");
+    }
+    this.sessionId = options.sessionId;
+    this.state = options.state;
+    this.profileId = options.profileId;
+    this.priorityClass = options.priorityClass;
+    this.schemaId = options.schemaId;
+    this.schemaVersion = options.schemaVersion;
+    this.maxInFlightOperations = options.maxInFlightOperations;
+    this.routeScopeId = options.routeScopeId;
+    this.lastOperationId = options.lastOperationId;
+    this.sessionErrorCode = options.sessionErrorCode;
+  }
+
+  public get acceptsSessionScopedMessages(): boolean {
+    return this.state !== "closed";
+  }
+
+  public get acceptsNewOperations(): boolean {
+    return this.state === "open" || this.state === "resumed";
+  }
+}
+
+export class NnrpConnectionLifecycle {
+  public readonly state: NnrpConnectionLifecycleState;
+  public readonly sessions: readonly NnrpSessionLifecycle[];
+
+  public constructor(options: {
+    readonly state: NnrpConnectionLifecycleState;
+    readonly sessions?: readonly NnrpSessionLifecycle[];
+  }) {
+    if (!NNRP_CONNECTION_LIFECYCLE_STATES.has(options.state)) {
+      throw lifecycleError("NNRP_CONNECTION_LIFECYCLE_STATE_INVALID", "Connection lifecycle state is not recognized.");
+    }
+    const sessions = [...(options.sessions ?? [])].sort((left, right) => left.sessionId - right.sessionId);
+    if (sessions.some((session) => !(session instanceof NnrpSessionLifecycle))) {
+      throw lifecycleError("NNRP_CONNECTION_SESSIONS_INVALID", "Connection sessions must be lifecycle values.");
+    }
+    if (new Set(sessions.map((session) => session.sessionId)).size !== sessions.length) {
+      throw lifecycleError("NNRP_CONNECTION_SESSION_DUPLICATE", "Connection sessions must have unique session ids.");
+    }
+    if (options.state === "closed" && sessions.some((session) => session.state !== "closed")) {
+      throw lifecycleError("NNRP_CONNECTION_CLOSE_INVALID", "Closed connections require every session to be closed.");
+    }
+    this.state = options.state;
+    this.sessions = Object.freeze(sessions);
+  }
+}
+
 const NNRP_TRANSPORT_KINDS: ReadonlySet<NnrpTransportKind> = new Set(["tcp", "quic", "ipc", "websocket"]);
+const NNRP_CONNECTION_LIFECYCLE_STATES: ReadonlySet<NnrpConnectionLifecycleState> = new Set([
+  "open",
+  "closing",
+  "closed",
+]);
+const NNRP_SESSION_LIFECYCLE_STATES: ReadonlySet<NnrpSessionLifecycleState> = new Set([
+  "open",
+  "resumed",
+  "closing",
+  "draining",
+  "closed",
+]);
 
 export type NnrpTransportPolicy =
   | "auto"
@@ -959,6 +1483,13 @@ export type NnrpCapability =
   | "cache"
   | "schema"
   | "recovery"
+  | "handshake.basic"
+  | "session.open_close"
+  | "session.resume"
+  | "flow_update"
+  | "frame_submit.tensor.inline"
+  | "result_push.basic"
+  | "cache.lifecycle"
   | "payload.typed"
   | "control.cancel_abort"
   | "control.supersede"
@@ -993,6 +1524,13 @@ const NNRP_CAPABILITY_TOKENS = new Set<NnrpCapability>([
   "cache",
   "schema",
   "recovery",
+  "handshake.basic",
+  "session.open_close",
+  "session.resume",
+  "flow_update",
+  "frame_submit.tensor.inline",
+  "result_push.basic",
+  "cache.lifecycle",
   "payload.typed",
   "control.cancel_abort",
   "control.supersede",
@@ -1081,6 +1619,19 @@ export interface NnrpTransportProviderMetadata {
   readonly limitations: readonly NnrpTransportProviderLimitation[];
 }
 
+export type NnrpTransportProviderKind = "pure-rust" | "native-dynamic" | "wasm";
+
+export interface NnrpTransportProviderDescriptor {
+  readonly name: string;
+  readonly version: string;
+  readonly transportId: NnrpTransportKind;
+  readonly kind: NnrpTransportProviderKind;
+  readonly available: boolean;
+  readonly libraryPath?: string;
+  readonly metadata: NnrpTransportProviderMetadata;
+  readonly diagnostic?: string;
+}
+
 export interface NnrpTransportProviderObservation {
   readonly kind: NnrpTransportKind;
   readonly metadata: NnrpTransportProviderMetadata;
@@ -1096,19 +1647,19 @@ export interface NnrpTransportProbeMetrics {
 }
 
 export interface NnrpTransportCandidateReadiness {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly providerId: string;
   readonly routeResolved: boolean;
   readonly securitySatisfied: boolean;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export interface NnrpTransportProbeObservation {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly providerId: string;
   readonly state: "succeeded" | "failed";
   readonly metrics?: NnrpTransportProbeMetrics;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export interface NnrpTransportClientSecurity {
@@ -1126,12 +1677,12 @@ export interface NnrpTransportServerSecurity {
 export type NnrpTransportSecurity = NnrpTransportClientSecurity | NnrpTransportServerSecurity;
 
 export interface NnrpClientProviderRoute {
-  readonly endpoint?: string | URL;
+  readonly endpoint?: NnrpProviderEndpoint;
   readonly security?: NnrpTransportClientSecurity;
 }
 
 export interface NnrpServerProviderRoute {
-  readonly endpoint?: string | URL;
+  readonly endpoint?: NnrpProviderEndpoint;
   readonly security?: NnrpTransportServerSecurity;
 }
 
@@ -1140,7 +1691,7 @@ export type NnrpClientProviderRoutes = Readonly<Partial<Record<NnrpTransportKind
 export type NnrpServerProviderRoutes = Readonly<Partial<Record<NnrpTransportKind, NnrpServerProviderRoute>>>;
 
 export interface NnrpTransportCandidate {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly provider: NnrpTransportProviderMetadata;
   readonly localAvailable: boolean;
   readonly peerSupported: boolean;
@@ -1149,7 +1700,7 @@ export interface NnrpTransportCandidate {
   readonly probe?: NnrpTransportProbeMetrics;
   readonly selectionRank?: number;
   readonly rejectionReason?: NnrpTransportRejectionReason;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export interface NnrpTransportEndpoint {
@@ -1176,6 +1727,112 @@ export interface NnrpTransportAcceptOptions {
 
 const NNRP_DEFAULT_PORT = 4433;
 
+export class NnrpEndpoint {
+  public readonly uri: string;
+  readonly #url: URL;
+
+  public constructor(uri: string | URL) {
+    const parsed = parseApplicationEndpointUrl(uri);
+    this.uri = parsed.toString();
+    this.#url = parsed;
+  }
+
+  public static parse(uri: string | URL): NnrpEndpoint {
+    return new NnrpEndpoint(uri);
+  }
+
+  public get protocol(): "nnrp:" | "nnrps:" {
+    return this.#url.protocol as "nnrp:" | "nnrps:";
+  }
+
+  public get host(): string {
+    return this.#url.host;
+  }
+
+  public get hostname(): string {
+    return this.#url.hostname;
+  }
+
+  public get port(): string {
+    return this.#url.port;
+  }
+
+  public get pathname(): string {
+    return this.#url.pathname;
+  }
+
+  public get search(): string {
+    return this.#url.search;
+  }
+
+  public get hash(): string {
+    return this.#url.hash;
+  }
+
+  public get secure(): boolean {
+    return this.protocol === "nnrps:";
+  }
+
+  public toString(): string {
+    return this.uri;
+  }
+}
+
+export class NnrpProviderEndpoint {
+  public readonly uri: string;
+  public readonly scheme: "tcp" | "quic" | "unix" | "npipe" | "ws" | "wss";
+
+  public constructor(uri: string | URL) {
+    const value = uri instanceof URL ? uri.toString() : uri.trim();
+    const schemeEnd = value.indexOf("://");
+    const scheme = schemeEnd < 0 ? "" : value.slice(0, schemeEnd);
+    if (!isProviderEndpointScheme(scheme)) {
+      throw invalidProviderEndpoint(undefined, "Provider endpoint uses an unsupported or missing scheme.");
+    }
+    const locator = value.slice(schemeEnd + 3);
+    if (locator.length === 0 || value.includes("#")) {
+      throw invalidProviderEndpoint(undefined, "Provider endpoint requires a locator and must not contain a fragment.");
+    }
+    if (scheme === "unix" && (!locator.startsWith("/") || locator === "/" || locator.includes("?"))) {
+      throw invalidProviderEndpoint(undefined, "unix provider endpoint requires an absolute socket path.");
+    }
+    if (scheme === "npipe" && (locator.includes("?") || locator.includes("@"))) {
+      throw invalidProviderEndpoint(undefined, "npipe provider endpoint contains an invalid locator.");
+    }
+    if (scheme !== "unix" && scheme !== "npipe") {
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch (cause) {
+        throw invalidProviderEndpoint(undefined, "Provider endpoint is malformed.", cause);
+      }
+      if (parsed.host.length === 0 || parsed.username.length > 0 || parsed.password.length > 0) {
+        throw invalidProviderEndpoint(undefined, "Provider endpoint requires an authority without user information.");
+      }
+    }
+    this.uri = value;
+    this.scheme = scheme;
+  }
+
+  public static parse(uri: string | URL): NnrpProviderEndpoint {
+    return new NnrpProviderEndpoint(uri);
+  }
+
+  public matchesTransport(transport: NnrpTransportKind): boolean {
+    return (transport === "tcp" && this.scheme === "tcp") || (transport === "quic" && this.scheme === "quic") ||
+      (transport === "ipc" && (this.scheme === "unix" || this.scheme === "npipe")) ||
+      (transport === "websocket" && (this.scheme === "ws" || this.scheme === "wss"));
+  }
+
+  public get secure(): boolean {
+    return this.scheme === "wss";
+  }
+
+  public toString(): string {
+    return this.uri;
+  }
+}
+
 export interface NnrpTransportConnection {
   readonly kind: NnrpTransportKind;
   readonly endpoint: string;
@@ -1201,6 +1858,7 @@ export interface NnrpNativeTransportBinding {
 }
 
 export interface NnrpTransportProvider extends NnrpTransportProviderObservation {
+  readonly descriptor: NnrpTransportProviderDescriptor;
   readonly endpointSchemes: readonly string[];
   probe?(options: NnrpTransportProbeOptions): Promise<NnrpTransportProbeMetrics>;
   connect?(options: NnrpTransportEndpoint): NnrpTransportConnection | Promise<NnrpTransportConnection>;
@@ -1208,18 +1866,18 @@ export interface NnrpTransportProvider extends NnrpTransportProviderObservation 
 }
 
 export interface NnrpTransportSelection {
-  readonly selected: NnrpTransportCandidate | null;
+  readonly selectedProvider: NnrpTransportProviderDescriptor;
   readonly candidates: readonly NnrpTransportCandidate[];
   readonly policy: NnrpTransportPolicy;
+  readonly diagnostic?: string;
 }
 
-export interface NnrpTransportCandidateOptions {
-  readonly local: NnrpCapabilityManifest;
-  readonly peer: NnrpCapabilityManifest;
-  readonly providers: readonly NnrpTransportProviderObservation[];
+export interface NnrpTransportSelectionOptions {
+  readonly peerSupportedTransports: readonly NnrpTransportKind[];
+  readonly policy: NnrpTransportPolicy;
   readonly requestedMaxFrameBytes?: bigint;
   readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
-  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
+  readonly probeObservations: readonly NnrpTransportProbeObservation[];
 }
 
 export type NnrpTransportSelectionErrorCode =
@@ -1235,10 +1893,10 @@ export interface NnrpTransportSelectionSummary {
 }
 
 export interface NnrpRejectedTransportCandidate {
-  readonly kind: NnrpTransportKind;
+  readonly transportId: NnrpTransportKind;
   readonly provider: NnrpTransportProviderMetadata;
   readonly reason: NnrpTransportRejectionReason;
-  readonly diagnostic?: NnrpDiagnostic;
+  readonly diagnostic?: string;
 }
 
 export const NNRP_STANDARD_INPUT_PROFILES = ["tensor", "token", "structured_event", "tool_delta"] as const;
@@ -1662,6 +2320,10 @@ export interface NnrpOperationLifecycleEvent {
   readonly state: NnrpOperationState;
 }
 
+export type NnrpClientEvent =
+  | { readonly type: "runtime"; readonly event: NnrpRuntimeEvent }
+  | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };
+
 export type NnrpTerminalEvent =
   | { readonly type: "runtime"; readonly event: NnrpRuntimeEvent }
   | { readonly type: "lifecycle"; readonly event: NnrpOperationLifecycleEvent };
@@ -1747,11 +2409,11 @@ export interface NnrpSessionPatchResult {
   readonly metadata?: Readonly<Record<string, string>>;
 }
 
-export class NnrpError extends Error {
-  public readonly diagnostic: NnrpDiagnostic;
+export class NnrpError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic> extends Error {
+  public readonly diagnostic: TDiagnostic;
 
-  public constructor(diagnostic: NnrpDiagnostic) {
-    super(diagnostic.message);
+  public constructor(diagnostic: TDiagnostic) {
+    super(typeof diagnostic === "string" ? diagnostic : diagnostic.message);
     this.name = "NnrpError";
     this.diagnostic = diagnostic;
   }
@@ -1764,26 +2426,35 @@ export class NnrpCapabilityError extends NnrpError {
   }
 }
 
-export class NnrpTransportError extends NnrpError {
-  public constructor(diagnostic: NnrpDiagnostic) {
+export class NnrpTransportError<TDiagnostic extends NnrpDiagnostic | string = NnrpDiagnostic>
+  extends NnrpError<TDiagnostic> {
+  public constructor(diagnostic: TDiagnostic) {
     super(diagnostic);
     this.name = "NnrpTransportError";
   }
 }
 
-export class NnrpTransportSelectionError extends NnrpTransportError {
+export class NnrpTransportSelectionError extends NnrpTransportError<string> {
   public readonly code: NnrpTransportSelectionErrorCode;
-  public readonly selection?: NnrpTransportSelection;
+  public readonly policy?: NnrpTransportPolicy;
+  public readonly transportId?: NnrpTransportKind;
+  public readonly candidates: readonly NnrpTransportCandidate[];
 
   public constructor(
     code: NnrpTransportSelectionErrorCode,
-    diagnostic: NnrpDiagnostic,
-    selection?: NnrpTransportSelection,
+    diagnostic: string,
+    evidence: {
+      readonly policy?: NnrpTransportPolicy;
+      readonly transportId?: NnrpTransportKind;
+      readonly candidates?: readonly NnrpTransportCandidate[];
+    } = {},
   ) {
     super(diagnostic);
     this.name = "NnrpTransportSelectionError";
     this.code = code;
-    if (selection !== undefined) this.selection = selection;
+    if (evidence.policy !== undefined) this.policy = evidence.policy;
+    if (evidence.transportId !== undefined) this.transportId = evidence.transportId;
+    this.candidates = Object.freeze([...(evidence.candidates ?? [])]);
   }
 }
 
@@ -2085,9 +2756,11 @@ export function createBrowserWasmManifest(
 }
 
 export function selectTransport(
-  candidates: readonly NnrpTransportCandidate[],
-  policy: NnrpTransportPolicy = "auto",
+  providers: readonly NnrpTransportProviderDescriptor[],
+  options: NnrpTransportSelectionOptions,
 ): NnrpTransportSelection {
+  const candidates = createTransportCandidates(providers, options);
+  const policy = options.policy;
   validateTransportSelectionCandidates(candidates);
   const evaluated = candidates.map((candidate) => evaluateTransportCandidate(candidate, policy));
   const eligible = evaluated.filter((candidate) => candidate.rejectionReason === undefined);
@@ -2112,17 +2785,20 @@ export function selectTransport(
     .sort(compareRejectedTransportCandidates);
   const annotatedCandidates = [...ordered, ...rejected];
 
-  const selection: NnrpTransportSelection = {
-    selected: ordered[0] ?? null,
-    candidates: annotatedCandidates,
-    policy,
-  };
-  if (selection.selected === null) throw transportSelectionError(selection);
-  return selection;
+  const selected = ordered[0];
+  if (selected === undefined) throw transportSelectionError(policy, annotatedCandidates);
+  const selectedProvider = providers.find((provider) =>
+    provider.transportId === selected.transportId && provider.metadata.id === selected.provider.id
+  );
+  if (selectedProvider === undefined) {
+    throw invalidTransportEvidence("Selected candidate does not resolve to a provider descriptor.", policy);
+  }
+  return { selectedProvider, candidates: annotatedCandidates, policy };
 }
 
 export function createTransportCandidates(
-  options: NnrpTransportCandidateOptions,
+  providers: readonly NnrpTransportProviderDescriptor[],
+  options: NnrpTransportSelectionOptions,
 ): readonly NnrpTransportCandidate[] {
   if (
     options.requestedMaxFrameBytes !== undefined &&
@@ -2131,22 +2807,24 @@ export function createTransportCandidates(
     throw transportContractError(
       "NNRP_TRANSPORT_REQUESTED_FRAME_LIMIT_INVALID",
       "requestedMaxFrameBytes must fit the frozen u64 wire range.",
-      options.providers[0]?.kind ?? "tcp",
+      providers[0]?.transportId ?? "tcp",
     );
   }
-  const observations = options.probeObservations ?? [];
-  validateTransportSelectionEvidence(options.providers, options.candidateReadiness, observations);
+  const observations = options.probeObservations;
+  validateTransportSelectionEvidence(providers, options.candidateReadiness, observations, options.policy);
   const readinessByKey = new Map(
     options.candidateReadiness.map((
       readiness,
-    ) => [transportEvidenceKey(readiness.kind, readiness.providerId), readiness]),
+    ) => [transportEvidenceKey(readiness.transportId, readiness.providerId), readiness]),
   );
   const observationByKey = new Map(
-    observations.map((observation) => [transportEvidenceKey(observation.kind, observation.providerId), observation]),
+    observations.map((
+      observation,
+    ) => [transportEvidenceKey(observation.transportId, observation.providerId), observation]),
   );
-  return options.providers.map((provider) => {
-    validateTransportProviderObservation(provider);
-    const key = transportEvidenceKey(provider.kind, provider.metadata.id);
+  return providers.map((provider) => {
+    validateTransportProviderDescriptor(provider);
+    const key = transportEvidenceKey(provider.transportId, provider.metadata.id);
     const readiness = readinessByKey.get(key)!;
     const observation = observationByKey.get(key);
     const probe = observation?.metrics;
@@ -2155,20 +2833,19 @@ export function createTransportCandidates(
       : !readiness.securitySatisfied
       ? "security-unsatisfied"
       : undefined;
+    const diagnostic = observation?.diagnostic ?? readiness.diagnostic ?? provider.diagnostic;
 
     return {
-      kind: provider.kind,
+      transportId: provider.transportId,
       provider: provider.metadata,
-      localAvailable: provider.localAvailable && options.local.transports.includes(provider.kind),
-      peerSupported: options.peer.transports.includes(provider.kind),
+      localAvailable: provider.available,
+      peerSupported: options.peerSupportedTransports.includes(provider.transportId),
       withinLimits: options.requestedMaxFrameBytes === undefined ||
         options.requestedMaxFrameBytes <= provider.metadata.limits.maxFrameBytes,
       probeState: observation?.state ?? "not-run",
       ...(probe === undefined ? {} : { probe }),
       ...(rejectionReason === undefined ? {} : { rejectionReason }),
-      ...((observation?.diagnostic ?? readiness.diagnostic ?? provider.diagnostic) === undefined
-        ? {}
-        : { diagnostic: observation?.diagnostic ?? readiness.diagnostic ?? provider.diagnostic }),
+      ...(diagnostic === undefined ? {} : { diagnostic }),
     } satisfies NnrpTransportCandidate;
   });
 }
@@ -2178,7 +2855,7 @@ export function createTransportSelectionSummary(
 ): NnrpTransportSelectionSummary {
   return {
     policy: selection.policy,
-    selected: selection.selected?.kind ?? null,
+    selected: selection.selectedProvider.transportId,
     rejected: selection.candidates
       .filter((
         candidate,
@@ -2186,7 +2863,7 @@ export function createTransportSelectionSummary(
         candidate.rejectionReason !== undefined
       )
       .map((candidate) => ({
-        kind: candidate.kind,
+        transportId: candidate.transportId,
         provider: candidate.provider,
         reason: candidate.rejectionReason,
         ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
@@ -2195,7 +2872,11 @@ export function createTransportSelectionSummary(
   };
 }
 
-export function parseApplicationEndpoint(endpoint: string | URL): URL {
+export function parseApplicationEndpoint(endpoint: string | URL): NnrpEndpoint {
+  return NnrpEndpoint.parse(endpoint);
+}
+
+function parseApplicationEndpointUrl(endpoint: string | URL): URL {
   const raw = normalizeEndpointValue(endpoint);
   let parsed: URL;
   try {
@@ -2215,22 +2896,20 @@ export function parseApplicationEndpoint(endpoint: string | URL): URL {
 }
 
 export function resolveProviderEndpoint(
-  endpoint: string | URL,
+  endpoint: NnrpEndpoint,
   transport: NnrpTransportKind,
-  providerEndpoint?: string | URL,
+  providerEndpoint?: NnrpProviderEndpoint,
 ): string {
-  const applicationEndpoint = parseApplicationEndpoint(endpoint);
-
   switch (transport) {
     case "tcp":
     case "quic":
       return providerEndpoint === undefined
-        ? applicationHostPort(applicationEndpoint)
+        ? applicationHostPort(endpoint)
         : parseHostPortProviderEndpoint(providerEndpoint, transport);
     case "ipc":
       return parseIpcProviderEndpoint(providerEndpoint, transport);
     case "websocket":
-      return parseWebsocketProviderEndpoint(applicationEndpoint, providerEndpoint, transport);
+      return parseWebsocketProviderEndpoint(endpoint, providerEndpoint, transport);
   }
 }
 
@@ -2342,7 +3021,7 @@ export function createTensorSubmitRequest(input: NnrpTensorSubmitInput): NnrpSub
 
   const referenceBlocks = [references.camera, references.tileIndex, references.tensorSectionTable]
     .filter((value): value is NnrpObjectReferenceBlock => value !== undefined);
-  const referenceRegion = concatBytes(referenceBlocks.map(encodeSubmitObjectReference));
+  const referenceRegion = concatBytes(referenceBlocks.map(encodeObjectReferenceBlock));
   const hasInline = inlineRegion.length > 0;
   const hasReferences = referenceBlocks.length > 0;
   const submitMode = hasInline && hasReferences
@@ -2459,9 +3138,8 @@ export function createTypedPayloadSubmitRequest(input: NnrpTypedPayloadSubmitInp
   }, body);
 }
 
-export function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array {
-  validateSubmitRequestShape(request);
-  const metadata = request.metadata;
+export function encodeFrameSubmitMetadata(metadata: NnrpFrameSubmitMetadata): Uint8Array {
+  validateFrameSubmitMetadata(metadata);
   const output = new Uint8Array(72);
   const view = new DataView(output.buffer);
   view.setUint16(0, metadata.srcWidth, true);
@@ -2479,7 +3157,7 @@ export function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array {
   view.setUint32(24, metadata.tileBaseId, true);
   view.setUint32(28, metadata.cameraBytes, true);
   view.setUint32(32, metadata.tileIndexBytes, true);
-  view.setBigUint64(40, request.operationId, true);
+  view.setBigUint64(40, metadata.operationId, true);
   view.setUint8(52, metadata.submitMode);
   view.setUint8(53, metadata.budgetPolicy);
   view.setUint8(54, metadata.lossTolerancePolicy);
@@ -2488,6 +3166,49 @@ export function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array {
   view.setUint32(64, metadata.payloadKindBitmap, true);
   view.setUint16(68, metadata.payloadFrameCount, true);
   return output;
+}
+
+export function decodeFrameSubmitMetadata(payload: Uint8Array): NnrpFrameSubmitMetadata {
+  requireExactRuntimePayload(payload, 72, "FRAME_SUBMIT");
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  if (
+    view.getUint8(15) !== 0 || view.getUint32(36, true) !== 0 || view.getUint32(48, true) !== 0 ||
+    view.getUint8(55) !== 0 || view.getUint16(70, true) !== 0
+  ) {
+    throw submitProtocolError("NNRP_SUBMIT_METADATA_RESERVED", "FRAME_SUBMIT metadata reserved fields must be zero.");
+  }
+  const metadata: NnrpFrameSubmitMetadata = {
+    srcWidth: view.getUint16(0, true),
+    srcHeight: view.getUint16(2, true),
+    tileWidth: view.getUint16(4, true),
+    tileHeight: view.getUint16(6, true),
+    tileCount: view.getUint16(8, true),
+    sectionCount: view.getUint16(10, true),
+    frameClass: view.getUint8(12),
+    inputProfile: view.getUint8(13) as NnrpTensorInputProfile,
+    tileIndexMode: view.getUint8(14) as NnrpTileIndexMode,
+    latencyBudgetMs: view.getUint16(16, true),
+    targetFpsX100: view.getUint16(18, true),
+    retryOfFrame: view.getUint32(20, true),
+    tileBaseId: view.getUint32(24, true),
+    cameraBytes: view.getUint32(28, true),
+    tileIndexBytes: view.getUint32(32, true),
+    operationId: view.getBigUint64(40, true),
+    submitMode: view.getUint8(52) as NnrpSubmitMode,
+    budgetPolicy: view.getUint8(53),
+    lossTolerancePolicy: view.getUint8(54),
+    objectRefMask: view.getUint32(56, true),
+    dependencyFrameId: view.getUint32(60, true),
+    payloadKindBitmap: view.getUint32(64, true),
+    payloadFrameCount: view.getUint16(68, true),
+  };
+  validateFrameSubmitMetadata(metadata);
+  return metadata;
+}
+
+export function encodeSubmitMetadata(request: NnrpSubmitRequest): Uint8Array {
+  validateSubmitRequestShape(request);
+  return encodeFrameSubmitMetadata({ operationId: request.operationId, ...request.metadata });
 }
 
 export function encodeSubmitPayload(request: NnrpSubmitRequest): Uint8Array {
@@ -2505,41 +3226,14 @@ export function decodeSubmitPayload(payload: Uint8Array): {
       "FRAME_SUBMIT payload must contain 72-byte metadata and a BodyRegionPrelude.",
     );
   }
-  const view = new DataView(payload.buffer, payload.byteOffset, 72);
-  if (
-    view.getUint8(15) !== 0 || view.getUint32(36, true) !== 0 || view.getUint32(48, true) !== 0 ||
-    view.getUint8(55) !== 0 || view.getUint16(70, true) !== 0
-  ) {
-    throw submitProtocolError("NNRP_SUBMIT_METADATA_RESERVED", "FRAME_SUBMIT metadata reserved fields must be zero.");
-  }
-  const metadata: NnrpSubmitMetadata = {
-    srcWidth: view.getUint16(0, true),
-    srcHeight: view.getUint16(2, true),
-    tileWidth: view.getUint16(4, true),
-    tileHeight: view.getUint16(6, true),
-    tileCount: view.getUint16(8, true),
-    sectionCount: view.getUint16(10, true),
-    frameClass: view.getUint8(12),
-    inputProfile: view.getUint8(13) as NnrpTensorInputProfile,
-    tileIndexMode: view.getUint8(14) as NnrpTileIndexMode,
-    latencyBudgetMs: view.getUint16(16, true),
-    targetFpsX100: view.getUint16(18, true),
-    retryOfFrame: view.getUint32(20, true),
-    tileBaseId: view.getUint32(24, true),
-    cameraBytes: view.getUint32(28, true),
-    tileIndexBytes: view.getUint32(32, true),
-    submitMode: view.getUint8(52) as NnrpSubmitMode,
-    budgetPolicy: view.getUint8(53),
-    lossTolerancePolicy: view.getUint8(54),
-    objectRefMask: view.getUint32(56, true),
-    dependencyFrameId: view.getUint32(60, true),
-    payloadKindBitmap: view.getUint32(64, true),
-    payloadFrameCount: view.getUint16(68, true),
-  };
+  const completeMetadata = decodeFrameSubmitMetadata(payload.subarray(0, 72));
+  const { operationId, ...metadata } = completeMetadata;
+  const body = payload.slice(72);
+  validateSubmitBody(metadata, body);
   return {
-    operationId: view.getBigUint64(40, true),
+    operationId,
     metadata,
-    body: payload.slice(72),
+    body,
   };
 }
 
@@ -2547,11 +3241,18 @@ export function encodeResultPushPayload(
   metadata: NnrpResultPushMetadata,
   body: Uint8Array = new Uint8Array(),
 ): Uint8Array {
-  validateResultPushMetadata(metadata);
   if (!(body instanceof Uint8Array)) {
     throw runtimeEventError("NNRP_RESULT_BODY_INVALID", "RESULT_PUSH body must be a Uint8Array.");
   }
   const encoded = new Uint8Array(64 + body.byteLength);
+  encoded.set(encodeResultPushMetadata(metadata), 0);
+  encoded.set(body, 64);
+  return encoded;
+}
+
+export function encodeResultPushMetadata(metadata: NnrpResultPushMetadata): Uint8Array {
+  validateResultPushMetadata(metadata);
+  const encoded = new Uint8Array(64);
   const view = new DataView(encoded.buffer);
   view.setUint16(0, metadata.statusCode, true);
   view.setUint16(2, metadata.resultFlags, true);
@@ -2570,8 +3271,12 @@ export function encodeResultPushPayload(
   view.setUint16(54, metadata.droppedTileCount, true);
   view.setUint32(56, metadata.payloadKindBitmap, true);
   view.setUint16(60, metadata.payloadFrameCount, true);
-  encoded.set(body, 64);
   return encoded;
+}
+
+export function decodeResultPushMetadata(payload: Uint8Array): NnrpResultPushMetadata {
+  requireExactRuntimePayload(payload, 64, "RESULT_PUSH");
+  return decodeResultPushPayload(payload).metadata;
 }
 
 export function decodeResultPushPayload(payload: Uint8Array): {
@@ -2579,7 +3284,7 @@ export function decodeResultPushPayload(payload: Uint8Array): {
   readonly body: Uint8Array;
 } {
   requireRuntimePayload(payload, 64, "RESULT_PUSH");
-  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const view = new DataView(payload.buffer, payload.byteOffset, 64);
   if (
     view.getUint16(10, true) !== 0 || view.getUint16(18, true) !== 0 ||
     view.getBigUint64(28, true) !== 0n || view.getBigUint64(36, true) !== 0n ||
@@ -2646,7 +3351,8 @@ export function decodeNnrpRuntimeEvent(
       return runtimeEvent(ownedHeader, { type: "result_hint", value }, { type: "none" });
     }
     case NnrpMessageType.FlowUpdate: {
-      const value = decodeFlowUpdateMetadata(payload, ownedHeader);
+      const value = decodeFlowUpdateMetadata(payload);
+      validateFlowUpdateHeaderScope(value, ownedHeader);
       return runtimeEvent(ownedHeader, { type: "flow_update", value }, { type: "none" });
     }
     case NnrpMessageType.CacheInvalidate: {
@@ -2887,7 +3593,18 @@ function runtimeControlEventTail(messageType: NnrpMessageType, bytes: Uint8Array
   }
 }
 
-function decodeResultHintMetadata(payload: Uint8Array): NnrpResultHintMetadata {
+export function encodeResultHintMetadata(metadata: NnrpResultHintMetadata): Uint8Array {
+  validateResultHintMetadata(metadata);
+  const encoded = new Uint8Array(16);
+  const view = new DataView(encoded.buffer);
+  view.setUint32(0, metadata.appliedBudgetPolicy, true);
+  view.setUint32(4, metadata.congestionState, true);
+  view.setUint32(8, metadata.reason, true);
+  view.setUint32(12, metadata.retryAfterMs, true);
+  return encoded;
+}
+
+export function decodeResultHintMetadata(payload: Uint8Array): NnrpResultHintMetadata {
   requireExactRuntimePayload(payload, 16, "RESULT_HINT");
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   const metadata: NnrpResultHintMetadata = {
@@ -2896,16 +3613,28 @@ function decodeResultHintMetadata(payload: Uint8Array): NnrpResultHintMetadata {
     reason: view.getUint32(8, true) as NnrpResultHintReason,
     retryAfterMs: view.getUint32(12, true),
   };
-  assertEnumRange("appliedBudgetPolicy", metadata.appliedBudgetPolicy, NnrpResultHintBudgetPolicy.Drop);
-  assertEnumRange("congestionState", metadata.congestionState, NnrpResultHintCongestionState.Saturated);
-  assertEnumRange("reason", metadata.reason, NnrpResultHintReason.Superseded);
+  validateResultHintMetadata(metadata);
   return metadata;
 }
 
-function decodeFlowUpdateMetadata(
-  payload: Uint8Array,
-  header: NnrpRuntimeFrameHeader,
-): NnrpFlowUpdateMetadata {
+export function encodeFlowUpdateMetadata(metadata: NnrpFlowUpdateMetadata): Uint8Array {
+  validateFlowUpdateMetadata(metadata);
+  const encoded = new Uint8Array(32);
+  const view = new DataView(encoded.buffer);
+  view.setUint8(0, metadata.scopeKind);
+  view.setUint8(1, metadata.updateReason);
+  view.setUint8(2, metadata.backpressureLevel);
+  view.setUint16(4, metadata.connectionCredit, true);
+  view.setUint16(6, metadata.sessionCredit, true);
+  view.setUint16(8, metadata.operationCredit, true);
+  view.setBigUint64(12, metadata.operationId, true);
+  view.setUint32(20, metadata.retryAfterMs, true);
+  view.setUint32(24, metadata.creditEpoch, true);
+  view.setUint32(28, metadata.flowFlags, true);
+  return encoded;
+}
+
+export function decodeFlowUpdateMetadata(payload: Uint8Array): NnrpFlowUpdateMetadata {
   requireExactRuntimePayload(payload, 32, "FLOW_UPDATE");
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   if (view.getUint8(3) !== 0 || view.getUint16(10, true) !== 0) {
@@ -2923,15 +3652,14 @@ function decodeFlowUpdateMetadata(
     creditEpoch: view.getUint32(24, true),
     flowFlags: view.getUint32(28, true),
   };
-  assertEnumRange("scopeKind", metadata.scopeKind, NnrpFlowScopeKind.Operation);
-  assertEnumRange("updateReason", metadata.updateReason, NnrpFlowUpdateReason.Congestion);
-  assertEnumRange("backpressureLevel", metadata.backpressureLevel, NnrpBackpressureLevel.Paused);
-  if ((metadata.flowFlags & ~0x0f) !== 0) {
-    throw runtimeEventError("NNRP_FLOW_FLAGS_INVALID", "FLOW_UPDATE contains reserved flow flag bits.");
-  }
-  if (metadata.retryAfterMs !== 0 && (metadata.flowFlags & 0x02) === 0) {
-    throw runtimeEventError("NNRP_FLOW_RETRY_FLAG_MISSING", "FLOW_UPDATE retryAfterMs requires its validity flag.");
-  }
+  validateFlowUpdateMetadata(metadata);
+  return metadata;
+}
+
+function validateFlowUpdateHeaderScope(
+  metadata: NnrpFlowUpdateMetadata,
+  header: NnrpRuntimeFrameHeader,
+): void {
   if (
     (metadata.scopeKind === NnrpFlowScopeKind.Connection &&
       (header.sessionId !== 0 || metadata.sessionCredit !== 0 || metadata.operationCredit !== 0 ||
@@ -2944,7 +3672,6 @@ function decodeFlowUpdateMetadata(
   ) {
     throw runtimeEventError("NNRP_FLOW_SCOPE_INVALID", "FLOW_UPDATE scope fields do not match its common header.");
   }
-  return metadata;
 }
 
 function decodeSessionCloseMetadata(payload: Uint8Array): NnrpSessionCloseMetadata {
@@ -2984,15 +3711,38 @@ function validateResultPushMetadata(metadata: NnrpResultPushMetadata): void {
   if ((metadata.payloadKindBitmap & ~0x7f) !== 0) {
     throw runtimeEventError("NNRP_RESULT_PAYLOAD_KIND_INVALID", "RESULT_PUSH contains unknown payload kinds.");
   }
+  const stale = metadata.resultClass === NnrpResultClass.StaleReuse || (metadata.resultFlags & 0x01) !== 0;
+  if (stale !== (metadata.reusedFrameId !== 0)) {
+    throw runtimeEventError(
+      "NNRP_RESULT_STALE_REUSE_INVALID",
+      "RESULT_PUSH stale semantics and reusedFrameId must agree.",
+    );
+  }
   if (
     (metadata.payloadKindBitmap & NnrpPayloadKind.Tensor) === 0 &&
-    (metadata.tileCount !== 0 || metadata.tileBaseId !== 0 || metadata.tileIndexBytes !== 0 ||
+    (metadata.sectionCount !== 0 || metadata.tileCount !== 0 || metadata.tileBaseId !== 0 ||
+      metadata.tileIndexBytes !== 0 ||
       metadata.coveredTileCount !== 0 || metadata.droppedTileCount !== 0)
   ) {
     throw runtimeEventError(
       "NNRP_RESULT_TENSOR_FIELDS_INVALID",
       "Non-tensor RESULT_PUSH must clear tensor tile fields.",
     );
+  }
+  if ((metadata.payloadKindBitmap & NnrpPayloadKind.Tensor) !== 0) {
+    const partial = metadata.resultClass === NnrpResultClass.Partial || (metadata.resultFlags & 0x04) !== 0;
+    if (partial && metadata.droppedTileCount === 0) {
+      throw runtimeEventError(
+        "NNRP_RESULT_PARTIAL_COVERAGE_INVALID",
+        "Partial tensor RESULT_PUSH requires droppedTileCount greater than zero.",
+      );
+    }
+    if (metadata.coveredTileCount + metadata.droppedTileCount !== metadata.tileCount) {
+      throw runtimeEventError(
+        "NNRP_RESULT_TENSOR_COVERAGE_INVALID",
+        "Tensor RESULT_PUSH coverage must equal tileCount.",
+      );
+    }
   }
 }
 
@@ -3043,6 +3793,96 @@ function validateNonZeroOperationId(operationId: bigint): void {
   }
 }
 
+function validateClientHelloMetadata(metadata: ClientHelloMetadata): void {
+  const u8Fields = ["minVersionMajor", "maxVersionMajor"] as const;
+  const u16Fields = [
+    "supportedWireFormatBitmap",
+    "cacheDigestBitmap",
+    "cacheObjectBitmap",
+    "cacheNamespaceCount",
+    "maxLaneCount",
+    "targetCadenceX100",
+    "latencyBudgetMs",
+    "qualityTier",
+    "degradePolicy",
+  ] as const;
+  const u32Fields = [
+    "supportedProfileBitmap",
+    "supportedPayloadKindBitmap",
+    "supportedCodecBitmap",
+    "supportedCompressionBitmap",
+    "supportedDtypeBitmap",
+    "supportedLayoutBitmap",
+    "maxCacheEntries",
+    "maxCacheBytes",
+    "requestedSessionId",
+    "authBytes",
+    "controlExtensionBytes",
+  ] as const;
+  u8Fields.forEach((field) => assertUnsigned(field, metadata[field], 0xff));
+  u16Fields.forEach((field) => assertUnsigned(field, metadata[field], 0xffff));
+  u32Fields.forEach((field) => assertUnsigned(field, metadata[field], 0xffff_ffff));
+  if (
+    metadata.minVersionMajor > metadata.maxVersionMajor || metadata.minVersionMajor > 1 ||
+    metadata.maxVersionMajor < 1
+  ) {
+    throw runtimeEventError("NNRP_CLIENT_HELLO_VERSION_INVALID", "CLIENT_HELLO version range must include NNRP/1.");
+  }
+  if ((metadata.supportedWireFormatBitmap & 0x01) === 0) {
+    throw runtimeEventError(
+      "NNRP_CLIENT_HELLO_WIRE_FORMAT_INVALID",
+      "CLIENT_HELLO must advertise wire format 0.",
+    );
+  }
+  if (metadata.supportedProfileBitmap === 0 || metadata.supportedPayloadKindBitmap === 0) {
+    throw runtimeEventError(
+      "NNRP_CLIENT_HELLO_CAPABILITY_INVALID",
+      "CLIENT_HELLO profile and payload-kind bitmaps must be non-zero.",
+    );
+  }
+}
+
+function validateSessionPatchAckMetadata(metadata: SessionPatchAckMetadata): void {
+  assertEnumRange("ackStatus", metadata.ackStatus, SessionPatchAckStatus.Rejected);
+  assertEnumRange("rejectReason", metadata.rejectReason, SessionPatchRejectReason.RateLimited);
+  assertUnsigned("appliedPatchMask", metadata.appliedPatchMask, 0x7f);
+  assertUnsigned("rejectedPatchMask", metadata.rejectedPatchMask, 0x7f);
+  assertUnsigned("retryAfterMs", metadata.retryAfterMs, 0xffff_ffff);
+  assertUnsigned("effectiveProfileId", metadata.effectiveProfileId, 0xffff);
+  assertUnsigned("effectiveTargetCadenceX100", metadata.effectiveTargetCadenceX100, 0xffff_ffff);
+  assertUnsigned("effectiveQualityTier", metadata.effectiveQualityTier, 0xffff);
+  assertUnsigned("effectiveDegradePolicy", metadata.effectiveDegradePolicy, 0xffff);
+  assertUnsignedBigInt("effectiveLaneMask", metadata.effectiveLaneMask, 0xffff_ffff_ffff_ffffn);
+  assertUnsigned("effectiveCodecBitmap", metadata.effectiveCodecBitmap, 0xffff_ffff);
+  assertUnsigned("effectiveCompressionBitmap", metadata.effectiveCompressionBitmap, 0xffff_ffff);
+  assertUnsigned("profilePatchAckBytes", metadata.profilePatchAckBytes, 0xffff_ffff);
+}
+
+function validateResultHintMetadata(metadata: NnrpResultHintMetadata): void {
+  assertEnumRange("appliedBudgetPolicy", metadata.appliedBudgetPolicy, NnrpResultHintBudgetPolicy.Drop);
+  assertEnumRange("congestionState", metadata.congestionState, NnrpResultHintCongestionState.Saturated);
+  assertEnumRange("reason", metadata.reason, NnrpResultHintReason.Superseded);
+  assertUnsigned("retryAfterMs", metadata.retryAfterMs, 0xffff_ffff);
+}
+
+function validateFlowUpdateMetadata(metadata: NnrpFlowUpdateMetadata): void {
+  assertEnumRange("scopeKind", metadata.scopeKind, NnrpFlowScopeKind.Operation);
+  assertEnumRange("updateReason", metadata.updateReason, NnrpFlowUpdateReason.Congestion);
+  assertEnumRange("backpressureLevel", metadata.backpressureLevel, NnrpBackpressureLevel.Paused);
+  assertUnsigned("connectionCredit", metadata.connectionCredit, 0xffff);
+  assertUnsigned("sessionCredit", metadata.sessionCredit, 0xffff);
+  assertUnsigned("operationCredit", metadata.operationCredit, 0xffff);
+  assertUnsignedBigInt("operationId", metadata.operationId, 0xffff_ffff_ffff_ffffn);
+  assertUnsigned("retryAfterMs", metadata.retryAfterMs, 0xffff_ffff);
+  assertUnsigned("creditEpoch", metadata.creditEpoch, 0xffff_ffff);
+  if (!Number.isSafeInteger(metadata.flowFlags) || metadata.flowFlags < 0 || metadata.flowFlags > 0x0f) {
+    throw runtimeEventError("NNRP_FLOW_FLAGS_INVALID", "FLOW_UPDATE contains reserved flag bits.");
+  }
+  if (metadata.retryAfterMs !== 0 && (metadata.flowFlags & 0x02) === 0) {
+    throw runtimeEventError("NNRP_FLOW_RETRY_FLAG_MISSING", "FLOW_UPDATE retryAfterMs requires its validity flag.");
+  }
+}
+
 function requireRuntimePayload(payload: Uint8Array, minimum: number, name: string): void {
   if (!(payload instanceof Uint8Array) || payload.byteLength < minimum) {
     throw runtimeEventError(
@@ -3069,7 +3909,12 @@ function requireEmptyRuntimePayload(payload: Uint8Array, name: string): void {
 }
 
 function assertEnumRange(name: string, value: number, maximum: number): void {
-  assertUnsigned(name, value, maximum);
+  if (!Number.isInteger(value) || value < 0 || value > maximum) {
+    throw runtimeEventError(
+      "NNRP_RUNTIME_ENUM_INVALID",
+      `${name} is not a frozen runtime metadata enum value.`,
+    );
+  }
 }
 
 function runtimeEventError(code: string, message: string): NnrpProtocolError {
@@ -3203,7 +4048,7 @@ function transportRejectionReason(
   policy: NnrpTransportPolicy,
 ): NnrpTransportRejectionReason | undefined {
   const forcedKind = forcedTransportKind(policy);
-  if (forcedKind !== undefined && candidate.kind !== forcedKind) {
+  if (forcedKind !== undefined && candidate.transportId !== forcedKind) {
     return "policy-disallowed";
   }
   if (!candidate.localAvailable) {
@@ -3241,7 +4086,7 @@ function compareTransportCandidates(
     throw transportContractError(
       "NNRP_TRANSPORT_PROBE_METRICS_MISSING",
       "Successful transport candidates require probe metrics before comparison.",
-      leftProbe === undefined ? left.kind : right.kind,
+      leftProbe === undefined ? left.transportId : right.transportId,
     );
   }
 
@@ -3249,9 +4094,9 @@ function compareTransportCandidates(
     compareBigInt(rightProbe.medianThroughputBytesPerSecond, leftProbe.medianThroughputBytesPerSecond) ||
     compareBigInt(leftProbe.medianRttMicroseconds, rightProbe.medianRttMicroseconds) ||
     compareProviderCost(left.provider.cost, right.provider.cost) ||
-    comparePreferredTransport(left.kind, right.kind, policy) ||
+    comparePreferredTransport(left.transportId, right.transportId, policy) ||
     left.provider.preferenceRank - right.provider.preferenceRank ||
-    transportNumericId(left.kind) - transportNumericId(right.kind) ||
+    transportNumericId(left.transportId) - transportNumericId(right.transportId) ||
     compareBytewise(left.provider.id, right.provider.id);
 }
 
@@ -3272,12 +4117,12 @@ function comparePreferredTransport(
 }
 
 function compareRejectedTransportCandidates(left: NnrpTransportCandidate, right: NnrpTransportCandidate): number {
-  return transportNumericId(left.kind) - transportNumericId(right.kind) ||
+  return transportNumericId(left.transportId) - transportNumericId(right.transportId) ||
     compareBytewise(left.provider.id, right.provider.id);
 }
 
 function candidateIdentity(candidate: NnrpTransportCandidate): string {
-  return `${transportNumericId(candidate.kind)}\0${candidate.provider.id}`;
+  return `${transportNumericId(candidate.transportId)}\0${candidate.provider.id}`;
 }
 
 function transportNumericId(kind: NnrpTransportKind): number {
@@ -3311,21 +4156,21 @@ function compareBytewise(left: string, right: string): number {
 }
 
 function validateTransportCandidate(candidate: NnrpTransportCandidate): void {
-  validateTransportProviderMetadata(candidate.provider, candidate.kind);
+  validateTransportProviderMetadata(candidate.provider, candidate.transportId);
   if (candidate.probeState === "succeeded") {
     if (candidate.probe === undefined) {
       throw transportContractError(
         "NNRP_TRANSPORT_PROBE_METRICS_MISSING",
         "A succeeded transport probe must include metrics.",
-        candidate.kind,
+        candidate.transportId,
       );
     }
-    validateTransportProbeMetrics(candidate.probe, candidate.kind);
+    validateTransportProbeMetrics(candidate.probe, candidate.transportId);
   } else if (candidate.probe !== undefined) {
     throw transportContractError(
       "NNRP_TRANSPORT_PROBE_STATE_INVALID",
       "Probe metrics are allowed only when probeState is succeeded.",
-      candidate.kind,
+      candidate.transportId,
     );
   }
 }
@@ -3335,57 +4180,61 @@ function validateTransportSelectionCandidates(candidates: readonly NnrpTransport
   const providerIds = new Set<string>();
   for (const candidate of candidates) {
     validateTransportCandidate(candidate);
-    if (kinds.has(candidate.kind) || providerIds.has(candidate.provider.id)) {
+    if (kinds.has(candidate.transportId) || providerIds.has(candidate.provider.id)) {
       throw invalidTransportEvidence("Transport candidates must contain unique transport kinds and provider ids.");
     }
-    kinds.add(candidate.kind);
+    kinds.add(candidate.transportId);
     providerIds.add(candidate.provider.id);
   }
 }
 
 function validateTransportSelectionEvidence(
-  providers: readonly NnrpTransportProviderObservation[],
+  providers: readonly NnrpTransportProviderDescriptor[],
   readiness: readonly NnrpTransportCandidateReadiness[],
   observations: readonly NnrpTransportProbeObservation[],
+  policy?: NnrpTransportPolicy,
 ): void {
   const kinds = new Set<NnrpTransportKind>();
   const providerIds = new Set<string>();
   const providerKeys = new Set<string>();
   for (const provider of providers) {
-    validateTransportProviderObservation(provider);
-    if (kinds.has(provider.kind) || providerIds.has(provider.metadata.id)) {
-      throw invalidTransportEvidence("Provider observations must contain unique transport kinds and provider ids.");
+    validateTransportProviderDescriptor(provider);
+    if (kinds.has(provider.transportId) || providerIds.has(provider.metadata.id)) {
+      throw invalidTransportEvidence(
+        "Provider descriptors must contain unique transport kinds and provider ids.",
+        policy,
+      );
     }
-    kinds.add(provider.kind);
+    kinds.add(provider.transportId);
     providerIds.add(provider.metadata.id);
-    providerKeys.add(transportEvidenceKey(provider.kind, provider.metadata.id));
+    providerKeys.add(transportEvidenceKey(provider.transportId, provider.metadata.id));
   }
 
   const readinessKeys = new Set<string>();
   for (const record of readiness) {
     validateTransportCandidateReadiness(record);
-    const key = transportEvidenceKey(record.kind, record.providerId);
+    const key = transportEvidenceKey(record.transportId, record.providerId);
     if (!providerKeys.has(key)) {
-      throw invalidTransportEvidence("Candidate readiness contains an unmatched provider identity.");
+      throw invalidTransportEvidence("Candidate readiness contains an unmatched provider identity.", policy);
     }
     if (readinessKeys.has(key)) {
-      throw invalidTransportEvidence("Candidate readiness contains a duplicate provider identity.");
+      throw invalidTransportEvidence("Candidate readiness contains a duplicate provider identity.", policy);
     }
     readinessKeys.add(key);
   }
   if (readinessKeys.size !== providerKeys.size) {
-    throw invalidTransportEvidence("Candidate readiness must contain exactly one record for every provider.");
+    throw invalidTransportEvidence("Candidate readiness must contain exactly one record for every provider.", policy);
   }
 
   const observationKeys = new Set<string>();
   for (const observation of observations) {
     validateTransportProbeObservation(observation);
-    const key = transportEvidenceKey(observation.kind, observation.providerId);
+    const key = transportEvidenceKey(observation.transportId, observation.providerId);
     if (!providerKeys.has(key)) {
-      throw invalidTransportEvidence("Probe observations contain an unmatched provider identity.");
+      throw invalidTransportEvidence("Probe observations contain an unmatched provider identity.", policy);
     }
     if (observationKeys.has(key)) {
-      throw invalidTransportEvidence("Probe observations contain a duplicate provider identity.");
+      throw invalidTransportEvidence("Probe observations contain a duplicate provider identity.", policy);
     }
     observationKeys.add(key);
   }
@@ -3393,8 +4242,9 @@ function validateTransportSelectionEvidence(
 
 function validateTransportCandidateReadiness(readiness: NnrpTransportCandidateReadiness): void {
   if (
-    !NNRP_TRANSPORT_KINDS.has(readiness.kind) || !isNonEmptyAscii(readiness.providerId) ||
-    typeof readiness.routeResolved !== "boolean" || typeof readiness.securitySatisfied !== "boolean"
+    !NNRP_TRANSPORT_KINDS.has(readiness.transportId) || !isNonEmptyAscii(readiness.providerId) ||
+    typeof readiness.routeResolved !== "boolean" || typeof readiness.securitySatisfied !== "boolean" ||
+    (readiness.diagnostic !== undefined && typeof readiness.diagnostic !== "string")
   ) {
     throw invalidTransportEvidence("Candidate readiness contains an invalid provider identity or readiness value.");
   }
@@ -3402,8 +4252,9 @@ function validateTransportCandidateReadiness(readiness: NnrpTransportCandidateRe
 
 function validateTransportProbeObservation(observation: NnrpTransportProbeObservation): void {
   if (
-    !NNRP_TRANSPORT_KINDS.has(observation.kind) || !isNonEmptyAscii(observation.providerId) ||
-    (observation.state !== "succeeded" && observation.state !== "failed")
+    !NNRP_TRANSPORT_KINDS.has(observation.transportId) || !isNonEmptyAscii(observation.providerId) ||
+    (observation.state !== "succeeded" && observation.state !== "failed") ||
+    (observation.diagnostic !== undefined && typeof observation.diagnostic !== "string")
   ) {
     throw invalidTransportEvidence("Probe observation contains an invalid provider identity or state.");
   }
@@ -3411,7 +4262,7 @@ function validateTransportProbeObservation(observation: NnrpTransportProbeObserv
     if (observation.metrics === undefined) {
       throw invalidTransportEvidence("Succeeded probe observations require metrics.");
     }
-    validateTransportProbeMetrics(observation.metrics, observation.kind);
+    validateTransportProbeMetrics(observation.metrics, observation.transportId);
   } else if (observation.metrics !== undefined) {
     throw invalidTransportEvidence("Failed probe observations must not include metrics.");
   }
@@ -3421,48 +4272,49 @@ function transportEvidenceKey(kind: NnrpTransportKind, providerId: string): stri
   return `${transportNumericId(kind)}\0${providerId}`;
 }
 
-function invalidTransportEvidence(message: string): NnrpTransportSelectionError {
-  return new NnrpTransportSelectionError("INVALID_EVIDENCE", {
-    code: "NNRP_TRANSPORT_SELECTION_INVALID_EVIDENCE",
+function invalidTransportEvidence(message: string, policy?: NnrpTransportPolicy): NnrpTransportSelectionError {
+  return new NnrpTransportSelectionError(
+    "INVALID_EVIDENCE",
     message,
-    source: "transport",
-    retryable: false,
-  });
+    { ...(policy === undefined ? {} : { policy }) },
+  );
 }
 
-function transportSelectionError(selection: NnrpTransportSelection): NnrpTransportSelectionError {
-  const forcedKind = forcedTransportKind(selection.policy);
+function transportSelectionError(
+  policy: NnrpTransportPolicy,
+  candidates: readonly NnrpTransportCandidate[],
+): NnrpTransportSelectionError {
+  const forcedKind = forcedTransportKind(policy);
   if (forcedKind !== undefined) {
-    const candidate = selection.candidates.find((value) => value.kind === forcedKind);
+    const candidate = candidates.find((value) => value.transportId === forcedKind);
     const reason = candidate?.rejectionReason;
     return new NnrpTransportSelectionError(
       "FORCED_TRANSPORT_UNAVAILABLE",
-      {
-        code: "NNRP_TRANSPORT_SELECTION_FORCED_UNAVAILABLE",
-        message: reason === undefined
-          ? `Forced transport is not available: ${forcedKind}.`
-          : `Forced transport ${forcedKind} was rejected: ${reason}.`,
-        source: "transport",
-        retryable: false,
-        transport: forcedKind,
-      },
-      selection,
+      reason === undefined
+        ? `Forced transport is not available: ${forcedKind}.`
+        : `Forced transport ${forcedKind} was rejected: ${reason}.`,
+      { policy, transportId: forcedKind, candidates },
     );
   }
   return new NnrpTransportSelectionError(
     "NO_VIABLE_TRANSPORT",
-    {
-      code: "NNRP_TRANSPORT_SELECTION_NO_VIABLE_TRANSPORT",
-      message: "No viable transport provider remains after applying policy and evidence.",
-      source: "transport",
-      retryable: false,
-    },
-    selection,
+    "No viable transport provider remains after applying policy and evidence.",
+    { policy, candidates },
   );
 }
 
-function validateTransportProviderObservation(provider: NnrpTransportProviderObservation): void {
-  validateTransportProviderMetadata(provider.metadata, provider.kind);
+function validateTransportProviderDescriptor(provider: NnrpTransportProviderDescriptor): void {
+  if (
+    !isNonEmptyAscii(provider.name) || provider.version.trim().length === 0 ||
+    !NNRP_TRANSPORT_KINDS.has(provider.transportId) ||
+    (provider.kind !== "pure-rust" && provider.kind !== "native-dynamic" && provider.kind !== "wasm") ||
+    typeof provider.available !== "boolean" ||
+    (provider.libraryPath !== undefined && provider.libraryPath.trim().length === 0) ||
+    (provider.diagnostic !== undefined && provider.diagnostic.trim().length === 0)
+  ) {
+    throw invalidTransportEvidence(`Transport provider descriptor is invalid: ${provider.name || "<empty>"}.`);
+  }
+  validateTransportProviderMetadata(provider.metadata, provider.transportId);
 }
 
 function validateTransportProviderMetadata(
@@ -3561,26 +4413,27 @@ function normalizeEndpointValue(endpoint: string | URL): string {
   return value;
 }
 
-function applicationHostPort(endpoint: URL): string {
+function applicationHostPort(endpoint: NnrpEndpoint): string {
   return `${endpoint.hostname}:${endpoint.port || NNRP_DEFAULT_PORT}`;
 }
 
+function isProviderEndpointScheme(
+  value: string,
+): value is "tcp" | "quic" | "unix" | "npipe" | "ws" | "wss" {
+  return value === "tcp" || value === "quic" || value === "unix" || value === "npipe" || value === "ws" ||
+    value === "wss";
+}
+
 function parseHostPortProviderEndpoint(
-  endpoint: string | URL,
+  endpoint: NnrpProviderEndpoint,
   transport: Extract<NnrpTransportKind, "tcp" | "quic">,
 ): string {
-  if (endpoint instanceof URL) {
-    throw invalidProviderEndpoint(transport, `${transport} provider endpoint must use host:port form.`);
+  if (!endpoint.matchesTransport(transport)) {
+    throw invalidProviderEndpoint(transport, `${transport} provider endpoint must use ${transport}://.`);
   }
-
-  const value = endpoint.trim();
-  if (value.length === 0 || value.includes("://")) {
-    throw invalidProviderEndpoint(transport, `${transport} provider endpoint must use host:port form.`);
-  }
-
   let parsed: URL;
   try {
-    parsed = new URL(`tcp://${value}`);
+    parsed = new URL(endpoint.uri);
   } catch (cause) {
     throw invalidProviderEndpoint(transport, `${transport} provider endpoint is malformed.`, cause);
   }
@@ -3602,14 +4455,17 @@ function parseHostPortProviderEndpoint(
 }
 
 function parseIpcProviderEndpoint(
-  endpoint: string | URL | undefined,
+  endpoint: NnrpProviderEndpoint | undefined,
   transport: Extract<NnrpTransportKind, "ipc">,
 ): string {
   if (endpoint === undefined) {
     throw invalidProviderEndpoint(transport, "IPC selection requires an explicit unix:// or npipe:// endpoint.");
   }
 
-  const value = endpoint instanceof URL ? endpoint.toString() : endpoint.trim();
+  if (!endpoint.matchesTransport(transport)) {
+    throw invalidProviderEndpoint(transport, "IPC provider endpoint must use unix:// or npipe://.");
+  }
+  const value = endpoint.uri;
   const scheme = value.startsWith("unix://") ? "unix://" : value.startsWith("npipe://") ? "npipe://" : undefined;
   if (scheme === undefined || value.slice(scheme.length).replace(/^\/+|\/+$/g, "").length === 0) {
     throw invalidProviderEndpoint(transport, "IPC provider endpoint must use unix:// or npipe:// with a locator.");
@@ -3619,17 +4475,20 @@ function parseIpcProviderEndpoint(
 }
 
 function parseWebsocketProviderEndpoint(
-  applicationEndpoint: URL,
-  endpoint: string | URL | undefined,
+  applicationEndpoint: NnrpEndpoint,
+  endpoint: NnrpProviderEndpoint | undefined,
   transport: Extract<NnrpTransportKind, "websocket">,
 ): string {
   if (endpoint === undefined) {
     throw invalidProviderEndpoint(transport, "websocket selection requires an explicit ws:// or wss:// endpoint.");
   }
 
+  if (!endpoint.matchesTransport(transport)) {
+    throw invalidProviderEndpoint(transport, "websocket provider endpoint must use ws:// or wss://.");
+  }
   let parsed: URL;
   try {
-    parsed = endpoint instanceof URL ? new URL(endpoint.toString()) : new URL(endpoint.trim());
+    parsed = new URL(endpoint.uri);
   } catch (cause) {
     throw invalidProviderEndpoint(transport, "websocket provider endpoint is malformed.", cause);
   }
@@ -3655,7 +4514,7 @@ function invalidApplicationEndpoint(message: string, cause?: unknown): NnrpProto
 }
 
 function invalidProviderEndpoint(
-  transport: NnrpTransportKind,
+  transport: NnrpTransportKind | undefined,
   message: string,
   cause?: unknown,
 ): NnrpTransportError {
@@ -3664,9 +4523,29 @@ function invalidProviderEndpoint(
     message,
     source: "transport",
     retryable: false,
-    transport,
+    ...(transport === undefined ? {} : { transport }),
     ...(cause === undefined ? {} : { cause }),
   });
+}
+
+function lifecycleError(code: string, message: string): NnrpProtocolError {
+  return new NnrpProtocolError({ code, message, source: "core", retryable: false });
+}
+
+function validateLifecycleU16(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+    throw lifecycleError("NNRP_LIFECYCLE_U16_INVALID", `${name} must fit the frozen u16 range.`);
+  }
+}
+
+function validateLifecycleU32(name: string, value: number, nonzero = false): void {
+  const minimum = nonzero ? 1 : 0;
+  if (!Number.isInteger(value) || value < minimum || value > 0xffff_ffff) {
+    throw lifecycleError(
+      "NNRP_LIFECYCLE_U32_INVALID",
+      `${name} must fit the frozen ${nonzero ? "non-zero " : ""}u32 range.`,
+    );
+  }
 }
 
 function createCacheMetadata(metadata: NnrpCacheMetadata): NnrpCacheMetadata {
@@ -3733,6 +4612,10 @@ function validateSubmitPolicy(policy: NnrpSubmitPolicy): void {
   assertUnsigned("policy.dependencyFrameId", policy.dependencyFrameId, 0xffff_ffff);
 }
 
+function validateFrameSubmitMetadata(metadata: NnrpFrameSubmitMetadata): void {
+  validateSubmitMetadataShape(metadata.operationId, metadata);
+}
+
 function validateSubmitReference(
   reference: NnrpObjectReferenceBlock | undefined,
   expectedKind: NnrpCacheObjectKind,
@@ -3745,13 +4628,26 @@ function validateSubmitReference(
       `Submit ${slot} reference uses the wrong object kind.`,
     );
   }
-  assertUnsigned(`${slot}.refFlags`, reference.refFlags, 0xffff);
+  validateObjectReferenceBlock(reference);
   assertUnsigned(`${slot}.cacheNamespace`, reference.cacheNamespace, 0xffff_ffff);
   assertSubmitU64(`${slot}.cacheKeyHi`, reference.cacheKeyHi);
   assertSubmitU64(`${slot}.cacheKeyLo`, reference.cacheKeyLo);
 }
 
-function encodeSubmitObjectReference(reference: NnrpObjectReferenceBlock): Uint8Array {
+function validateObjectReferenceBlock(reference: NnrpObjectReferenceBlock): void {
+  if (!isCacheObjectKind(reference.objectKind)) {
+    throw submitProtocolError("NNRP_OBJECT_REFERENCE_KIND_INVALID", "Object reference kind is not registered.");
+  }
+  if (reference.refFlags !== 0) {
+    throw submitProtocolError("NNRP_OBJECT_REFERENCE_FLAGS_INVALID", "Object reference flags must be zero.");
+  }
+  assertUnsigned("reference.cacheNamespace", reference.cacheNamespace, 0xffff_ffff);
+  assertSubmitU64("reference.cacheKeyHi", reference.cacheKeyHi);
+  assertSubmitU64("reference.cacheKeyLo", reference.cacheKeyLo);
+}
+
+export function encodeObjectReferenceBlock(reference: NnrpObjectReferenceBlock): Uint8Array {
+  validateObjectReferenceBlock(reference);
   const output = new Uint8Array(24);
   const view = new DataView(output.buffer);
   view.setUint16(0, reference.objectKind, true);
@@ -3760,6 +4656,20 @@ function encodeSubmitObjectReference(reference: NnrpObjectReferenceBlock): Uint8
   view.setBigUint64(8, reference.cacheKeyHi, true);
   view.setBigUint64(16, reference.cacheKeyLo, true);
   return output;
+}
+
+export function decodeObjectReferenceBlock(encoded: Uint8Array): NnrpObjectReferenceBlock {
+  requireExactRuntimePayload(encoded, 24, "OBJECT_REFERENCE_BLOCK");
+  const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength);
+  const reference: NnrpObjectReferenceBlock = {
+    objectKind: view.getUint16(0, true) as NnrpCacheObjectKind,
+    refFlags: view.getUint16(2, true),
+    cacheNamespace: view.getUint32(4, true),
+    cacheKeyHi: view.getBigUint64(8, true),
+    cacheKeyLo: view.getBigUint64(16, true),
+  };
+  validateObjectReferenceBlock(reference);
+  return reference;
 }
 
 function appendInlineSubmitObject(target: number[], objectKind: NnrpCacheObjectKind, payload: Uint8Array): void {
@@ -3968,7 +4878,17 @@ function validateSubmitRequestShape(request: NnrpSubmitRequest): void {
   }
 
   validateSubmitIdentity({ operationId: request.operationId, frameId: request.frameId, header: request.header });
-  const metadata = request.metadata;
+  validateSubmitMetadataShape(request.operationId, request.metadata);
+  validateSubmitBody(request.metadata, request.body);
+}
+
+function validateSubmitMetadataShape(operationId: bigint, metadata: NnrpSubmitMetadata): void {
+  if (operationId <= 0n || operationId > 0xffff_ffff_ffff_ffffn) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_OPERATION_ID_INVALID",
+      "Submit metadata operationId must be between 1 and 2^64-1.",
+    );
+  }
   assertUnsigned("metadata.srcWidth", metadata.srcWidth, 0xffff);
   assertUnsigned("metadata.srcHeight", metadata.srcHeight, 0xffff);
   assertUnsigned("metadata.tileWidth", metadata.tileWidth, 0xffff);
@@ -4014,18 +4934,49 @@ function validateSubmitRequestShape(request: NnrpSubmitRequest): void {
       "Non-tensor submits must clear tensor tile fields.",
     );
   }
-  if (!(request.body instanceof Uint8Array) || request.body.byteLength < 32) {
+}
+
+function validateSubmitBody(metadata: NnrpSubmitMetadata, body: Uint8Array): void {
+  if (!(body instanceof Uint8Array) || body.byteLength < 32) {
     throw submitProtocolError("NNRP_SUBMIT_BODY_INVALID", "Submit body must contain a BodyRegionPrelude.");
   }
-  const prelude = new DataView(request.body.buffer, request.body.byteOffset, 32);
+  const prelude = new DataView(body.buffer, body.byteOffset, 32);
   if (prelude.getUint32(24, true) !== 0 || prelude.getUint32(28, true) !== 0) {
     throw submitProtocolError("NNRP_SUBMIT_BODY_RESERVED", "Submit body prelude reserved fields must be zero.");
   }
   const regionBytes = prelude.getUint32(0, true) + prelude.getUint32(4, true) +
     prelude.getUint32(8, true) + prelude.getUint32(12, true) + prelude.getUint32(16, true) +
     prelude.getUint32(20, true);
-  if (regionBytes !== request.body.byteLength - 32) {
+  if (regionBytes !== body.byteLength - 32) {
     throw submitProtocolError("NNRP_SUBMIT_BODY_LENGTH_INVALID", "Submit body region lengths do not cover the body.");
+  }
+  const objectReferenceBytes = prelude.getUint32(4, true);
+  const typedPayloadDescriptorBytes = prelude.getUint32(8, true);
+  const typedPayloadFrameBytes = prelude.getUint32(12, true);
+  const extensionDescriptorBytes = prelude.getUint32(16, true);
+  if (objectReferenceBytes % 24 !== 0) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_OBJECT_REFERENCE_LENGTH_INVALID",
+      "Submit object reference region must contain complete 24-byte blocks.",
+    );
+  }
+  if (typedPayloadDescriptorBytes % 24 !== 0 || typedPayloadDescriptorBytes !== metadata.payloadFrameCount * 24) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_TYPED_DESCRIPTOR_LENGTH_INVALID",
+      "Submit typed payload descriptor bytes must equal payloadFrameCount * 24.",
+    );
+  }
+  if (metadata.payloadFrameCount === 0 && typedPayloadFrameBytes !== 0) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_TYPED_FRAME_LENGTH_INVALID",
+      "Submit typed payload frame bytes must be zero when payloadFrameCount is zero.",
+    );
+  }
+  if (extensionDescriptorBytes % 16 !== 0) {
+    throw submitProtocolError(
+      "NNRP_SUBMIT_EXTENSION_DESCRIPTOR_LENGTH_INVALID",
+      "Submit extension descriptor region must contain complete 16-byte descriptors.",
+    );
   }
 }
 
@@ -4151,6 +5102,20 @@ function validateCacheKey(key: NnrpCacheKey): void {
 }
 
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
+const NNRP_CACHE_LEASE_OUTCOMES: ReadonlySet<NnrpCacheLeaseOutcome> = new Set([
+  "valid",
+  "expired",
+  "renewed",
+  "released",
+  "missing",
+]);
+const NNRP_CACHE_INVALIDATION_REASONS: ReadonlySet<NnrpCacheInvalidationReason> = new Set([
+  "explicit",
+  "dependency-invalidated",
+  "lease-expired",
+  "version-mismatch",
+  "schema-mismatch",
+]);
 
 function validateCacheObjectId(objectId: CacheObjectId): void {
   if (objectId === null || typeof objectId !== "object") {
@@ -4162,6 +5127,18 @@ function validateCacheObjectId(objectId: CacheObjectId): void {
   if (!isCacheObjectKind(objectId.objectKind)) {
     throw runtimeObjectError("NNRP_CACHE_OBJECT_KIND_INVALID", "Cache lease object kind is not recognized.");
   }
+}
+
+function validateCacheObjectVersion(version: NnrpCacheObjectVersion): void {
+  validateCacheObjectId(version.objectId);
+  validateU64BigInt("objectVersion.objectVersion", version.objectVersion);
+  validateU32Number("objectVersion.schemaId", version.schemaId);
+  validateU32Number("objectVersion.schemaVersion", version.schemaVersion);
+}
+
+function cacheObjectIdsEqual(left: CacheObjectId, right: CacheObjectId): boolean {
+  return left.cacheNamespace === right.cacheNamespace && left.cacheKeyHi === right.cacheKeyHi &&
+    left.cacheKeyLo === right.cacheKeyLo && left.objectKind === right.objectKind;
 }
 
 function validateU64BigInt(name: string, value: bigint): void {
@@ -4184,6 +5161,10 @@ function isCacheObjectKind(value: number): value is NnrpCacheObjectKind {
 function isCacheLeaseOwnerScope(value: number): value is CacheLeaseOwnerScope {
   return value === CacheLeaseOwnerScope.Connection || value === CacheLeaseOwnerScope.Session ||
     value === CacheLeaseOwnerScope.Operation;
+}
+
+function isCacheReuseScope(value: number): value is CacheReuseScope {
+  return Number.isInteger(value) && value >= CacheReuseScope.Operation && value <= CacheReuseScope.Profile;
 }
 
 function validateSchemaDescriptor(descriptor: NnrpSchemaDescriptor): void {
@@ -4833,6 +5814,42 @@ function validateCacheInvalidateMetadata(metadata: CacheInvalidateMetadata): voi
       "Cache invalidate identity fields must match invalidateScope.",
     );
   }
+}
+
+function validateCachePutMetadata(metadata: CachePutMetadata): void {
+  assertUnsigned("cacheNamespace", metadata.cacheNamespace, 0xffff_ffff);
+  assertUnsignedBigInt("cacheKeyHi", metadata.cacheKeyHi, 0xffff_ffff_ffff_ffffn);
+  assertUnsignedBigInt("cacheKeyLo", metadata.cacheKeyLo, 0xffff_ffff_ffff_ffffn);
+  if (!isCacheObjectKind(metadata.objectKind)) {
+    throw runtimeObjectError("NNRP_CACHE_OBJECT_KIND_INVALID", "CACHE_PUT objectKind is not registered.");
+  }
+  assertUnsigned("ttlMs", metadata.ttlMs, 0xffff_ffff);
+  assertUnsigned("objectBytes", metadata.objectBytes, 0xffff_ffff);
+  assertUnsigned("codecBitmap", metadata.codecBitmap, 0xffff_ffff);
+  if (!Number.isInteger(metadata.flags) || metadata.flags < 0 || metadata.flags > 0x03) {
+    throw runtimeObjectError("NNRP_CACHE_PUT_FLAGS_INVALID", "CACHE_PUT flags contain reserved bits.");
+  }
+}
+
+function validateCacheAckMetadata(metadata: CacheAckMetadata): void {
+  assertUnsigned("cacheNamespace", metadata.cacheNamespace, 0xffff_ffff);
+  assertUnsignedBigInt("cacheKeyHi", metadata.cacheKeyHi, 0xffff_ffff_ffff_ffffn);
+  assertUnsignedBigInt("cacheKeyLo", metadata.cacheKeyLo, 0xffff_ffff_ffff_ffffn);
+  assertEnumRange("status", metadata.status, CacheAckStatus.Replaced);
+  assertUnsigned("acceptedTtlMs", metadata.acceptedTtlMs, 0xffff_ffff);
+  assertUnsigned("maxObjectBytes", metadata.maxObjectBytes, 0xffff_ffff);
+  assertUnsigned("detailCode", metadata.detailCode, 0xffff_ffff);
+}
+
+function validateTransportProbeMetadata(metadata: TransportProbeMetadata): void {
+  assertUnsigned("probeId", metadata.probeId, 0xffff_ffff);
+  assertUnsigned("probePayloadBytes", metadata.probePayloadBytes, 0xffff_ffff);
+  assertUnsignedBigInt("clientSendTsUs", metadata.clientSendTsUs, 0xffff_ffff_ffff_ffffn);
+}
+
+function validateTransportProbeAckMetadata(metadata: TransportProbeAckMetadata): void {
+  assertUnsigned("probeId", metadata.probeId, 0xffff_ffff);
+  assertUnsignedBigInt("serverRecvTsUs", metadata.serverRecvTsUs, 0xffff_ffff_ffff_ffffn);
 }
 
 function validateRuntimeControlMetadata(

@@ -61,7 +61,14 @@
 
 - [x] Publish exact Preview4 public types from `@nnrp/core`.
   - [x] Update capability manifests and provider contracts.
-  - [x] Update selection options, candidate diagnostics, and endpoint resolution results.
+  - [x] Export validated `NnrpEndpoint` and `NnrpProviderEndpoint` values instead of projecting raw `URL` or provider
+        strings as the frozen endpoint types.
+  - [x] Export `NnrpTransportProviderDescriptor`, `NnrpTransportSelectionOptions`, and the exact frozen
+        `NnrpTransportSelection` result shape, keeping provider-owned `name` distinct from protocol `transportId`.
+  - [x] Export `NnrpConnectionLifecycle` and `NnrpSessionLifecycle` with the frozen states, counters, and transition
+        invariants.
+  - [x] Update selection options, candidate diagnostics, and endpoint resolution results without duplicate role-local
+        substitutes.
   - [x] Update public API snapshots without old-preview aliases.
 - [x] Add contract tests.
   - [x] Cover every transport kind and policy.

@@ -25,7 +25,7 @@ owns the browser WASM runtime.
 | --------------------------- | ----------------------------------------------------------------------------------- |
 | `@nnrp/core`                | Runtime-neutral contracts, codecs, validation, endpoints, and provider selection.   |
 | `@nnrp/native-client`       | Node.js/Deno client, session, control, object, and cache lifecycle.                 |
-| `@nnrp/native-server`       | Node.js/Deno listener, accepted session, response, control, object, and cache APIs. |
+| `@nnrp/native-server`       | Node.js/Deno listener, accepted session/operation, control, object, and cache APIs. |
 | `@nnrp/browser-client`      | Browser client/session lifecycle and the single `nnrp-wasm-browser` artifact.       |
 | `@nnrp/transport-tcp`       | TCP provider behavior and TCP native libraries.                                     |
 | `@nnrp/transport-quic`      | QUIC provider behavior and QUIC native libraries.                                   |
@@ -57,12 +57,13 @@ import {
   NNRP_STANDARD_PROFILE_TOKEN,
   NNRP_TOKEN_DELTA_SCHEMA_ID,
   NNRP_TOKEN_DELTA_SCHEMA_VERSION,
+  NnrpEndpoint,
 } from "@nnrp/core";
 import { openNativeClient } from "@nnrp/native-client";
 import { createTcpTransportProvider } from "@nnrp/transport-tcp";
 
 const client = await openNativeClient({
-  endpoint: "nnrp://127.0.0.1:4433/session/default",
+  endpoint: NnrpEndpoint.parse("nnrp://127.0.0.1:4433/session/default"),
   transports: [createTcpTransportProvider()],
   transportPolicy: "auto",
 });
@@ -97,11 +98,11 @@ are never serialized into operation payloads.
 ## Runtime Surface
 
 Native and browser clients expose the same submit, cancellation, deadline, priority, progress, partial-result, runtime
-object, cache reference, and event polling concepts. `@nnrp/native-server` additionally exposes listen/accept and
-server-only response controls. Public methods use structured Preview4 metadata and `bigint` for wire `u64` fields;
-native handles, WASM handles, and transport-library handles remain private. Session open and resume are asynchronous,
-and resumable sessions expose runtime-issued tickets through `session.recoveryTicket()` for
-`client.resumeSession(ticket)`.
+object, cache reference, and event polling concepts. `@nnrp/native-server` additionally exposes listen/accept and server
+session controls plus operation-owned progress, partial result, result, and result-drop replies. Public methods use
+structured Preview4 metadata and `bigint` for wire `u64` fields; native handles, WASM handles, and transport-library
+handles remain private. Session open and resume are asynchronous, and resumable sessions expose runtime-issued tickets
+through `session.recoveryTicket()` for `client.resumeSession(ticket)`.
 
 ## Conformance And Benchmarks
 

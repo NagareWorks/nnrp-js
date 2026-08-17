@@ -1020,7 +1020,11 @@ class NodeClientRoleSession {
     return await pollRoleEvents(this.symbols, "client", this.handle, maxEvents, timeoutMillis);
   }
 
-  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+  async sendRuntimeFrame(
+    messageType: number,
+    frameId: number,
+    payload: Uint8Array,
+  ): Promise<void> {
     this.#requireOpen();
     const body = Buffer.from(payload);
     assertStatus(
@@ -1268,12 +1272,17 @@ class NodeServerRoleSession {
     );
   }
 
-  async sendRuntimeFrame(messageType: number, frameId: number, payload: Uint8Array): Promise<void> {
+  async sendRuntimeFrame(
+    handle: NativeHandle,
+    messageType: number,
+    frameId: number,
+    payload: Uint8Array,
+  ): Promise<void> {
     this.#requireOpen();
     const body = Buffer.from(payload);
     assertStatus(
       await invoke<NativeStatus>(this.symbols.runtimeFrameSend, [{
-        handle: this.handle,
+        handle,
         message_type: messageType,
         frame_id: frameId,
         payload: { ptr: body, len: body.byteLength },

@@ -1,3 +1,4 @@
+import { NnrpEndpoint as FrozenNnrpEndpoint, NnrpProviderEndpoint as FrozenNnrpProviderEndpoint } from "@nnrp/core";
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   createTokenSubmitRequest,
@@ -6,13 +7,15 @@ import {
   NNRP_DEFAULT_SUBMIT_HEADER,
   NNRP_DEFAULT_SUBMIT_POLICY,
   NnrpMessageType,
+  type NnrpOperationLifecycleEvent,
+  type NnrpRuntimeEvent,
   type NnrpTransportConnection,
   RuntimeRole,
 } from "@nnrp/core";
-import { openBackendRuntime } from "@nnrp/native-server";
+import { type NnrpServerSession, openBackendRuntime } from "@nnrp/native-server";
 import { createWebSocketTransportProvider } from "@nnrp/transport-websocket";
 import { assertRuntimeMetadata } from "../../../scripts/runtime-event-fixtures.ts";
-import { loadBrowserWasmModule, openBrowserWasmConnection } from "../src/wasm-role.ts";
+import { type BrowserWasmRole, loadBrowserWasmModule, openBrowserWasmConnection } from "../src/wasm-role.ts";
 
 Deno.test({
   name: "package-owned browser WASM role remains full duplex while awaiting an event",
@@ -28,8 +31,8 @@ Deno.test({
       transportPolicy: "force-websocket",
     });
     const server = serverRuntime.listen({
-      endpoint: "nnrp://127.0.0.1/browser-wasm-duplex",
-      providerRoutes: { websocket: { endpoint: providerEndpoint } },
+      endpoint: FrozenNnrpEndpoint.parse("nnrp://127.0.0.1/browser-wasm-duplex"),
+      providerRoutes: { websocket: { endpoint: FrozenNnrpProviderEndpoint.parse(providerEndpoint) } },
       transportPolicy: "force-websocket",
     });
     const accepting = server.accept();
@@ -81,7 +84,8 @@ Deno.test({
 
     let failure: unknown;
     try {
-      const pendingEvent = role.awaitEvent().catch((error) => error);
+      const lifecycleEvents: NnrpOperationLifecycleEvent[] = [];
+      const pendingEvent = awaitRuntimeEvent(role, lifecycleEvents).catch((error) => error);
       const metadata = {
         traceId: 1n,
         spanId: 2n,
@@ -105,7 +109,7 @@ Deno.test({
       }
       assertEquals(sentMessageTypes.at(-1), NnrpMessageType.TraceContext);
       assertEquals(
-        (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+        (await receiveServerRuntimeEvent(serverSession)).header.messageType,
         NnrpMessageType.TraceContext,
       );
 
@@ -117,10 +121,10 @@ Deno.test({
 
       await role.submitNoWait(9, NNRP_DEFAULT_SUBMIT_HEADER, frameSubmitPayload(42n, new Uint8Array([7])));
       assertEquals(
-        (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+        (await serverSession.receiveSubmit({ timeoutMillis: 5_000 })).submit.header.messageType,
         NnrpMessageType.FrameSubmit,
       );
-      const pendingAfterSubmit = role.awaitEvent().catch((error) => error);
+      const pendingAfterSubmit = awaitRuntimeEvent(role, lifecycleEvents).catch((error) => error);
       await within(
         role.sendRuntimeFrame(
           NnrpMessageType.Cancel,
@@ -137,14 +141,16 @@ Deno.test({
         "WASM role CANCEL did not complete while event receive was pending",
       );
       assertEquals(
-        (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+        (await receiveServerRuntimeEvent(serverSession)).header.messageType,
         NnrpMessageType.Cancel,
       );
+      await expectServerLifecycle(serverSession, "cancelled");
       await serverSession.sendTraceContext({ ...metadata, traceId: 42n });
       const traceAfterSubmit = await pendingAfterSubmit;
       if (traceAfterSubmit instanceof Error) throw traceAfterSubmit;
       assertEquals(traceAfterSubmit.header.messageType, NnrpMessageType.TraceContext);
       assertRuntimeMetadata(traceAfterSubmit, "trace_context");
+      assertEquals(lifecycleEvents, [{ operationId: 42n, state: "cancelled" }]);
     } catch (error) {
       failure = error;
     } finally {
@@ -152,7 +158,7 @@ Deno.test({
         const clientClosing = role.close();
         try {
           assertEquals(
-            (await serverSession.receive({ timeoutMillis: 5_000 })).header.messageType,
+            (await receiveServerRuntimeEvent(serverSession)).header.messageType,
             NnrpMessageType.SessionClose,
           );
           await serverSession.close();
@@ -176,6 +182,33 @@ Deno.test({
     if (failure !== undefined) throw failure;
   },
 });
+
+async function awaitRuntimeEvent(
+  role: BrowserWasmRole,
+  lifecycleEvents: NnrpOperationLifecycleEvent[],
+): Promise<NnrpRuntimeEvent> {
+  while (true) {
+    const event = await role.awaitEvent();
+    if (event.type === "runtime") return event.event;
+    lifecycleEvents.push(event.event);
+  }
+}
+
+async function receiveServerRuntimeEvent(session: NnrpServerSession): Promise<NnrpRuntimeEvent> {
+  const event = await session.nextEvent({ timeoutMillis: 5_000 });
+  if (event.type === "runtime") return event.event;
+  if (event.type === "submit") return event.operation.submit;
+  throw new Error(`expected server runtime event, received lifecycle state ${event.event.state}`);
+}
+
+async function expectServerLifecycle(session: NnrpServerSession, state: string): Promise<void> {
+  const event = await session.nextEvent({ timeoutMillis: 5_000 });
+  if (event.type !== "lifecycle") {
+    const actual = event.type === "submit" ? "submit" : `runtime-${event.event.header.messageType}`;
+    throw new Error(`expected server lifecycle-${state}, received ${actual}`);
+  }
+  assertEquals(event.event.state, state);
+}
 
 function frameSubmitPayload(operationId: bigint, body: Uint8Array): Uint8Array {
   return encodeSubmitPayload(createTokenSubmitRequest({

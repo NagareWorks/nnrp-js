@@ -5,6 +5,15 @@ export const PREVIEW4_ADAPTER_RESULTS_SCHEMA =
   "https://raw.githubusercontent.com/NagareWorks/nnrp-conformance/main/schemas/adapter-case-results.schema.json" as const;
 
 export const PREVIEW4_ADAPTER_CAPABILITIES = [
+  "handshake.basic",
+  "session.open_close",
+  "session.resume",
+  "flow_update",
+  "frame_submit.tensor.inline",
+  "result_push.basic",
+  "cache.lifecycle",
+  "transport.tcp",
+  "transport.quic",
   "payload.typed",
   "control.cancel_abort",
   "control.supersede",
@@ -28,6 +37,27 @@ export const PREVIEW4_ADAPTER_CAPABILITIES = [
 
 export const PREVIEW4_ADAPTER_CASE_IDS = [
   "l0.header.fixed_shape.golden",
+  "l0.control.client_hello.golden",
+  "l0.control.session_patch_ack.golden",
+  "l0.flow_update.packet.golden",
+  "l0.result_hint.packet.golden",
+  "l0.frame_submit.metadata.golden",
+  "l0.result_push.metadata.golden",
+  "l0.body_region.prelude.golden",
+  "l0.object_reference.block.golden",
+  "l0.typed_payload.descriptor.golden",
+  "l0.typed_payload.frame_regions.golden",
+  "l1.flow_update.metadata.validation",
+  "l1.result_hint.metadata.validation",
+  "l1.cache.lifecycle.roundtrip",
+  "l1.transport_probe.metadata.roundtrip",
+  "l1.frame_submit.message.parse_emit",
+  "l1.result_push.message.parse_emit",
+  "l1.result_push.object_reference.resolve",
+  "l1.typed_payload.region.pack",
+  "l3.transport.probe.selection",
+  "l3.transport.tcp.session_smoke",
+  "l3.transport.quic.session_smoke",
   "l0.typed_payload.descriptor.current.golden",
   "l1.control.cancel-abort",
   "l1.control.priority-deadline",
@@ -51,6 +81,7 @@ export type Preview4ImplementedCaseId = typeof PREVIEW4_IMPLEMENTED_CASE_IDS[num
 
 export interface Preview4AdapterPlanCase {
   readonly id: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
 }
 
 export interface Preview4AdapterPlan {
@@ -83,7 +114,12 @@ export function parsePreview4AdapterPlan(value: unknown): Preview4AdapterPlan {
   if (!Array.isArray(plan.cases)) throw new Error("adapter execution plan cases must be an array");
   const cases = plan.cases.map((entry, index) => {
     const candidate = record(entry, `adapter execution plan cases[${index}]`);
-    return { id: nonEmptyString(candidate.id, `adapter execution plan cases[${index}].id`) };
+    const id = nonEmptyString(candidate.id, `adapter execution plan cases[${index}].id`);
+    const parameters = candidate.parameters === undefined
+      ? {}
+      : record(candidate.parameters, `adapter execution plan cases[${index}].parameters`);
+    validateFrozenParameterKeys(id, parameters);
+    return { id, parameters };
   });
 
   const actual = cases.map(({ id }) => id);
@@ -100,6 +136,33 @@ export function parsePreview4AdapterPlan(value: unknown): Preview4AdapterPlan {
     artifacts: { results_path: resultsPath, evidence_dir: evidenceDir },
     cases,
   };
+}
+
+const FROZEN_PARAMETER_KEYS: Readonly<Record<string, readonly string[]>> = {
+  "l0.header.fixed_shape.golden": ["header_hex"],
+  "l0.control.client_hello.golden": ["metadata_hex"],
+  "l0.control.session_patch_ack.golden": ["metadata_hex"],
+  "l0.flow_update.packet.golden": ["packet_hex"],
+  "l0.result_hint.packet.golden": ["packet_hex"],
+  "l0.frame_submit.metadata.golden": ["metadata_hex"],
+  "l0.result_push.metadata.golden": ["metadata_hex"],
+  "l0.body_region.prelude.golden": ["metadata_hex"],
+  "l0.object_reference.block.golden": ["metadata_hex"],
+  "l0.typed_payload.descriptor.golden": ["descriptor_hex"],
+  "l0.typed_payload.frame_regions.golden": ["descriptor_region_hex", "payload_hex"],
+  "l0.typed_payload.descriptor.current.golden": ["descriptor_hex"],
+};
+
+function validateFrozenParameterKeys(id: string, parameters: Readonly<Record<string, unknown>>): void {
+  const expected = FROZEN_PARAMETER_KEYS[id] ?? [];
+  const actual = Object.keys(parameters).sort();
+  const sortedExpected = [...expected].sort();
+  if (!sameStrings(actual, sortedExpected)) {
+    throw new Error(
+      `adapter execution plan case ${id} parameters must equal [${sortedExpected.join(", ")}], ` +
+        `received [${actual.join(", ")}]`,
+    );
+  }
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

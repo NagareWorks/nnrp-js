@@ -8,8 +8,10 @@ import {
   validateHostRouteScenario,
 } from "./host-route-conformance.ts";
 import {
+  acceptServerSessionsSequentially,
   browserTreeTerminationCommand,
   clientLocator,
+  providerForRoute,
   providerRouteLocator,
   serverPolicy,
   validateBrowserResult,
@@ -134,13 +136,32 @@ Deno.test("host-route evidence preserves selected carriers and atomic rollback",
   assertEquals(rollback.logical_set_closed, true);
 });
 
-Deno.test("host-route target adapts suite wire locators to frozen SDK route forms", () => {
+Deno.test("host-route target preserves suite provider URIs for frozen SDK route values", () => {
   const scenario = validateHostRouteScenario(clientScenario);
   const tcp = scenario.host_route.routes[0]!;
   const ipc = scenario.host_route.routes[1]!;
-  assertEquals(clientLocator(tcp, { ...tcp, locator: "tcp://127.0.0.1:4317" }), "127.0.0.1:4317");
+  assertEquals(clientLocator(tcp, { ...tcp, locator: "tcp://127.0.0.1:4317" }), "tcp://127.0.0.1:4317");
   assertEquals(clientLocator(ipc, { ...ipc, locator: "npipe://nnrp-host-route" }), "npipe://nnrp-host-route");
-  assertEquals(providerRouteLocator(tcp, { ...tcp, locator: "tcp://127.0.0.1:4318" }), "127.0.0.1:4318");
+  assertEquals(providerRouteLocator({ ...tcp, locator: "tcp://127.0.0.1:4318" }), "tcp://127.0.0.1:4318");
+});
+
+Deno.test("host-route target keeps uninstalled provider descriptor identity atomic", () => {
+  const route = validateHostRouteScenario({
+    ...clientScenario,
+    host_route: {
+      ...clientScenario.host_route,
+      routes: [{
+        transport: "quic",
+        provider_id: "example.transport.quic.uninstalled",
+        locator: "quic://127.0.0.1:0",
+        security: { mode: "tls_server_auth", credential_owner: "suite" },
+      }],
+    },
+  }).host_route.routes[0]!;
+  const provider = providerForRoute(route);
+  assertEquals(provider.metadata.id, route.provider_id);
+  assertEquals(provider.descriptor.metadata.id, route.provider_id);
+  assertEquals(provider.localAvailable, false);
 });
 
 Deno.test("host-route target observes an injected terminal listener before healthy peers", () => {
@@ -155,6 +176,48 @@ Deno.test("host-route target observes an injected terminal listener before healt
     },
   });
   assertEquals(serverPolicy(scenario.host_route.routes), "prefer-tcp");
+});
+
+Deno.test("host-route server closes each accepted session before accepting the next route", async () => {
+  const events: string[] = [];
+  let releaseFirstClose: () => void = () => undefined;
+  let reportFirstCloseStarted: () => void = () => undefined;
+  const firstCloseGate = new Promise<void>((resolvePromise) => {
+    releaseFirstClose = resolvePromise;
+  });
+  const firstCloseStarted = new Promise<void>((resolvePromise) => {
+    reportFirstCloseStarted = resolvePromise;
+  });
+
+  const result = acceptServerSessionsSequentially(
+    2,
+    (index) => {
+      events.push(`accept-${index}`);
+      return Promise.resolve(index);
+    },
+    async (session) => {
+      events.push(`close-${session}-start`);
+      if (session === 0) {
+        reportFirstCloseStarted();
+        await firstCloseGate;
+      }
+      events.push(`close-${session}-end`);
+      return session === 0 ? "tcp" : "ipc";
+    },
+  );
+
+  await firstCloseStarted;
+  assertEquals(events, ["accept-0", "close-0-start"]);
+  releaseFirstClose();
+  assertEquals(await result, ["tcp", "ipc"]);
+  assertEquals(events, [
+    "accept-0",
+    "close-0-start",
+    "close-0-end",
+    "accept-1",
+    "close-1-start",
+    "close-1-end",
+  ]);
 });
 
 Deno.test("browser host-route results preserve the suite scenario identity", () => {

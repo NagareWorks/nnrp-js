@@ -71,7 +71,7 @@ Deno.test("native wire host-route profiles use suite-owned provider declarations
   assertEquals(manifest.wire_conformance.modes, ["suite_as_client", "suite_as_server"]);
   assertEquals(manifest.wire_conformance.transports, []);
   assertEquals(manifest.wire_conformance.host_route_providers.length, 2);
-  assertEquals(NATIVE_HOST_ROUTE_PROFILES.map((profile) => profile.expected), [9, 1]);
+  assertEquals(NATIVE_HOST_ROUTE_PROFILES.map((profile) => profile.expected), [10, 1]);
 });
 
 Deno.test("browser host-route profile declares only the real browser client role", () => {

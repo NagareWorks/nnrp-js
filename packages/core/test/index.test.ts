@@ -24,6 +24,7 @@ import {
   decodeRuntimeControlMetadata,
   decodeRuntimeObjectMetadata,
   decodeSessionOpenMetadata,
+  decodeSubmitPayload,
   decodeTypedPayloadDescriptor,
   encodeCacheInvalidateMetadata,
   encodeResultPushPayload,
@@ -46,12 +47,16 @@ import {
   type NnrpCacheInvalidateRequest,
   type NnrpCacheInvalidateResult,
   type NnrpCacheKey,
+  NnrpCacheLeaseResult,
   type NnrpCacheMetadata,
   NnrpCacheObjectKind,
+  NnrpCachePolicyOptions,
   type NnrpCachePutRequest,
   type NnrpCachePutResult,
   NnrpCapabilityError,
   type NnrpClientProviderRoutes,
+  NnrpConnectionLifecycle,
+  NnrpEndpoint,
   NnrpFlowScopeKind,
   NnrpFlowUpdateReason,
   NnrpHeaderFlags,
@@ -60,6 +65,7 @@ import {
   NnrpMessageType,
   NnrpPayloadKind,
   NnrpProtocolError,
+  NnrpProviderEndpoint,
   NnrpRecoveryError,
   NnrpResultClass,
   NnrpResultDropError,
@@ -72,6 +78,7 @@ import {
   NnrpSchemaRegistryFailure,
   type NnrpServerProviderRoutes,
   NnrpSessionCloseReason,
+  NnrpSessionLifecycle,
   NnrpSessionPriorityClass,
   NnrpSessionRecoveryTicket,
   NnrpStandardProfile,
@@ -86,6 +93,8 @@ import {
   type NnrpTransportKind,
   type NnrpTransportPolicy,
   type NnrpTransportProbeMetrics,
+  type NnrpTransportProbeObservation,
+  type NnrpTransportProviderDescriptor,
   type NnrpTransportProviderObservation,
   NnrpTransportSelectionError,
   NnrpTypedPayloadDescriptorFlags,
@@ -369,10 +378,16 @@ function transportCandidate(
     readonly costUnits?: bigint;
   } = {},
 ): NnrpTransportCandidate {
-  const provider = transportProvider(kind, overrides);
+  const provider = transportProvider(kind, {
+    id: overrides.id,
+    preferenceRank: overrides.preferenceRank,
+    costModelId: overrides.costModelId,
+    costUnits: overrides.costUnits,
+    localAvailable: overrides.localAvailable,
+  });
   const probe = overrides.probe;
   return {
-    kind,
+    transportId: kind,
     provider: provider.metadata,
     localAvailable: overrides.localAvailable ?? true,
     peerSupported: overrides.peerSupported ?? true,
@@ -388,11 +403,87 @@ function readyCandidates(
   providers: readonly NnrpTransportProviderObservation[],
 ): readonly NnrpTransportCandidateReadiness[] {
   return providers.map((provider) => ({
-    kind: provider.kind,
+    transportId: provider.kind,
     providerId: provider.metadata.id,
     routeResolved: true,
     securitySatisfied: true,
   }));
+}
+
+interface TestTransportCandidateInput {
+  readonly local: { readonly transports: readonly NnrpTransportKind[] };
+  readonly peer: { readonly transports: readonly NnrpTransportKind[] };
+  readonly providers: readonly NnrpTransportProviderObservation[];
+  readonly requestedMaxFrameBytes?: bigint;
+  readonly candidateReadiness: readonly NnrpTransportCandidateReadiness[];
+  readonly probeObservations?: readonly NnrpTransportProbeObservation[];
+  readonly policy?: NnrpTransportPolicy;
+}
+
+function testProviderDescriptor(provider: NnrpTransportProviderObservation): NnrpTransportProviderDescriptor {
+  return {
+    name: `@nnrp/transport-${provider.kind}`,
+    version: "test",
+    transportId: provider.kind,
+    kind: "native-dynamic",
+    available: provider.localAvailable,
+    metadata: provider.metadata,
+    ...(provider.diagnostic === undefined ? {} : { diagnostic: provider.diagnostic.message }),
+  };
+}
+
+function testTransportCandidates(input: TestTransportCandidateInput): readonly NnrpTransportCandidate[] {
+  const providers = input.providers.map(testProviderDescriptor);
+  return createTransportCandidates(providers, {
+    peerSupportedTransports: input.peer.transports,
+    policy: input.policy ?? "auto",
+    ...(input.requestedMaxFrameBytes === undefined ? {} : { requestedMaxFrameBytes: input.requestedMaxFrameBytes }),
+    candidateReadiness: input.candidateReadiness,
+    probeObservations: input.probeObservations ?? [],
+  });
+}
+
+function selectTestTransport(
+  candidates: readonly NnrpTransportCandidate[],
+  policy: NnrpTransportPolicy = "auto",
+) {
+  const providers: NnrpTransportProviderDescriptor[] = candidates.map((candidate) => ({
+    name: `@nnrp/transport-${candidate.transportId}`,
+    version: "test",
+    transportId: candidate.transportId,
+    kind: "native-dynamic",
+    available: candidate.localAvailable,
+    metadata: {
+      ...candidate.provider,
+      limits: {
+        maxFrameBytes: candidate.withinLimits ? candidate.provider.limits.maxFrameBytes : 1n,
+      },
+    },
+  }));
+  const probeObservations: NnrpTransportProbeObservation[] = candidates.flatMap((candidate) =>
+    candidate.probeState === "not-run" || candidate.probeState === "missing" ? [] : [{
+      transportId: candidate.transportId,
+      providerId: candidate.provider.id,
+      state: candidate.probeState,
+      ...(candidate.probe === undefined ? {} : { metrics: candidate.probe }),
+      ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
+    }]
+  );
+  return selectTransport(providers, {
+    peerSupportedTransports: candidates.filter((candidate) => candidate.peerSupported).map((candidate) =>
+      candidate.transportId
+    ),
+    policy,
+    requestedMaxFrameBytes: candidates.some((candidate) => !candidate.withinLimits) ? 2n : undefined,
+    candidateReadiness: candidates.map((candidate) => ({
+      transportId: candidate.transportId,
+      providerId: candidate.provider.id,
+      routeResolved: candidate.rejectionReason !== "route-unresolved",
+      securitySatisfied: candidate.rejectionReason !== "security-unsatisfied",
+      ...(candidate.diagnostic === undefined ? {} : { diagnostic: candidate.diagnostic }),
+    })),
+    probeObservations,
+  });
 }
 
 const NNRP_MESSAGE_TYPES = [
@@ -1188,7 +1279,7 @@ Deno.test("@nnrp/core decodes role frames and terminal evidence without flatteni
   const resultMetadata = {
     statusCode: 200,
     resultFlags: 0,
-    sectionCount: 1,
+    sectionCount: 0,
     tileCount: 0,
     activeProfileId: 2,
     inferenceMs: 3,
@@ -1351,6 +1442,44 @@ Deno.test("@nnrp/core rejects malformed role events and nonterminal result evide
   assertRuntimeEventError(
     () => encodeResultPushPayload({ ...resultMetadata, tileCount: 1 }),
     "NNRP_RESULT_TENSOR_FIELDS_INVALID",
+  );
+  assertRuntimeEventError(
+    () => encodeResultPushPayload({ ...resultMetadata, sectionCount: 1 }),
+    "NNRP_RESULT_TENSOR_FIELDS_INVALID",
+  );
+  assertRuntimeEventError(
+    () =>
+      encodeResultPushPayload({
+        ...resultMetadata,
+        resultClass: NnrpResultClass.StaleReuse,
+        reusedFrameId: 0,
+      }),
+    "NNRP_RESULT_STALE_REUSE_INVALID",
+  );
+  assertRuntimeEventError(
+    () => encodeResultPushPayload({ ...resultMetadata, reusedFrameId: 1 }),
+    "NNRP_RESULT_STALE_REUSE_INVALID",
+  );
+  assertRuntimeEventError(
+    () =>
+      encodeResultPushPayload({
+        ...resultMetadata,
+        resultClass: NnrpResultClass.Partial,
+        payloadKindBitmap: NnrpPayloadKind.Tensor,
+        tileCount: 1,
+        coveredTileCount: 1,
+      }),
+    "NNRP_RESULT_PARTIAL_COVERAGE_INVALID",
+  );
+  assertRuntimeEventError(
+    () =>
+      encodeResultPushPayload({
+        ...resultMetadata,
+        payloadKindBitmap: NnrpPayloadKind.Tensor,
+        tileCount: 2,
+        coveredTileCount: 1,
+      }),
+    "NNRP_RESULT_TENSOR_COVERAGE_INVALID",
   );
   const reservedResult = encodeResultPushPayload(resultMetadata);
   reservedResult[10] = 1;
@@ -1704,7 +1833,11 @@ Deno.test("@nnrp/core encodes the frozen baseline cache invalidation metadata", 
   assertEquals(decodeCacheInvalidateMetadata(encoded), metadata);
 
   assertRuntimeObjectError(
-    () => encodeCacheInvalidateMetadata({ ...metadata, invalidateScope: 4 }),
+    () =>
+      encodeCacheInvalidateMetadata({
+        ...metadata,
+        invalidateScope: 4 as CacheInvalidateMetadata["invalidateScope"],
+      }),
     "NNRP_CACHE_INVALIDATE_SCOPE_INVALID",
   );
   assertRuntimeObjectError(
@@ -1744,6 +1877,15 @@ function assertRuntimeObjectError(action: () => unknown, code: string): void {
 function assertRuntimeEventError(action: () => unknown, code: string): void {
   const error = assertThrows(action, NnrpProtocolError);
   assertEquals(error.diagnostic.code, code);
+}
+
+function malformedSubmitBody(source: Uint8Array, offset: number, value: number): Uint8Array {
+  const body = source.slice();
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  const previous = view.getUint32(offset, true);
+  view.setUint32(offset, value, true);
+  view.setUint32(12, view.getUint32(12, true) + previous - value, true);
+  return body;
 }
 
 function runtimeHeader(messageType: NnrpMessageType, frameId: number) {
@@ -1853,15 +1995,16 @@ Deno.test("@nnrp/core rejects capability tokens outside the frozen catalog", () 
 });
 
 Deno.test("@nnrp/core selects the sole eligible provider without probe metrics", () => {
-  const selection = selectTransport([transportCandidate("tcp")]);
+  const selection = selectTestTransport([transportCandidate("tcp")]);
 
-  assertEquals(selection.selected?.kind, "tcp");
-  assertEquals(selection.selected?.probeState, "not-run");
-  assertEquals(selection.selected?.selectionRank, 0);
+  assertEquals(selection.selectedProvider.name, "@nnrp/transport-tcp");
+  assertEquals(selection.selectedProvider.transportId, "tcp");
+  assertEquals(selection.candidates[0]?.probeState, "not-run");
+  assertEquals(selection.candidates[0]?.selectionRank, 0);
 });
 
 Deno.test("@nnrp/core orders probes by success count, throughput, and RTT", () => {
-  const selection = selectTransport([
+  const selection = selectTestTransport([
     transportCandidate("quic", {
       probe: { ...DEFAULT_PROBE, successCount: 2, medianThroughputBytesPerSecond: 9_000_000n },
     }),
@@ -1871,20 +2014,20 @@ Deno.test("@nnrp/core orders probes by success count, throughput, and RTT", () =
     }),
   ]);
 
-  assertEquals(selection.selected?.kind, "ipc");
-  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["ipc", "tcp", "quic"]);
+  assertEquals(selection.selectedProvider.transportId, "ipc");
+  assertEquals(selection.candidates.map((candidate) => candidate.transportId), ["ipc", "tcp", "quic"]);
   assertEquals(selection.candidates.map((candidate) => candidate.selectionRank), [0, 1, 2]);
 });
 
 Deno.test("@nnrp/core uses numeric transport id as the final cross-transport tie", () => {
-  const selection = selectTransport([
+  const selection = selectTestTransport([
     transportCandidate("websocket", { probe: DEFAULT_PROBE, id: "provider-websocket" }),
     transportCandidate("tcp", { probe: DEFAULT_PROBE, id: "provider-tcp" }),
     transportCandidate("quic", { probe: DEFAULT_PROBE, id: "provider-quic" }),
     transportCandidate("ipc", { probe: DEFAULT_PROBE, id: "provider-ipc" }),
   ]);
 
-  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["quic", "tcp", "ipc", "websocket"]);
+  assertEquals(selection.candidates.map((candidate) => candidate.transportId), ["quic", "tcp", "ipc", "websocket"]);
 });
 
 Deno.test("@nnrp/core applies every preferred transport policy", () => {
@@ -1895,14 +2038,14 @@ Deno.test("@nnrp/core applies every preferred transport policy", () => {
     transportCandidate("websocket", { probe: DEFAULT_PROBE }),
   ] as const;
 
-  assertEquals(selectTransport(candidates, "prefer-quic").selected?.kind, "quic");
-  assertEquals(selectTransport(candidates, "prefer-tcp").selected?.kind, "tcp");
-  assertEquals(selectTransport(candidates, "prefer-ipc").selected?.kind, "ipc");
-  assertEquals(selectTransport(candidates, "prefer-websocket").selected?.kind, "websocket");
+  assertEquals(selectTestTransport(candidates, "prefer-quic").selectedProvider.transportId, "quic");
+  assertEquals(selectTestTransport(candidates, "prefer-tcp").selectedProvider.transportId, "tcp");
+  assertEquals(selectTestTransport(candidates, "prefer-ipc").selectedProvider.transportId, "ipc");
+  assertEquals(selectTestTransport(candidates, "prefer-websocket").selectedProvider.transportId, "websocket");
 });
 
 Deno.test("@nnrp/core preferred policies fall back when the preferred carrier is unavailable", () => {
-  const selection = selectTransport(
+  const selection = selectTestTransport(
     [
       transportCandidate("ipc", { peerSupported: false, probe: DEFAULT_PROBE }),
       transportCandidate("tcp", { probe: DEFAULT_PROBE }),
@@ -1911,8 +2054,8 @@ Deno.test("@nnrp/core preferred policies fall back when the preferred carrier is
     "prefer-ipc",
   );
 
-  assertEquals(selection.selected?.kind, "tcp");
-  assertEquals(selection.candidates.map((candidate) => candidate.kind), ["tcp", "websocket", "ipc"]);
+  assertEquals(selection.selectedProvider.transportId, "tcp");
+  assertEquals(selection.candidates.map((candidate) => candidate.transportId), ["tcp", "websocket", "ipc"]);
 });
 
 Deno.test("@nnrp/core applies every forced transport policy", () => {
@@ -1923,21 +2066,64 @@ Deno.test("@nnrp/core applies every forced transport policy", () => {
     transportCandidate("websocket", { probe: DEFAULT_PROBE }),
   ] as const;
 
-  assertEquals(selectTransport(candidates, "force-quic").selected?.kind, "quic");
-  assertEquals(selectTransport(candidates, "force-tcp").selected?.kind, "tcp");
-  assertEquals(selectTransport(candidates, "force-ipc").selected?.kind, "ipc");
-  assertEquals(selectTransport(candidates, "force-websocket").selected?.kind, "websocket");
+  assertEquals(selectTestTransport(candidates, "force-quic").selectedProvider.transportId, "quic");
+  assertEquals(selectTestTransport(candidates, "force-tcp").selectedProvider.transportId, "tcp");
+  assertEquals(selectTestTransport(candidates, "force-ipc").selectedProvider.transportId, "ipc");
+  assertEquals(selectTestTransport(candidates, "force-websocket").selectedProvider.transportId, "websocket");
 });
 
 Deno.test("@nnrp/core throws typed evidence for an unavailable forced provider", () => {
   const error = assertThrows(
-    () => selectTransport([transportCandidate("tcp")], "force-ipc"),
+    () => selectTestTransport([transportCandidate("tcp")], "force-ipc"),
     NnrpTransportSelectionError,
   );
 
   assertEquals(error.code, "FORCED_TRANSPORT_UNAVAILABLE");
-  assertEquals(error.selection?.selected, null);
-  assertEquals(error.selection?.candidates[0]?.rejectionReason, "policy-disallowed");
+  assertEquals(error.transportId, "ipc");
+  assertEquals(error.candidates[0]?.rejectionReason, "policy-disallowed");
+});
+
+Deno.test("@nnrp/core accepts zero frame requests and duplicate peer transport set entries", () => {
+  const provider = testProviderDescriptor(transportProvider("tcp"));
+  const candidates = createTransportCandidates([provider], {
+    peerSupportedTransports: ["tcp", "tcp"],
+    policy: "auto",
+    requestedMaxFrameBytes: 0n,
+    candidateReadiness: [{
+      transportId: "tcp",
+      providerId: provider.metadata.id,
+      routeResolved: true,
+      securitySatisfied: true,
+    }],
+    probeObservations: [],
+  });
+
+  assertEquals(candidates[0]?.peerSupported, true);
+  assertEquals(candidates[0]?.withinLimits, true);
+  assertEquals(candidates[0]?.probeState, "not-run");
+});
+
+Deno.test("@nnrp/core rejects requested frame sizes outside the frozen u64 range", () => {
+  const provider = testProviderDescriptor(transportProvider("tcp"));
+  const options = {
+    peerSupportedTransports: ["tcp"] as const,
+    policy: "auto" as const,
+    candidateReadiness: [{
+      transportId: "tcp" as const,
+      providerId: provider.metadata.id,
+      routeResolved: true,
+      securitySatisfied: true,
+    }],
+    probeObservations: [],
+  };
+
+  for (const requestedMaxFrameBytes of [-1n, 0x1_0000_0000_0000_0000n]) {
+    const error = assertThrows(
+      () => createTransportCandidates([provider], { ...options, requestedMaxFrameBytes }),
+      NnrpTransportError,
+    );
+    assertEquals(error.diagnostic.code, "NNRP_TRANSPORT_REQUESTED_FRAME_LIMIT_INVALID");
+  }
 });
 
 Deno.test("@nnrp/core creates transport candidates from local and peer manifests", () => {
@@ -1949,23 +2135,23 @@ Deno.test("@nnrp/core creates transport candidates from local and peer manifests
   });
 
   const providers = [transportProvider("tcp"), transportProvider("quic")];
-  const candidates = createTransportCandidates({
+  const candidates = testTransportCandidates({
     local,
     peer,
     providers,
     candidateReadiness: readyCandidates(providers),
   });
-  const selection = selectTransport(candidates);
+  const selection = selectTestTransport(candidates);
   const summary = createTransportSelectionSummary(selection);
 
-  assertEquals(selection.selected?.kind, "tcp");
+  assertEquals(selection.selectedProvider.transportId, "tcp");
   assertEquals(summary.selected, "tcp");
-  assertEquals(summary.rejected[0]?.kind, "quic");
+  assertEquals(summary.rejected[0]?.transportId, "quic");
   assertEquals(summary.rejected[0]?.reason, "peer-unsupported");
 });
 
 Deno.test("@nnrp/core reports policy-disallowed transport candidates", () => {
-  const selection = selectTransport(
+  const selection = selectTestTransport(
     [
       transportCandidate("quic", { probe: DEFAULT_PROBE }),
       transportCandidate("tcp", { probe: DEFAULT_PROBE }),
@@ -1974,38 +2160,38 @@ Deno.test("@nnrp/core reports policy-disallowed transport candidates", () => {
   );
   const summary = createTransportSelectionSummary(selection);
 
-  assertEquals(selection.selected?.kind, "tcp");
+  assertEquals(selection.selectedProvider.transportId, "tcp");
   assertEquals(summary.rejected[0]?.reason, "policy-disallowed");
 });
 
 Deno.test("@nnrp/core keeps provider locators and role security isolated by route", () => {
   const clientRoutes: NnrpClientProviderRoutes = {
     tcp: {
-      endpoint: "tcp://runtime.example:7443",
+      endpoint: NnrpProviderEndpoint.parse("tcp://runtime.example:7443"),
       security: {
         mode: "client",
         serverName: "runtime.example",
         trustedCertificateDer: new Uint8Array([1, 2, 3]),
       },
     },
-    ipc: { endpoint: "unix:///run/nnrp.sock" },
+    ipc: { endpoint: NnrpProviderEndpoint.parse("unix:///run/nnrp.sock") },
   };
   const serverRoutes: NnrpServerProviderRoutes = {
     quic: {
-      endpoint: new URL("quic://0.0.0.0:7443"),
+      endpoint: NnrpProviderEndpoint.parse("quic://0.0.0.0:7443"),
       security: {
         mode: "server",
         certificateDer: new Uint8Array([4, 5, 6]),
         privateKeyPkcs8Der: new Uint8Array([7, 8, 9]),
       },
     },
-    websocket: { endpoint: "wss://0.0.0.0:8443/nnrp" },
+    websocket: { endpoint: NnrpProviderEndpoint.parse("wss://0.0.0.0:8443/nnrp") },
   };
 
   assertEquals(clientRoutes.tcp?.security?.mode, "client");
-  assertEquals(clientRoutes.ipc?.endpoint, "unix:///run/nnrp.sock");
+  assertEquals(clientRoutes.ipc?.endpoint?.uri, "unix:///run/nnrp.sock");
   assertEquals(serverRoutes.quic?.security?.mode, "server");
-  assertEquals(serverRoutes.websocket?.endpoint, "wss://0.0.0.0:8443/nnrp");
+  assertEquals(serverRoutes.websocket?.endpoint?.uri, "wss://0.0.0.0:8443/nnrp");
 });
 
 Deno.test("@nnrp/core applies frozen route and security rejection precedence", () => {
@@ -2013,8 +2199,8 @@ Deno.test("@nnrp/core applies frozen route and security rejection precedence", (
   const securityFailure = transportCandidate("quic", { rejectionReason: "security-unsatisfied" });
 
   const reason = (candidate: NnrpTransportCandidate, policy: NnrpTransportPolicy = "auto") => {
-    const error = assertThrows(() => selectTransport([candidate], policy), NnrpTransportSelectionError);
-    return error.selection?.candidates[0]?.rejectionReason;
+    const error = assertThrows(() => selectTestTransport([candidate], policy), NnrpTransportSelectionError);
+    return error.candidates[0]?.rejectionReason;
   };
 
   assertEquals(reason(routeFailure), "route-unresolved");
@@ -2041,7 +2227,7 @@ Deno.test("@nnrp/core rejects over-limit and missing-probe candidates", () => {
     transportProvider("ipc", { maxFrameBytes: 4_096n }),
   ];
   const error = assertThrows(() =>
-    selectTransport(createTransportCandidates({
+    selectTestTransport(testTransportCandidates({
       local,
       peer,
       requestedMaxFrameBytes: 2_048n,
@@ -2050,7 +2236,7 @@ Deno.test("@nnrp/core rejects over-limit and missing-probe candidates", () => {
     })), NnrpTransportSelectionError);
 
   assertEquals(error.code, "NO_VIABLE_TRANSPORT");
-  assertEquals(error.selection?.candidates.map((candidate) => [candidate.kind, candidate.rejectionReason]), [
+  assertEquals(error.candidates.map((candidate) => [candidate.transportId, candidate.rejectionReason]), [
     ["quic", "probe-missing"],
     ["tcp", "limit-exceeded"],
     ["ipc", "probe-missing"],
@@ -2058,23 +2244,23 @@ Deno.test("@nnrp/core rejects over-limit and missing-probe candidates", () => {
 });
 
 Deno.test("@nnrp/core compares cost only inside the same non-zero model", () => {
-  const selection = selectTransport([
+  const selection = selectTestTransport([
     transportCandidate("tcp", { probe: DEFAULT_PROBE, costModelId: 7, costUnits: 20n }),
     transportCandidate("quic", { probe: DEFAULT_PROBE, costModelId: 7, costUnits: 10n }),
   ]);
-  assertEquals(selection.selected?.kind, "quic");
+  assertEquals(selection.selectedProvider.transportId, "quic");
 });
 
 Deno.test("@nnrp/core ignores probes for a sole provider and rejects failed probes in a probe set", () => {
-  const failed = selectTransport([transportCandidate("tcp", { probeState: "failed" })]);
-  assertEquals(failed.selected?.kind, "tcp");
-  assertEquals(failed.selected?.probeState, "not-run");
+  const failed = selectTestTransport([transportCandidate("tcp", { probeState: "failed" })]);
+  assertEquals(failed.selectedProvider.transportId, "tcp");
+  assertEquals(failed.candidates[0]?.probeState, "not-run");
 
-  const probed = selectTransport([
+  const probed = selectTestTransport([
     transportCandidate("tcp", { probeState: "failed" }),
     transportCandidate("quic", { probe: DEFAULT_PROBE }),
   ]);
-  assertEquals(probed.selected?.kind, "quic");
+  assertEquals(probed.selectedProvider.transportId, "quic");
   assertEquals(probed.candidates[1]?.rejectionReason, "probe-failed");
 });
 
@@ -2083,7 +2269,7 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
   const peer = createBackendNativeManifest();
   const metadataError = assertThrows(
     () =>
-      createTransportCandidates({
+      testTransportCandidates({
         local,
         peer,
         providers: [transportProvider("tcp", { preferenceRank: 0x1_0000 })],
@@ -2095,7 +2281,7 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
 
   const costModelError = assertThrows(
     () =>
-      createTransportCandidates({
+      testTransportCandidates({
         local,
         peer,
         providers: [transportProvider("tcp", { costModelId: 0x1_0000 })],
@@ -2113,7 +2299,7 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
   ) {
     const invalidMetadataError = assertThrows(
       () =>
-        createTransportCandidates({
+        testTransportCandidates({
           local,
           peer,
           providers: [invalidProvider],
@@ -2127,13 +2313,13 @@ Deno.test("@nnrp/core rejects invalid provider observations and probe metrics", 
   const provider = transportProvider("tcp");
   const metricsError = assertThrows(
     () =>
-      createTransportCandidates({
+      testTransportCandidates({
         local,
         peer,
         providers: [provider],
         candidateReadiness: readyCandidates([provider]),
         probeObservations: [{
-          kind: "tcp",
+          transportId: "tcp",
           providerId: provider.metadata.id,
           state: "succeeded",
           metrics: { ...DEFAULT_PROBE, successCount: 4 },
@@ -2158,15 +2344,15 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
   const assertInvalidEvidence = (operation: () => unknown) => {
     const error = assertThrows(operation, NnrpTransportSelectionError);
     assertEquals(error.code, "INVALID_EVIDENCE");
-    assertEquals(error.selection, undefined);
+    assertEquals(error.candidates, []);
   };
 
-  assertInvalidEvidence(() => createTransportCandidates({ local, peer, providers, candidateReadiness: [] }));
+  assertInvalidEvidence(() => testTransportCandidates({ local, peer, providers, candidateReadiness: [] }));
   assertInvalidEvidence(() =>
-    createTransportCandidates({ local, peer, providers, candidateReadiness: [readiness[0]!, readiness[0]!] })
+    testTransportCandidates({ local, peer, providers, candidateReadiness: [readiness[0]!, readiness[0]!] })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers,
@@ -2177,7 +2363,18 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: [
+        { ...readiness[0]!, diagnostic: { code: "not-a-string" } } as unknown as typeof readiness[number],
+        readiness[1]!,
+      ],
+    })
+  );
+  assertInvalidEvidence(() =>
+    testTransportCandidates({
       local,
       peer,
       providers,
@@ -2185,26 +2382,26 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers,
       candidateReadiness: readiness,
-      probeObservations: [{ kind: "tcp", providerId: "nnrp.transport.unknown", state: "failed" }],
+      probeObservations: [{ transportId: "tcp", providerId: "nnrp.transport.unknown", state: "failed" }],
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers,
       candidateReadiness: readiness,
-      probeObservations: [{ kind: "tcp", providerId: "nnrp.transport.\u8f93\u5165", state: "failed" }],
+      probeObservations: [{ transportId: "tcp", providerId: "nnrp.transport.\u8f93\u5165", state: "failed" }],
     })
   );
-  const failedProbe = { kind: "tcp", providerId: providers[0]!.metadata.id, state: "failed" } as const;
+  const failedProbe = { transportId: "tcp", providerId: providers[0]!.metadata.id, state: "failed" } as const;
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers,
@@ -2213,7 +2410,7 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers,
@@ -2222,7 +2419,7 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers,
@@ -2231,7 +2428,18 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
+      local,
+      peer,
+      providers,
+      candidateReadiness: readiness,
+      probeObservations: [
+        { ...failedProbe, diagnostic: { code: "not-a-string" } } as unknown as typeof failedProbe,
+      ],
+    })
+  );
+  assertInvalidEvidence(() =>
+    testTransportCandidates({
       local,
       peer,
       providers: [providers[0]!, transportProvider("tcp", { id: "nnrp.transport.tcp.other" })],
@@ -2239,7 +2447,7 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    createTransportCandidates({
+    testTransportCandidates({
       local,
       peer,
       providers: [providers[0]!, transportProvider("quic", { id: providers[0]!.metadata.id })],
@@ -2247,7 +2455,7 @@ Deno.test("@nnrp/core rejects incomplete, duplicate, and unmatched transport evi
     })
   );
   assertInvalidEvidence(() =>
-    selectTransport([
+    selectTestTransport([
       transportCandidate("tcp", { id: "nnrp.transport.tcp.first" }),
       transportCandidate("tcp", { id: "nnrp.transport.tcp.second" }),
     ])
@@ -2260,27 +2468,23 @@ Deno.test("@nnrp/core preserves failed and missing probe evidence as distinct di
   const providers = [transportProvider("tcp"), transportProvider("quic")];
   const error = assertThrows(
     () =>
-      selectTransport(createTransportCandidates({
+      selectTestTransport(testTransportCandidates({
         local,
         peer,
         providers,
         candidateReadiness: readyCandidates(providers),
         probeObservations: [{
-          kind: "tcp",
+          transportId: "tcp",
           providerId: providers[0]!.metadata.id,
           state: "failed",
-          diagnostic: {
-            code: "NNRP_TEST_PROBE_FAILED",
-            message: "tcp probe failed",
-            source: "transport",
-          },
+          diagnostic: "tcp probe failed",
         }],
       })),
     NnrpTransportSelectionError,
   );
 
   assertEquals(error.code, "NO_VIABLE_TRANSPORT");
-  assertEquals(error.selection?.candidates.map((candidate) => [candidate.kind, candidate.rejectionReason]), [
+  assertEquals(error.candidates.map((candidate) => [candidate.transportId, candidate.rejectionReason]), [
     ["quic", "probe-missing"],
     ["tcp", "probe-failed"],
   ]);
@@ -2294,6 +2498,18 @@ Deno.test("@nnrp/core parses application endpoints without losing URL semantics"
   assertEquals(endpoint.pathname, "/session/default");
   assertEquals(endpoint.search, "?tenant=a");
   assertEquals(endpoint.hash, "#result");
+  assertEquals(endpoint.uri, "nnrps://runtime.example:7443/session/default?tenant=a#result");
+  assertEquals(endpoint.secure, true);
+});
+
+Deno.test("@nnrp/core validates provider endpoint values independently from application endpoints", () => {
+  const ipc = NnrpProviderEndpoint.parse("unix:///tmp/nnrp.sock");
+  assertEquals(ipc.scheme, "unix");
+  assertEquals(ipc.matchesTransport("ipc"), true);
+  assertEquals(ipc.matchesTransport("tcp"), false);
+  assertEquals(NnrpProviderEndpoint.parse("wss://runtime.example/nnrp").secure, true);
+  assertThrows(() => NnrpProviderEndpoint.parse("nnrp://runtime.example"), NnrpTransportError);
+  assertThrows(() => NnrpProviderEndpoint.parse("unix://"), NnrpTransportError);
 });
 
 Deno.test("@nnrp/core rejects empty, malformed, and provider-local application endpoints", () => {
@@ -2304,29 +2520,52 @@ Deno.test("@nnrp/core rejects empty, malformed, and provider-local application e
 });
 
 Deno.test("@nnrp/core derives TCP and QUIC provider endpoints", () => {
-  assertEquals(resolveProviderEndpoint("nnrp://127.0.0.1:7443/session", "tcp"), "127.0.0.1:7443");
-  assertEquals(resolveProviderEndpoint("nnrps://runtime.example/session", "quic"), "runtime.example:4433");
+  assertEquals(resolveProviderEndpoint(NnrpEndpoint.parse("nnrp://127.0.0.1:7443/session"), "tcp"), "127.0.0.1:7443");
   assertEquals(
-    resolveProviderEndpoint("nnrp://runtime.example/session", "tcp", "[::1]:9000"),
+    resolveProviderEndpoint(NnrpEndpoint.parse("nnrps://runtime.example/session"), "quic"),
+    "runtime.example:4433",
+  );
+  assertEquals(
+    resolveProviderEndpoint(
+      NnrpEndpoint.parse("nnrp://runtime.example/session"),
+      "tcp",
+      NnrpProviderEndpoint.parse("tcp://[::1]:9000"),
+    ),
     "[::1]:9000",
   );
 });
 
 Deno.test("@nnrp/core validates provider-local endpoint schemes and security intent", () => {
   assertEquals(
-    resolveProviderEndpoint("nnrp://runtime.example/session", "ipc", "unix:///tmp/nnrp.sock"),
+    resolveProviderEndpoint(
+      NnrpEndpoint.parse("nnrp://runtime.example/session"),
+      "ipc",
+      NnrpProviderEndpoint.parse("unix:///tmp/nnrp.sock"),
+    ),
     "unix:///tmp/nnrp.sock",
   );
   assertEquals(
-    resolveProviderEndpoint("nnrp://runtime.example/session", "ipc", new URL("npipe://nnrp-runtime")),
+    resolveProviderEndpoint(
+      NnrpEndpoint.parse("nnrp://runtime.example/session"),
+      "ipc",
+      NnrpProviderEndpoint.parse("npipe://nnrp-runtime"),
+    ),
     "npipe://nnrp-runtime",
   );
   assertEquals(
-    resolveProviderEndpoint("nnrps://runtime.example/session", "websocket", "wss://runtime.example/nnrp"),
+    resolveProviderEndpoint(
+      NnrpEndpoint.parse("nnrps://runtime.example/session"),
+      "websocket",
+      NnrpProviderEndpoint.parse("wss://runtime.example/nnrp"),
+    ),
     "wss://runtime.example/nnrp",
   );
   assertEquals(
-    resolveProviderEndpoint("nnrp://runtime.example/session", "websocket", "wss://runtime.example/nnrp"),
+    resolveProviderEndpoint(
+      NnrpEndpoint.parse("nnrp://runtime.example/session"),
+      "websocket",
+      NnrpProviderEndpoint.parse("wss://runtime.example/nnrp"),
+    ),
     "wss://runtime.example/nnrp",
   );
 
@@ -2339,7 +2578,12 @@ Deno.test("@nnrp/core validates provider-local endpoint schemes and security int
     ] as const
   ) {
     const error = assertThrows(
-      () => resolveProviderEndpoint("nnrps://runtime.example/session", transport, providerEndpoint),
+      () =>
+        resolveProviderEndpoint(
+          NnrpEndpoint.parse("nnrps://runtime.example/session"),
+          transport,
+          NnrpProviderEndpoint.parse(providerEndpoint),
+        ),
       NnrpTransportError,
     );
     assertEquals(error.diagnostic.code, "NNRP_PROVIDER_ENDPOINT_INVALID");
@@ -2349,7 +2593,7 @@ Deno.test("@nnrp/core validates provider-local endpoint schemes and security int
 Deno.test("@nnrp/core requires explicit IPC and WebSocket provider endpoints", () => {
   for (const transport of ["ipc", "websocket"] as const) {
     const error = assertThrows(
-      () => resolveProviderEndpoint("nnrp://runtime.example/session", transport),
+      () => resolveProviderEndpoint(NnrpEndpoint.parse("nnrp://runtime.example/session"), transport),
       NnrpTransportError,
     );
     assertEquals(error.diagnostic.transport, transport);
@@ -2413,6 +2657,35 @@ Deno.test("@nnrp/core can skip payload copies when ownership is explicit", () =>
   const normalized = normalizeSubmitRequest(request, { copyPayloads: false });
 
   assertEquals(normalized.body, request.body);
+});
+
+Deno.test("@nnrp/core rejects malformed frozen body regions on send and receive", () => {
+  const request = createTokenSubmitRequest({
+    identity: submitIdentity(2n, 2),
+    policy: submitPolicy(),
+    chunks: [{ payload: new Uint8Array([5, 6]) }],
+  });
+  const malformedBodies = [
+    malformedSubmitBody(request.body, 4, 1),
+    malformedSubmitBody(request.body, 8, 23),
+    malformedSubmitBody(request.body, 16, 1),
+  ];
+  const expectedCodes = [
+    "NNRP_SUBMIT_OBJECT_REFERENCE_LENGTH_INVALID",
+    "NNRP_SUBMIT_TYPED_DESCRIPTOR_LENGTH_INVALID",
+    "NNRP_SUBMIT_EXTENSION_DESCRIPTOR_LENGTH_INVALID",
+  ];
+
+  malformedBodies.forEach((body, index) => {
+    assertRuntimeEventError(
+      () => normalizeSubmitRequest({ ...request, body }),
+      expectedCodes[index]!,
+    );
+    const payload = new Uint8Array(72 + body.byteLength);
+    payload.set(encodeSubmitMetadata(request));
+    payload.set(body, 72);
+    assertRuntimeEventError(() => decodeSubmitPayload(payload), expectedCodes[index]!);
+  });
 });
 
 Deno.test("@nnrp/core derives tensor regions and validates current submit identities", () => {
@@ -2506,7 +2779,7 @@ Deno.test("@nnrp/core encodes every tensor tile mode and rejects malformed tenso
   const referenced = create(NnrpTileIndexMode.RawU16, [1], [section(1, [new Uint8Array([1])])], {
     camera: {
       objectKind: NnrpCacheObjectKind.CameraBlock,
-      refFlags: 1,
+      refFlags: 0,
       cacheNamespace: 2,
       cacheKeyHi: 3n,
       cacheKeyLo: 4n,
@@ -2667,14 +2940,8 @@ Deno.test("@nnrp/core rejects invalid cache and schema edge cases", () => {
 });
 
 Deno.test("@nnrp/core covers transport diagnostics and optional descriptor fields", () => {
-  const diagnostic = {
-    code: "NNRP_TRANSPORT_PROBE",
-    message: "probe failed",
-    source: "transport" as const,
-    retryable: true,
-    transport: "quic" as const,
-  };
-  const summary = createTransportSelectionSummary(selectTransport([
+  const diagnostic = "probe failed";
+  const summary = createTransportSelectionSummary(selectTestTransport([
     {
       ...transportCandidate("quic", { probeState: "failed", rejectionReason: "probe-failed" }),
       diagnostic,
@@ -2744,6 +3011,112 @@ Deno.test("@nnrp/core validates frozen cache lease values", () => {
   assertThrows(() => new CacheLease(objectId, -1n, 2n, 0, 4n, 5n, 6), NnrpProtocolError);
   assertThrows(() => new CacheLease(objectId, 1n, 2n, 0, 4n, 5n, 0x1_0000_0000), NnrpProtocolError);
   assertThrows(() => lease.isExpiredAt(-1n), NnrpProtocolError);
+});
+
+Deno.test("@nnrp/core validates frozen cache lease results and policy options", () => {
+  const objectId = {
+    cacheNamespace: 7,
+    cacheKeyHi: 8n,
+    cacheKeyLo: 9n,
+    objectKind: NnrpCacheObjectKind.ReusableResultObject,
+  } as const;
+  const lease = new CacheLease(objectId, 10n, 11n, CacheLeaseOwnerScope.Session, 12n, 100n, 25);
+  const result = new NnrpCacheLeaseResult({
+    objectId,
+    outcome: "valid",
+    lease,
+    objectVersion: { objectId, objectVersion: 10n, schemaId: 3, schemaVersion: 4 },
+  });
+  assertEquals(result.outcome, "valid");
+  assertNotStrictEquals(result.objectId, objectId);
+  assertEquals(new NnrpCachePolicyOptions({ enabled: false }).expirationHintMs, 0n);
+  assertEquals(
+    new NnrpCachePolicyOptions({
+      enabled: true,
+      reuseScope: CacheReuseScope.Session,
+      expirationHintMs: 1_000n,
+      invalidationReason: "lease-expired",
+    }).reuseScope,
+    CacheReuseScope.Session,
+  );
+  assertThrows(
+    () => new NnrpCacheLeaseResult({ objectId, outcome: "unknown" as "valid" }),
+    NnrpProtocolError,
+  );
+  assertThrows(
+    () => new NnrpCachePolicyOptions({ enabled: false, reuseScope: CacheReuseScope.Session }),
+    NnrpProtocolError,
+  );
+  assertThrows(() => new NnrpCachePolicyOptions({ enabled: true }), NnrpProtocolError);
+});
+
+Deno.test("@nnrp/core cache lease results and policy options are structured-clone safe", () => {
+  const objectId = {
+    cacheNamespace: 7,
+    cacheKeyHi: 8n,
+    cacheKeyLo: 9n,
+    objectKind: NnrpCacheObjectKind.ReusableResultObject,
+  } as const;
+  const lease = new CacheLease(objectId, 10n, 11n, CacheLeaseOwnerScope.Session, 12n, 100n, 25);
+  const leaseResult = new NnrpCacheLeaseResult({
+    objectId,
+    outcome: "renewed",
+    lease,
+    objectVersion: { objectId, objectVersion: 10n, schemaId: 3, schemaVersion: 4 },
+    diagnostic: "lease renewed",
+  });
+  const policy = new NnrpCachePolicyOptions({
+    enabled: true,
+    reuseScope: CacheReuseScope.Session,
+    expirationHintMs: 1_000n,
+    invalidationReason: "lease-expired",
+  });
+
+  const clonedResult = structuredClone(leaseResult);
+  assertEquals(clonedResult.objectId, objectId);
+  assertEquals(clonedResult.outcome, "renewed");
+  assertEquals(clonedResult.lease?.objectId, objectId);
+  assertEquals(clonedResult.lease?.objectVersion, 10n);
+  assertEquals(clonedResult.lease?.leaseId, 11n);
+  assertEquals(clonedResult.lease?.ownerScope, CacheLeaseOwnerScope.Session);
+  assertEquals(clonedResult.lease?.ownerId, 12n);
+  assertEquals(clonedResult.lease?.grantedAtMillis, 100n);
+  assertEquals(clonedResult.lease?.ttlMillis, 25);
+  assertEquals(clonedResult.objectVersion, { objectId, objectVersion: 10n, schemaId: 3, schemaVersion: 4 });
+  assertEquals(clonedResult.diagnostic, "lease renewed");
+  assertEquals(structuredClone(policy), {
+    enabled: true,
+    reuseScope: CacheReuseScope.Session,
+    expirationHintMs: 1_000n,
+    invalidationReason: "lease-expired",
+  });
+});
+
+Deno.test("@nnrp/core validates deterministic lifecycle snapshots", () => {
+  const session = (sessionId: number, state: "open" | "closed") =>
+    new NnrpSessionLifecycle({
+      sessionId,
+      state,
+      profileId: 1,
+      priorityClass: NnrpSessionPriorityClass.Balanced,
+      schemaId: 2,
+      schemaVersion: 3,
+      maxInFlightOperations: 4,
+      routeScopeId: 5,
+      lastOperationId: 6n,
+      sessionErrorCode: 0,
+    });
+  const connection = new NnrpConnectionLifecycle({ state: "open", sessions: [session(2, "open"), session(1, "open")] });
+  assertEquals(connection.sessions.map((value) => value.sessionId), [1, 2]);
+  assertEquals(connection.sessions[0]?.acceptsNewOperations, true);
+  assertThrows(
+    () => new NnrpConnectionLifecycle({ state: "open", sessions: [session(1, "open"), session(1, "open")] }),
+    NnrpProtocolError,
+  );
+  assertThrows(
+    () => new NnrpConnectionLifecycle({ state: "closed", sessions: [session(1, "open")] }),
+    NnrpProtocolError,
+  );
 });
 
 Deno.test("@nnrp/core exposes strict standard profile checks", () => {

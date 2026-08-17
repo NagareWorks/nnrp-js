@@ -24,9 +24,19 @@ export function createWebSocketTransportProvider(
   const native = binding !== undefined;
   const available = options.available ?? (native || socketCtor !== undefined);
   const diagnostic = options.diagnostic ?? websocketUnavailableDiagnostic();
+  const metadata = providerMetadata(options, native);
   return {
     kind: "websocket",
-    metadata: providerMetadata(options, native),
+    descriptor: {
+      name: "@nnrp/transport-websocket",
+      version: "1.0.0-preview.4.5",
+      transportId: "websocket",
+      kind: native ? "native-dynamic" : "wasm",
+      available,
+      metadata,
+      ...(available ? {} : { diagnostic: diagnostic.message }),
+    },
+    metadata,
     localAvailable: available,
     ...(available ? {} : { diagnostic }),
     endpointSchemes: ["ws", "wss"],

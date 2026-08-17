@@ -19,6 +19,7 @@ Deno.test("Preview4 adapter executes every suite-owned public case", async () =>
   try {
     const report = await executePreview4AdapterPlan(plan(directory), {
       verifyHeader: () => undefined,
+      verifyTransportSession: () => undefined,
     });
     assertEquals(report.protocol_version, PREVIEW4_CONFORMANCE_PROTOCOL);
     assertEquals(report.implementation_name, "nnrp-js");
@@ -62,6 +63,61 @@ Deno.test("Preview4 adapter plan must exactly equal the executable case catalog"
     Error,
     "protocol_version",
   );
+  assertThrows(
+    () =>
+      parsePreview4AdapterPlan({
+        ...missing,
+        cases: missing.cases.map((entry) =>
+          entry.id === "l0.header.fixed_shape.golden" ? { ...entry, parameters: {} } : entry
+        ),
+      }),
+    Error,
+    "parameters must equal [header_hex]",
+  );
+  assertThrows(
+    () =>
+      parsePreview4AdapterPlan({
+        ...missing,
+        cases: missing.cases.map((entry) =>
+          entry.id === "l1.control.cancel-abort" ? { ...entry, parameters: { legacy: true } } : entry
+        ),
+      }),
+    Error,
+    "parameters must equal []",
+  );
+});
+
+Deno.test("Preview4 adapter consumes suite-owned frozen vectors", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const invalid = plan(directory);
+    const report = await executePreview4AdapterPlan({
+      ...invalid,
+      cases: invalid.cases.map((entry) =>
+        entry.id === "l0.body_region.prelude.golden"
+          ? {
+            ...entry,
+            parameters: { metadata_hex: "1900000018000000180000000e00000010000000050000000000000000000000" },
+          }
+          : entry
+      ),
+    }, { verifyHeader: () => undefined, verifyTransportSession: () => undefined });
+    const bodyPrelude = report.results.find(({ id }) => id === "l0.body_region.prelude.golden");
+    assertEquals(bodyPrelude?.outcome, "fail");
+    assertEquals(bodyPrelude?.message, "NNRP/1 baseline body-region prelude changed during roundtrip");
+
+    const malformedHex = plan(directory);
+    const malformedReport = await executePreview4AdapterPlan({
+      ...malformedHex,
+      cases: malformedHex.cases.map((entry) =>
+        entry.id === "l0.header.fixed_shape.golden" ? { ...entry, parameters: { header_hex: "not-hex" } } : entry
+      ),
+    }, { verifyHeader: () => undefined, verifyTransportSession: () => undefined });
+    assertEquals(malformedReport.results[0].outcome, "fail");
+    assertEquals(malformedReport.results[0].message?.includes("header_hex"), true);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
 });
 
 Deno.test("Preview4 adapter writes failures instead of masking execution errors", async () => {
@@ -71,6 +127,7 @@ Deno.test("Preview4 adapter writes failures instead of masking execution errors"
       verifyHeader: () => {
         throw new Error("header mismatch");
       },
+      verifyTransportSession: () => undefined,
     });
     assertEquals(report.results[0], {
       id: "l0.header.fixed_shape.golden",
@@ -90,7 +147,10 @@ Deno.test("Preview4 adapter CLI writer honors plan and result paths", async () =
     const planPath = `${directory}/plan.json`;
     const resultsPath = `${directory}/nested/results.json`;
     await Deno.writeTextFile(planPath, JSON.stringify(plan(directory)));
-    await writePreview4AdapterResults(planPath, resultsPath, { verifyHeader: () => undefined });
+    await writePreview4AdapterResults(planPath, resultsPath, {
+      verifyHeader: () => undefined,
+      verifyTransportSession: () => undefined,
+    });
     const results = JSON.parse(await Deno.readTextFile(resultsPath));
     assertEquals(results.results.length, PREVIEW4_ADAPTER_CASE_IDS.length);
   } finally {
@@ -131,6 +191,52 @@ function plan(directory: string) {
       results_path: `${directory}/results.json`,
       evidence_dir: `${directory}/evidence`,
     },
-    cases: PREVIEW4_ADAPTER_CASE_IDS.map((id) => ({ id })),
+    cases: PREVIEW4_ADAPTER_CASE_IDS.map((id) => ({ id, parameters: FROZEN_PARAMETERS[id] ?? {} })),
   };
 }
+
+const FROZEN_PARAMETERS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "l0.header.fixed_shape.golden": {
+    header_hex: "4e4e525001001028210000003000000000100000070000000b0000000200000015cd5b0700000000",
+  },
+  "l0.body_region.prelude.golden": {
+    metadata_hex: "1800000018000000180000000e00000010000000050000000000000000000000",
+  },
+  "l0.control.client_hello.golden": {
+    metadata_hex:
+      "01010100010000000100000003000000030000002100000003000000010007000100020040000000000001007017640002000000000000006000000000000000",
+  },
+  "l0.control.session_patch_ack.golden": {
+    metadata_hex: "010003001100000044000000000000000200000028230000680105000300000000000000010000000300000010000000",
+  },
+  "l0.flow_update.packet.golden": {
+    packet_hex:
+      "4e4e5250010017280000000020000000000000001500000000000000000006000d000000000000000104020000000100000000000000000000000000280000000500000003000000",
+  },
+  "l0.result_hint.packet.golden": {
+    packet_hex:
+      "4e4e525001001828000000001000000000000000150000002f010000000007000e000000000000000300000003000000030000003c000000",
+  },
+  "l0.frame_submit.metadata.golden": {
+    metadata_hex:
+      "80026801200020005400020001020000640070170700000000000000c000000000000000000000000807060504030201000000000205ff0003000000290000001100000002000000",
+  },
+  "l0.result_push.metadata.golden": {
+    metadata_hex:
+      "0000050001005400020000004b0302004e030000000000001000000000000000000000000000000000000000010100002900000035001f000300000003000000",
+  },
+  "l0.object_reference.block.golden": {
+    metadata_hex: "020000000700000044332211000000008877665500000000",
+  },
+  "l0.typed_payload.descriptor.golden": {
+    descriptor_hex: "10000300040000000700000000000000",
+  },
+  "l0.typed_payload.frame_regions.golden": {
+    descriptor_region_hex:
+      "020001000000000003000000000000000400020003000000020000000000000008000300050000000500000000000000100004000a0000000300000000000000",
+    payload_hex: "746f6b6175766964656f657674",
+  },
+  "l0.typed_payload.descriptor.current.golden": {
+    descriptor_hex: "020002020110000003000000020000000800000018000000",
+  },
+};
