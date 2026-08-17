@@ -29,7 +29,7 @@ export function createWebSocketTransportProvider(
     kind: "websocket",
     descriptor: {
       name: "@nnrp/transport-websocket",
-      version: "1.0.0-preview.4.4",
+      version: "1.0.0-preview.4.5",
       transportId: "websocket",
       kind: native ? "native-dynamic" : "wasm",
       available,

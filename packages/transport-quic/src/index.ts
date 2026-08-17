@@ -53,7 +53,7 @@ export function createQuicTransportProvider(
     kind: "quic",
     descriptor: {
       name: "@nnrp/transport-quic",
-      version: "1.0.0-preview.4.4",
+      version: "1.0.0-preview.4.5",
       transportId: "quic",
       kind: "native-dynamic",
       available,

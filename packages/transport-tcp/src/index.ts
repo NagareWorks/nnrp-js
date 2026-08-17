@@ -51,7 +51,7 @@ export function createTcpTransportProvider(
     kind: "tcp",
     descriptor: {
       name: "@nnrp/transport-tcp",
-      version: "1.0.0-preview.4.4",
+      version: "1.0.0-preview.4.5",
       transportId: "tcp",
       kind: "native-dynamic",
       available,

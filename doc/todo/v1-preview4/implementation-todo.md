@@ -1,10 +1,9 @@
 # NNRP/1 Preview4 JavaScript/TypeScript Implementation Todo
 
 This directory is the closed implementation plan for JavaScript/TypeScript Preview4. The public API contract is frozen
-in `nnrp-doc`; current development validation consumes the exact Rust ABI `4.4.0` workflow artifact from successful run
-`31666415612` at commit `295f5b65ac71885b5c1b54d927b2595005038481`; and `nnrp-conformance` owns wire-level schemas and
-scenarios. The public Rust tag `v1.0.0-preview.4.22` does not contain that development commit, so release closure still
-requires the explicit Rust release pin in workstream 10.
+in `nnrp-doc`; release validation consumes Rust `1.0.0-preview.4.23`, ABI `4.4.0`, from successful workflow run
+`32009630987` at commit `00074cf3c09002de940f011e229de729aa377e88`; and `nnrp-conformance` commit
+`685505dc0624f68ff4d660c78d24ea7e9b1b0290` owns wire-level schemas and scenarios.
 
 ## Closure Rules
 
@@ -30,13 +29,13 @@ requires the explicit Rust release pin in workstream 10.
 - [x] [05 - Runtime objects and cache references](05-runtime-object-and-cache.md)
 - [x] [06 - IPC carrier provider](06-ipc-provider.md)
 - [x] [07 - WebSocket carrier provider](07-websocket-provider.md)
-- [ ] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
+- [x] [08 - Wire conformance and benchmarks](08-wire-conformance-and-benchmarks.md)
 - [x] [09 - Artifacts, release, and docs](09-artifacts-release-docs.md)
-- [ ] [10 - SDK contract v15 role events and multiplexing](10-sdk-contract-v15-role-events-and-multiplexing.md)
+- [x] [10 - SDK contract v15 role events and multiplexing](10-sdk-contract-v15-role-events-and-multiplexing.md)
 
 ## Release Closure
 
-- [ ] All workstream files contain zero unchecked boxes.
+- [x] All workstream files contain zero unchecked boxes.
 - [x] `deno task lint`, `deno task test`, `deno task coverage`, and `deno task package-check` pass.
 - [x] Native and browser wire-conformance target manifests validate against the released suite schema.
-- [ ] Release dry-run tarballs pass the ownership checks in workstream 09 after the v15 role-event surface is complete.
+- [x] Release dry-run tarballs pass the ownership checks in workstream 09 after the v15 role-event surface is complete.

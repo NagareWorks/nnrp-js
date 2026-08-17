@@ -8,17 +8,17 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "0ae3bd5d8ecaa387822888868e8676f0a3596bcd";
+const CONFORMANCE_REVISION = "685505dc0624f68ff4d660c78d24ea7e9b1b0290";
 
-Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
-  assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.22/g)?.length ?? 0, 2);
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22"');
-  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_RUN_ID = "31666415612"');
+Deno.test("release workflow and local preparation pin Rust preview4.23", () => {
+  assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.23/g)?.length ?? 0, 2);
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.23"');
+  assertStringIncludes(artifactPreparation, 'DEFAULT_RUST_ARTIFACT_RUN_ID = "32009630987"');
   assertStringIncludes(
     artifactPreparation,
-    'DEFAULT_RUST_ARTIFACT_COMMIT = "295f5b65ac71885b5c1b54d927b2595005038481"',
+    'DEFAULT_RUST_ARTIFACT_COMMIT = "00074cf3c09002de940f011e229de729aa377e88"',
   );
-  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.22"');
+  assertStringIncludes(sdkReporting, 'DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.23"');
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.17"), false);
   assertEquals(releaseWorkflow.includes("1.0.0-preview.4.18"), false);
   assertEquals(artifactPreparation.includes("1.0.0-preview.4.17"), false);
@@ -28,10 +28,10 @@ Deno.test("release workflow and local preparation pin Rust preview4.22", () => {
 });
 
 Deno.test("CI consumes an immutable successful Rust workflow artifact without weakening release inputs", () => {
-  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "31666415612"');
+  assertStringIncludes(ciWorkflow, 'NNRP_JS_RUST_ARTIFACT_RUN_ID: "32009630987"');
   assertStringIncludes(
     ciWorkflow,
-    "NNRP_JS_RUST_ARTIFACT_COMMIT: 295f5b65ac71885b5c1b54d927b2595005038481",
+    "NNRP_JS_RUST_ARTIFACT_COMMIT: 00074cf3c09002de940f011e229de729aa377e88",
   );
   assertStringIncludes(artifactPreparation, "run.headSha !== expectedCommit");
   assertStringIncludes(artifactPreparation, 'run.status !== "completed" || run.conclusion !== "success"');
