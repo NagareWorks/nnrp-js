@@ -3,7 +3,7 @@
 This directory is the closed implementation plan for JavaScript/TypeScript Preview4. The public API contract is frozen
 in `nnrp-doc`; release validation consumes Rust `1.0.0-preview.4.23`, ABI `4.4.0`, from successful workflow run
 `32009630987` at commit `00074cf3c09002de940f011e229de729aa377e88`; and `nnrp-conformance` commit
-`685505dc0624f68ff4d660c78d24ea7e9b1b0290` owns wire-level schemas and scenarios.
+`0167a48d0af7520358575c6bcf9833c053efc403` owns wire-level schemas and scenarios.
 
 ## Closure Rules
 
