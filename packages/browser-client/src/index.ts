@@ -816,8 +816,20 @@ export class NnrpBrowserClientSession {
     return this.sendControl(NnrpMessageType.ExecutionHint, metadata, body);
   }
 
-  public sendTraceContext(metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.TraceContext, metadata, body);
+  public sendTraceContext(
+    metadata: TraceContextMetadata,
+    body: Uint8Array = EMPTY_PAYLOAD,
+    operationId?: bigint,
+  ): Promise<void> {
+    try {
+      return this.#sendRuntimeFrame(
+        NnrpMessageType.TraceContext,
+        encodeRuntimeControlMetadata(NnrpMessageType.TraceContext, metadata, body),
+        operationId ?? 0n,
+      );
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   public sendControl(
@@ -2162,6 +2174,7 @@ function runtimeControlOperationId(
   if (messageType === NnrpMessageType.RouteHint || messageType === NnrpMessageType.ExecutionHint) {
     return (metadata as RouteHintMetadata).operationId;
   }
+  if (messageType === NnrpMessageType.TraceContext) return 0n;
   return undefined;
 }
 
@@ -2191,6 +2204,7 @@ function allowsSessionScopedOperation(messageType: NnrpMessageType): boolean {
   return messageType === NnrpMessageType.Cancel ||
     messageType === NnrpMessageType.Abort ||
     messageType === NnrpMessageType.BudgetUpdate ||
+    messageType === NnrpMessageType.TraceContext ||
     messageType === NnrpMessageType.ObjectRef ||
     messageType === NnrpMessageType.ObjectRelease;
 }

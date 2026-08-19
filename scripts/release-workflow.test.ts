@@ -8,7 +8,7 @@ const sdkReporting = await Deno.readTextFile("scripts/sdk-reporting.ts");
 const dryRunArtifacts = await Deno.readTextFile("scripts/create-release-dry-run-artifacts.ts");
 const publishPackages = await Deno.readTextFile("scripts/publish-packages.ts");
 const gitignore = await Deno.readTextFile(".gitignore");
-const CONFORMANCE_REVISION = "0167a48d0af7520358575c6bcf9833c053efc403";
+const CONFORMANCE_REVISION = "4f1632d9deb924ce8d90d4f7212dc2310d936320";
 
 Deno.test("release workflow and local preparation pin Rust preview4.23", () => {
   assertEquals(releaseWorkflow.match(/1\.0\.0-preview\.4\.23/g)?.length ?? 0, 2);

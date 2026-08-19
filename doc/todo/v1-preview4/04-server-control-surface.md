@@ -22,7 +22,7 @@
 - [x] Keep session-scoped flow, diagnostics, object, and cache methods on `NnrpServerSession`.
   - [x] `sendBackpressure(metadata)`.
   - [x] `sendCreditUpdate(metadata)`.
-  - [x] `sendTraceContext(metadata, body?)`.
+  - [x] `sendTraceContext(metadata, body?, operationId?)`.
   - [x] `sendRecoverableError(metadata, diagnostic?)`.
   - [x] `sendRetryAfter(metadata, diagnostic?)`.
   - [x] Keep `sendControl(messageType, metadata, tail?)` for session-scoped server messages only.

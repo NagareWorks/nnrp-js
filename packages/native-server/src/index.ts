@@ -1503,6 +1503,7 @@ interface NnrpServerOperationState {
   readonly frameId: number;
   readonly submit: NnrpRuntimeEvent;
   readonly sessionClosed: () => boolean;
+  readonly terminalSent: () => void;
 }
 
 let createServerOperation: (state: NnrpServerOperationState) => NnrpServerOperation;
@@ -1547,7 +1548,7 @@ export class NnrpServerOperation {
         this.#state.handle,
         metadata,
         body.slice(),
-      ).catch((error) => {
+      ).then(() => this.#state.terminalSent()).catch((error) => {
         this.#terminal = false;
         throw error;
       });
@@ -1602,6 +1603,8 @@ export class NnrpServerOperation {
         messageType,
         frameId: this.#state.frameId,
         payload,
+      }).then(() => {
+        if (terminal) this.#state.terminalSent();
       }).catch((error) => {
         if (terminal) this.#terminal = false;
         throw error;
@@ -1650,6 +1653,7 @@ export class NnrpServerSession {
   readonly #state: NnrpServerSessionState | undefined;
   readonly #runtimeObjects = new RuntimeObjectLifecycle();
   readonly #pendingEvents: NnrpServerEvent[] = [];
+  readonly #operationFrames = new Map<bigint, number>();
   #receiveQueue: Promise<void> = Promise.resolve();
   #runtimeObjectQueue: Promise<void> = Promise.resolve();
   #nextRuntimeFrameId = 1;
@@ -1723,8 +1727,20 @@ export class NnrpServerSession {
     return this.sendControl(NnrpMessageType.CreditUpdate, metadata);
   }
 
-  public sendTraceContext(metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD): Promise<void> {
-    return this.sendControl(NnrpMessageType.TraceContext, metadata, body);
+  public sendTraceContext(
+    metadata: TraceContextMetadata,
+    body: Uint8Array = EMPTY_PAYLOAD,
+    operationId?: bigint,
+  ): Promise<void> {
+    try {
+      return this.#sendRuntimeFrame(
+        NnrpMessageType.TraceContext,
+        encodeRuntimeControlMetadata(NnrpMessageType.TraceContext, metadata, body),
+        this.#traceFrameId(operationId),
+      );
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   public sendRecoverableError(
@@ -1789,7 +1805,11 @@ export class NnrpServerSession {
   ): Promise<void> {
     try {
       assertServerRuntimeControlMessage(messageType);
-      return this.#sendRuntimeFrame(messageType, encodeRuntimeControlMetadata(messageType, metadata, tail));
+      return this.#sendRuntimeFrame(
+        messageType,
+        encodeRuntimeControlMetadata(messageType, metadata, tail),
+        messageType === NnrpMessageType.TraceContext ? 0 : undefined,
+      );
     } catch (error) {
       return Promise.reject(error);
     }
@@ -1799,6 +1819,7 @@ export class NnrpServerSession {
     if (this.#closed) return;
     this.#closed = true;
     this.#pendingEvents.length = 0;
+    this.#operationFrames.clear();
     this.#runtimeObjects.clear();
     const state = this.#state;
     const closeRoleSession = state === undefined ? undefined : serverRoleSessionClosers.get(state.runtime);
@@ -1850,16 +1871,32 @@ export class NnrpServerSession {
         retryable: false,
       });
     }
+    const operationId = event.metadata.value.operationId;
     const operation = createServerOperation({
       runtime: state.runtime,
       routingKey: state.routingKey,
       sessionId: state.sessionId,
       handle: decoded.operation,
-      operationId: event.metadata.value.operationId,
+      operationId,
       frameId: event.header.frameId,
       submit: event,
       sessionClosed: () => this.closed,
+      terminalSent: () => {
+        if (this.#operationFrames.get(operationId) === event.header.frameId) {
+          this.#operationFrames.delete(operationId);
+        }
+      },
     });
+    const existingFrameId = this.#operationFrames.get(operationId);
+    if (existingFrameId !== undefined && existingFrameId !== event.header.frameId) {
+      throw new NnrpProtocolError({
+        code: "NNRP_OPERATION_FRAME_MISMATCH",
+        message: `Operation ${operationId} is already bound to frame ${existingFrameId}, not ${event.header.frameId}.`,
+        source: "protocol",
+        retryable: false,
+      });
+    }
+    this.#operationFrames.set(operationId, event.header.frameId);
     return { type: "submit", operation };
   }
 
@@ -1906,15 +1943,17 @@ export class NnrpServerSession {
     }
   }
 
-  #sendRuntimeFrame(messageType: NnrpMessageType, payload: Uint8Array): Promise<void> {
+  #sendRuntimeFrame(messageType: NnrpMessageType, payload: Uint8Array, selectedFrameId?: number): Promise<void> {
     try {
       this.#ensureOpen();
       const state = this.#state;
       if (state === undefined) {
         return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
       }
-      const frameId = this.#nextRuntimeFrameId;
-      this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      const frameId = selectedFrameId ?? this.#nextRuntimeFrameId;
+      if (selectedFrameId === undefined) {
+        this.#nextRuntimeFrameId = frameId === 0xffff_ffff ? 1 : frameId + 1;
+      }
       const sendRuntimeFrame = serverRoleFrameSenders.get(state.runtime);
       if (sendRuntimeFrame === undefined) return Promise.reject(bindingNotConnectedError("sendRuntimeFrame"));
       return sendRuntimeFrame(state.routingKey, {
@@ -1926,6 +1965,18 @@ export class NnrpServerSession {
     } catch (error) {
       return Promise.reject(error);
     }
+  }
+
+  #traceFrameId(operationId: bigint | undefined): number {
+    if (operationId === undefined) return 0;
+    const frameId = this.#operationFrames.get(operationId);
+    if (frameId !== undefined) return frameId;
+    throw new NnrpProtocolError({
+      code: "NNRP_RUNTIME_OPERATION_INACTIVE",
+      message: `TraceContext references inactive operation ${operationId}.`,
+      source: "protocol",
+      retryable: false,
+    });
   }
 }
 

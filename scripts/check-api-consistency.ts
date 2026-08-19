@@ -65,6 +65,13 @@ interface FrozenSdkContract {
       readonly timeoutRule: string;
       readonly lifecycleRule: string;
     };
+    readonly traceContextCorrelation: {
+      readonly sessionFrameId: number;
+      readonly operationFrameRule: string;
+      readonly metadataOperationId: string;
+      readonly headerTraceIdRule: string;
+      readonly sendMethodShapes: Readonly<Record<"rust" | "python" | "javascript" | "csharp", string>>;
+    };
   };
   readonly languageProjections: {
     readonly javascript: Readonly<Record<string, FrozenProjectionValue>>;
@@ -131,6 +138,15 @@ async function checkFrozenMachineContract(): Promise<void> {
   checkProjection(contract, "sessionRecoveryTicketEncode", "NnrpSessionRecoveryTicket.toBytes");
   checkProjection(contract, "sessionRecoveryTicketDecode", "NnrpSessionRecoveryTicket.fromBytes");
   checkClientSubmitWaitContract(contract, nativeClientSource, browserClientSource);
+  checkTraceContextCorrelationContract(
+    contract,
+    nativeClientSource,
+    browserClientSource,
+    nativeServerSource,
+    nativeClientDeclaration,
+    browserClientDeclaration,
+    nativeServerDeclaration,
+  );
   checkFrozenDataPlaneValidation(contract, coreSource);
 
   for (
@@ -1022,6 +1038,87 @@ function checkClientSubmitWaitContract(
   }
 }
 
+function checkTraceContextCorrelationContract(
+  contract: FrozenSdkContract,
+  nativeClientSource: string,
+  browserClientSource: string,
+  nativeServerSource: string,
+  nativeClientDeclaration: string,
+  browserClientDeclaration: string,
+  nativeServerDeclaration: string,
+): void {
+  const correlation = contract.roleSurfaces.traceContextCorrelation;
+  const expected = {
+    sessionFrameId: 0,
+    operationFrameRule:
+      "A non-zero TRACE_CONTEXT frame_id is the FRAME_SUBMIT frame_id of an active operation and must be rejected when unknown or mismatched.",
+    metadataOperationId: "forbidden",
+    headerTraceIdRule: "A non-zero common-header trace_id equals TraceContextMetadata.trace_id.",
+    javascriptMethodShape: "sendTraceContext(metadata, body?, operationId?)",
+  } as const;
+  if (correlation === undefined) {
+    failures.push("frozen SDK contract is missing roleSurfaces.traceContextCorrelation");
+    return;
+  }
+  if (correlation.sessionFrameId !== expected.sessionFrameId) {
+    failures.push(`TRACE_CONTEXT session frame_id must be 0, received ${correlation.sessionFrameId}`);
+  }
+  if (correlation.operationFrameRule !== expected.operationFrameRule) {
+    failures.push("TRACE_CONTEXT operation frame rule drifted from the frozen contract");
+  }
+  if (correlation.metadataOperationId !== expected.metadataOperationId) {
+    failures.push("TRACE_CONTEXT metadata operation_id must remain forbidden");
+  }
+  if (correlation.headerTraceIdRule !== expected.headerTraceIdRule) {
+    failures.push("TRACE_CONTEXT common-header trace_id rule drifted from the frozen contract");
+  }
+  if (correlation.sendMethodShapes.javascript !== expected.javascriptMethodShape) {
+    failures.push(
+      `TRACE_CONTEXT JavaScript method shape must be ${expected.javascriptMethodShape}, received ${correlation.sendMethodShapes.javascript}`,
+    );
+  }
+
+  const sourceParameters = "metadata: TraceContextMetadata, body: Uint8Array = EMPTY_PAYLOAD, operationId?: bigint";
+  const declarationParameters = "metadata: TraceContextMetadata, body?: Uint8Array, operationId?: bigint";
+  for (
+    const [label, className, source, declaration] of [
+      ["@nnrp/native-client", "NnrpClientSession", nativeClientSource, nativeClientDeclaration],
+      ["@nnrp/browser-client", "NnrpBrowserClientSession", browserClientSource, browserClientDeclaration],
+      ["@nnrp/native-server", "NnrpServerSession", nativeServerSource, nativeServerDeclaration],
+    ] as const
+  ) {
+    checkClassMethodParameters(source, className, "sendTraceContext", sourceParameters, `${label} source`);
+    checkClassMethodParameters(
+      declaration,
+      className,
+      "sendTraceContext",
+      declarationParameters,
+      `${label} declaration`,
+    );
+  }
+
+  for (
+    const [label, source] of [
+      ["@nnrp/native-client", nativeClientSource],
+      ["@nnrp/browser-client", browserClientSource],
+    ] as const
+  ) {
+    checkRequiredSourceFragments(`${label} TRACE_CONTEXT correlation`, source, [
+      "operationId ?? 0n",
+      "if (messageType === NnrpMessageType.TraceContext) return 0n;",
+      "inactiveRuntimeOperationError(messageType, operationId)",
+    ]);
+  }
+  checkRequiredSourceFragments("@nnrp/native-server TRACE_CONTEXT correlation", nativeServerSource, [
+    "readonly #operationFrames = new Map<bigint, number>();",
+    "this.#traceFrameId(operationId)",
+    "messageType === NnrpMessageType.TraceContext ? 0 : undefined",
+    'code: "NNRP_RUNTIME_OPERATION_INACTIVE"',
+    "if (this.#operationFrames.get(operationId) === event.header.frameId)",
+    "this.#operationFrames.delete(operationId)",
+  ]);
+}
+
 function contractFields(contract: FrozenSdkContract, typeName: string): readonly string[] {
   const type = contract.types[typeName];
   if (type === undefined) {
@@ -1229,6 +1326,27 @@ function checkClassMethodSignature(
   const declaration = classDeclaration(source, className);
   if (declaration === undefined) return;
   checkMethodSignature(declaration, methodName, expectedReturn, requiredParameter);
+}
+
+function checkClassMethodParameters(
+  source: string,
+  className: string,
+  methodName: string,
+  expectedParameters: string,
+  label: string,
+): void {
+  const declaration = classDeclaration(source, className);
+  if (declaration === undefined) return;
+  const match = new RegExp(`(?:public\\s+)?(?:async\\s+)?${methodName}\\s*\\(([^)]*)\\)`, "s").exec(declaration);
+  if (match === null) {
+    failures.push(`${label} is missing ${className}.${methodName}()`);
+    return;
+  }
+  const actual = normalizeType(match[1]!).replace(/,$/, "");
+  const expected = normalizeType(expectedParameters).replace(/,$/, "");
+  if (actual !== expected) {
+    failures.push(`${label} ${className}.${methodName}() parameters must be ${expected}, received ${actual}`);
+  }
 }
 
 function checkRequiredSourceFragments(label: string, source: string, requiredFragments: readonly string[]): void {

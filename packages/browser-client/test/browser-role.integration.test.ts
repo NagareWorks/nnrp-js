@@ -10,6 +10,7 @@ import {
   NNRP_DEFAULT_SUBMIT_POLICY,
   type NnrpClientEvent,
   NnrpMessageType,
+  NnrpProtocolError,
   type NnrpRuntimeEvent,
   NnrpTimeoutError,
   NnrpTransportError,
@@ -312,15 +313,65 @@ Deno.test({
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "route-hint");
       await session.sendExecutionHint(route, new Uint8Array([6]));
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "execution-hint");
-      await session.sendTraceContext({
-        traceId: 1n,
-        spanId: 2n,
-        parentSpanId: 0n,
-        stageCode: 3,
-        flags: 0,
-        bodyBytes: 1,
-      }, new Uint8Array([7]));
+      const operationTracePacketIndex = sentPackets.length;
+      await session.sendTraceContext(
+        {
+          traceId: 1n,
+          spanId: 2n,
+          parentSpanId: 0n,
+          stageCode: 3,
+          flags: 0,
+          bodyBytes: 1,
+        },
+        new Uint8Array([7]),
+        100n,
+      );
+      const operationTracePacket = sentPackets[operationTracePacketIndex]!;
+      assertEquals(operationTracePacket[6], NnrpMessageType.TraceContext);
+      assertEquals(
+        new DataView(
+          operationTracePacket.buffer,
+          operationTracePacket.byteOffset,
+          operationTracePacket.byteLength,
+        ).getUint32(24, true),
+        9,
+      );
       assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "trace-context");
+      await session.sendTraceContext({
+        traceId: 2n,
+        spanId: 3n,
+        parentSpanId: 1n,
+        stageCode: 4,
+        flags: 0,
+        bodyBytes: 0,
+      });
+      const sessionTracePacket = sentPackets.at(-1)!;
+      assertEquals(sessionTracePacket[6], NnrpMessageType.TraceContext);
+      assertEquals(
+        new DataView(sessionTracePacket.buffer, sessionTracePacket.byteOffset, sessionTracePacket.byteLength).getUint32(
+          24,
+          true,
+        ),
+        0,
+      );
+      assertEquals(eventLabel(await receiveServerRuntimeEvent(serverSession)), "trace-context");
+      const inactiveTrace = await assertRejects(
+        () =>
+          session.sendTraceContext(
+            {
+              traceId: 3n,
+              spanId: 4n,
+              parentSpanId: 0n,
+              stageCode: 5,
+              flags: 0,
+              bodyBytes: 0,
+            },
+            undefined,
+            999n,
+          ),
+        NnrpProtocolError,
+      );
+      assertEquals(inactiveTrace.diagnostic.code, "NNRP_RUNTIME_OPERATION_INACTIVE");
       await session.sendControl(NnrpMessageType.RetryAfter, {
         scopeId: 100n,
         controlSequence: 6n,
