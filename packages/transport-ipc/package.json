@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/transport-ipc",
-  "version": "1.0.0-preview.4.6",
+  "version": "1.0.0-preview.4.7",
   "description": "Native Unix-domain socket and Windows named-pipe carrier provider for NNRP runtimes.",
   "keywords": ["nnrp", "ai", "runtime", "transport", "ipc", "unix-socket", "named-pipe", "typescript"],
   "type": "module",

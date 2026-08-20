@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/core",
-  "version": "1.0.0-preview.4.6",
+  "version": "1.0.0-preview.4.7",
   "description": "Shared TypeScript primitives for NNRP.",
   "keywords": [
     "nnrp",
