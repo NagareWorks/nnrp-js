@@ -129,6 +129,7 @@ Deno.test("release publishes packages before creating the immutable git tag", ()
   assertStringIncludes(releaseWorkflow, 'if [ -n "$existing" ] && [ "$existing" != "$target" ]; then');
   assertStringIncludes(releaseWorkflow, "Manual tag creation requires publish_to_npm=true");
   assertStringIncludes(releaseWorkflow, "Dry-run releases cannot create immutable Git tags.");
+  assertStringIncludes(releaseWorkflow, "prerelease: true");
 });
 
 Deno.test("publish automation stages dependency order and rejects mismatched existing versions", () => {
