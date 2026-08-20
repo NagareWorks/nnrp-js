@@ -1,9 +1,9 @@
 # NNRP/1 Preview4 JavaScript/TypeScript Implementation Todo
 
 This directory is the closed implementation plan for JavaScript/TypeScript Preview4. The public API contract is frozen
-in `nnrp-doc`; release validation consumes Rust `1.0.0-preview.4.23`, ABI `4.4.0`, from successful workflow run
-`32009630987` at commit `00074cf3c09002de940f011e229de729aa377e88`; and `nnrp-conformance` commit
-`0167a48d0af7520358575c6bcf9833c053efc403` owns wire-level schemas and scenarios.
+in `nnrp-doc`; release validation consumes Rust `1.0.0-preview.4.24`, ABI `4.4.0`, from successful workflow run
+`32331954684` at commit `8979c5b968a159ccea2ad0106573cc384ca38dbe`; and `nnrp-conformance` commit
+`efb0d965d5a18d0a86fd50cb69efccce0b43c089` owns wire-level schemas and scenarios.
 
 ## Closure Rules
 

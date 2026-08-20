@@ -55,7 +55,7 @@ export function createIpcTransportProvider(options: NnrpIpcTransportProviderOpti
     kind: "ipc",
     descriptor: {
       name: "@nnrp/transport-ipc",
-      version: "1.0.0-preview.4.5",
+      version: "1.0.0-preview.4.6",
       transportId: "ipc",
       kind: "native-dynamic",
       available,

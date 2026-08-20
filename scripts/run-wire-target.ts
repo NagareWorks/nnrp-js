@@ -241,7 +241,6 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
       bodyBytes: TRACE_BODY.byteLength,
     },
     TRACE_BODY,
-    operation.operationId,
   );
   await operation.sendResultDrop({
     operationId: submit.metadata.value.operationId,
