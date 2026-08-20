@@ -32,15 +32,15 @@ on:
       rust_artifact_version:
         description: nnrp-rs release version that provides the native artifacts.
         required: true
-        default: 1.0.0-preview.4.23
+        default: 1.0.0-preview.4.24
       rust_artifact_run_id:
         description: Successful nnrp-rs release workflow run that produced the selected version.
         required: true
-        default: "32009630987"
+        default: "32331954684"
       rust_artifact_commit:
         description: Exact nnrp-rs source commit associated with the selected workflow run.
         required: true
-        default: 00074cf3c09002de940f011e229de729aa377e88
+        default: 8979c5b968a159ccea2ad0106573cc384ca38dbe
       dry_run:
         description: Run npm publish in dry-run mode.
         required: true
@@ -52,10 +52,10 @@ permissions:
   id-token: write
 
 env:
-  NNRP_CONFORMANCE_SOURCE_COMMIT: 685505dc0624f68ff4d660c78d24ea7e9b1b0290
-  NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.23' }}
-  NNRP_JS_RUST_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_run_id || '32009630987' }}
-  NNRP_JS_RUST_ARTIFACT_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_commit || '00074cf3c09002de940f011e229de729aa377e88' }}
+  NNRP_CONFORMANCE_SOURCE_COMMIT: efb0d965d5a18d0a86fd50cb69efccce0b43c089
+  NNRP_JS_RUST_ARTIFACT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_version || '1.0.0-preview.4.24' }}
+  NNRP_JS_RUST_ARTIFACT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_run_id || '32331954684' }}
+  NNRP_JS_RUST_ARTIFACT_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.rust_artifact_commit || '8979c5b968a159ccea2ad0106573cc384ca38dbe' }}
 
 jobs:
   publish:

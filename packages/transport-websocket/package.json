@@ -1,6 +1,6 @@
 {
   "name": "@nnrp/transport-websocket",
-  "version": "1.0.0-preview.4.5",
+  "version": "1.0.0-preview.4.6",
   "description": "WebSocket transport provider with native artifacts and browser host bindings for NNRP runtimes.",
   "keywords": [
     "nnrp",

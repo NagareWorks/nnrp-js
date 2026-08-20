@@ -11,6 +11,18 @@ Deno.test("wire target routes every server accept through the diagnostic helper"
   assertEquals(source.includes("await quic.server.accept()"), false);
 });
 
+Deno.test("cancel target emits terminal trace evidence at session scope", async () => {
+  const source = await Deno.readTextFile("scripts/run-wire-target.ts");
+  const handler = source.slice(
+    source.indexOf("async function handleCancel"),
+    source.indexOf("async function handlePriority"),
+  );
+  const traceCall = handler.match(/await session\.sendTraceContext\(([\s\S]*?)\);/)?.[1];
+
+  assertEquals(traceCall?.includes("TRACE_BODY"), true);
+  assertEquals(traceCall?.includes("operation.operationId"), false);
+});
+
 Deno.test("wire target requires frozen deadline-before-submit ordering and correlation", async () => {
   const calls: string[] = [];
   const session = deadlineSession(calls);

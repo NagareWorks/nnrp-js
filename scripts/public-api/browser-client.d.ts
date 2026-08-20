@@ -129,7 +129,7 @@ export declare class NnrpBrowserClientSession {
     degradeProfile(metadata: CapabilityMetadata, body?: Uint8Array): Promise<void>;
     sendRouteHint(metadata: RouteHintMetadata, body?: Uint8Array): Promise<void>;
     sendExecutionHint(metadata: RouteHintMetadata, body?: Uint8Array): Promise<void>;
-    sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array): Promise<void>;
+    sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array, operationId?: bigint): Promise<void>;
     sendControl(messageType: NnrpMessageType, metadata: RuntimeControlMetadata, tail?: Uint8Array): Promise<void>;
     declareObject(metadata: ObjectDescriptorMetadata, body?: Uint8Array): Promise<void>;
     referenceObject(metadata: ObjectReferenceMetadata, body?: Uint8Array): Promise<void>;

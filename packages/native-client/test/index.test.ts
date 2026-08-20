@@ -1279,14 +1279,43 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
   } as const;
   await session.sendRouteHint(route, one);
   await session.sendExecutionHint(route, one);
+  await session.sendTraceContext(
+    {
+      traceId: 1n,
+      spanId: 2n,
+      parentSpanId: 3n,
+      stageCode: 4,
+      flags: 0,
+      bodyBytes: 1,
+    },
+    one,
+    1n,
+  );
   await session.sendTraceContext({
-    traceId: 1n,
-    spanId: 2n,
-    parentSpanId: 3n,
-    stageCode: 4,
+    traceId: 2n,
+    spanId: 3n,
+    parentSpanId: 1n,
+    stageCode: 5,
     flags: 0,
-    bodyBytes: 1,
-  }, one);
+    bodyBytes: 0,
+  });
+  const inactiveTrace = await assertRejects(
+    () =>
+      session.sendTraceContext(
+        {
+          traceId: 3n,
+          spanId: 4n,
+          parentSpanId: 0n,
+          stageCode: 6,
+          flags: 0,
+          bodyBytes: 0,
+        },
+        undefined,
+        999n,
+      ),
+    NnrpProtocolError,
+  );
+  assertEquals(inactiveTrace.diagnostic.code, "NNRP_RUNTIME_OPERATION_INACTIVE");
   await session.sendControl(NnrpMessageType.RetryAfter, {
     scopeId: 1n,
     controlSequence: 2n,
@@ -1389,6 +1418,7 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     NnrpMessageType.RouteHint,
     NnrpMessageType.ExecutionHint,
     NnrpMessageType.TraceContext,
+    NnrpMessageType.TraceContext,
     NnrpMessageType.RetryAfter,
     NnrpMessageType.ObjectDeclare,
     NnrpMessageType.ObjectRef,
@@ -1411,16 +1441,17 @@ Deno.test("@nnrp/native-client exposes the frozen high-level Preview4 runtime AP
     2,
     17,
     17,
+    17,
+    0,
     3,
     4,
+    17,
+    17,
     5,
-    17,
-    17,
     6,
     7,
     8,
     9,
-    10,
   ]);
   assertEquals(seen.every(({ payload }) => payload.byteLength > 0), true);
   assertEquals(

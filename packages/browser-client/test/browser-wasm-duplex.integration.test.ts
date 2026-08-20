@@ -98,7 +98,7 @@ Deno.test({
       await within(
         role.sendRuntimeFrame(
           NnrpMessageType.TraceContext,
-          1,
+          0,
           encodeRuntimeControlMetadata(NnrpMessageType.TraceContext, metadata),
         ),
         "WASM role send did not complete while event receive was pending",
@@ -108,15 +108,15 @@ Deno.test({
         throw new Error(`WASM role send waited ${sendElapsedMillis.toFixed(0)}ms for the pending event receive`);
       }
       assertEquals(sentMessageTypes.at(-1), NnrpMessageType.TraceContext);
-      assertEquals(
-        (await receiveServerRuntimeEvent(serverSession)).header.messageType,
-        NnrpMessageType.TraceContext,
-      );
+      const serverTrace = await receiveServerRuntimeEvent(serverSession);
+      assertEquals(serverTrace.header.messageType, NnrpMessageType.TraceContext);
+      assertEquals(serverTrace.header.frameId, 0);
 
       await serverSession.sendTraceContext(metadata);
       const trace = await pendingEvent;
       if (trace instanceof Error) throw trace;
       assertEquals(trace.header.messageType, NnrpMessageType.TraceContext);
+      assertEquals(trace.header.frameId, 0);
       assertRuntimeMetadata(trace, "trace_context");
 
       await role.submitNoWait(9, NNRP_DEFAULT_SUBMIT_HEADER, frameSubmitPayload(42n, new Uint8Array([7])));
@@ -149,6 +149,7 @@ Deno.test({
       const traceAfterSubmit = await pendingAfterSubmit;
       if (traceAfterSubmit instanceof Error) throw traceAfterSubmit;
       assertEquals(traceAfterSubmit.header.messageType, NnrpMessageType.TraceContext);
+      assertEquals(traceAfterSubmit.header.frameId, 0);
       assertRuntimeMetadata(traceAfterSubmit, "trace_context");
       assertEquals(lifecycleEvents, [{ operationId: 42n, state: "cancelled" }]);
     } catch (error) {

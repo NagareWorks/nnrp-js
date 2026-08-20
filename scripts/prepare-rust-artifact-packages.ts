@@ -8,9 +8,9 @@ import {
   parseReleaseChecksums,
 } from "./rust-artifact-policy.ts";
 
-const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.23";
-const DEFAULT_RUST_ARTIFACT_RUN_ID = "32009630987";
-const DEFAULT_RUST_ARTIFACT_COMMIT = "00074cf3c09002de940f011e229de729aa377e88";
+const DEFAULT_RUST_ARTIFACT_VERSION = "1.0.0-preview.4.24";
+const DEFAULT_RUST_ARTIFACT_RUN_ID = "32331954684";
+const DEFAULT_RUST_ARTIFACT_COMMIT = "8979c5b968a159ccea2ad0106573cc384ca38dbe";
 const browserWasmPackageDir = "packages/browser-client";
 const transportPackages: readonly TransportPackagePolicy[] = [
   { transport: "tcp", packageDir: "packages/transport-tcp" },

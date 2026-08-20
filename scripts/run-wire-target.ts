@@ -231,14 +231,17 @@ async function handleCancel(session: NnrpServerSession): Promise<void> {
   if (cancel.metadata.value.operationId !== submit.metadata.value.operationId) {
     throw new Error("cancel wire case targeted another operation");
   }
-  await session.sendTraceContext({
-    traceId: 0x1234n,
-    spanId: 0x5678n,
-    parentSpanId: 0n,
-    stageCode: 1,
-    flags: 0,
-    bodyBytes: TRACE_BODY.byteLength,
-  }, TRACE_BODY);
+  await session.sendTraceContext(
+    {
+      traceId: 0x1234n,
+      spanId: 0x5678n,
+      parentSpanId: 0n,
+      stageCode: 1,
+      flags: 0,
+      bodyBytes: TRACE_BODY.byteLength,
+    },
+    TRACE_BODY,
+  );
   await operation.sendResultDrop({
     operationId: submit.metadata.value.operationId,
     resultSequence: 1n,

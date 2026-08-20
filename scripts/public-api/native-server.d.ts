@@ -157,7 +157,7 @@ export declare class NnrpServerSession {
     receiveSubmit(options?: NnrpEventPollOptions): Promise<NnrpServerOperation>;
     sendBackpressure(metadata: PressureMetadata): Promise<void>;
     sendCreditUpdate(metadata: PressureMetadata): Promise<void>;
-    sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array): Promise<void>;
+    sendTraceContext(metadata: TraceContextMetadata, body?: Uint8Array, operationId?: bigint): Promise<void>;
     sendRecoverableError(metadata: RecoverableErrorMetadata, diagnostic?: Uint8Array): Promise<void>;
     sendRetryAfter(metadata: RetryAfterMetadata, diagnostic?: Uint8Array): Promise<void>;
     declareObject(metadata: ObjectDescriptorMetadata, body?: Uint8Array): Promise<void>;

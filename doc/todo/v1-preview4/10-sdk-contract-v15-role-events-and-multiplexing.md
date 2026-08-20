@@ -71,10 +71,10 @@ paths.
 - [x] Add unit coverage for canonical tickets, option validation, async handshake, resume, policy, and multi-session
       use.
 - [x] Run real TCP, QUIC, IPC, and WebSocket role E2E against successful full-matrix Rust workflow artifact run
-      `32009630987` at merge commit `00074cf3c09002de940f011e229de729aa377e88`.
+      `32331954684` at merge commit `8979c5b968a159ccea2ad0106573cc384ca38dbe`.
 - [x] Run suite-owned adapter conformance and native/browser independent-process wire E2E without skips.
 - [x] Run format, lint, typecheck, tests, total and incremental coverage, build, package, and installed-package gates.
 - [x] Inspect every staged npm package and verify only provider packages contain their owned native artifacts.
 - [x] Update README, release notes, examples, and public API snapshots after implementation matches contract v15.
-- [x] Pin audited Rust `1.0.0-preview.4.23`, whose tag, source commit, workflow artifacts, and ABI 4.4 manifest identify
+- [x] Pin audited Rust `1.0.0-preview.4.24`, whose tag, source commit, workflow artifacts, and ABI 4.4 manifest identify
       the same server-operation lifetime implementation.

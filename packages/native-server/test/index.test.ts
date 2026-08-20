@@ -770,7 +770,7 @@ Deno.test("@nnrp/native-server decodes ordered control, object, and cache role e
 });
 
 Deno.test("@nnrp/native-server enforces terminal result ordering without blocking terminal evidence", async () => {
-  const runtimeFrames: NnrpMessageType[] = [];
+  const runtimeFrames: Array<{ readonly messageType: NnrpMessageType; readonly frameId: number }> = [];
   const observedHandles: Array<{ readonly id: bigint; readonly generation: number; readonly flags: number }> = [];
   let resultCount = 0;
   const operationHandle = { kind: 4, id: 900n, generation: 3, flags: 0xa5 };
@@ -787,8 +787,8 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
               resultCount++;
               observedHandles.push(handle);
             },
-            onRuntimeFrame: (handle, messageType) => {
-              runtimeFrames.push(messageType as NnrpMessageType);
+            onRuntimeFrame: (handle, messageType, _payload, frameId) => {
+              runtimeFrames.push({ messageType: messageType as NnrpMessageType, frameId });
               observedHandles.push(handle);
             },
           },
@@ -802,6 +802,18 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
   const operation = await session.receiveSubmit();
   assertEquals(operation.submit.metadata.type, "frame_submit");
 
+  await session.sendTraceContext(
+    {
+      traceId: 9n,
+      spanId: 1n,
+      parentSpanId: 0n,
+      stageCode: 1,
+      flags: 0,
+      bodyBytes: 0,
+    },
+    undefined,
+    operation.operationId,
+  );
   await operation.sendProgress({
     operationId: 9n,
     progressSequence: 1n,
@@ -841,6 +853,23 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
     NnrpProtocolError,
   );
   assertEquals(duplicateError.diagnostic.code, "NNRP_SERVER_RESULT_TERMINAL_DUPLICATE");
+  const inactiveTrace = await assertRejects(
+    () =>
+      session.sendTraceContext(
+        {
+          traceId: 10n,
+          spanId: 2n,
+          parentSpanId: 0n,
+          stageCode: 2,
+          flags: 0,
+          bodyBytes: 0,
+        },
+        undefined,
+        operation.operationId,
+      ),
+    NnrpProtocolError,
+  );
+  assertEquals(inactiveTrace.diagnostic.code, "NNRP_RUNTIME_OPERATION_INACTIVE");
 
   await session.sendTraceContext({
     traceId: 1n,
@@ -874,13 +903,16 @@ Deno.test("@nnrp/native-server enforces terminal result ordering without blockin
     diagnosticBytes: 1,
   }, new Uint8Array([0x2b]));
 
-  assertEquals(runtimeFrames, [
+  assertEquals(runtimeFrames.map(({ messageType }) => messageType), [
+    NnrpMessageType.TraceContext,
     NnrpMessageType.Progress,
     NnrpMessageType.PartialResult,
     NnrpMessageType.TraceContext,
     NnrpMessageType.ResultDropReason,
   ]);
+  assertEquals(runtimeFrames.map(({ frameId }) => frameId), [7, 7, 7, 0, 8]);
   assertEquals(observedHandles, [
+    { kind: 3, id: 1n, generation: 1, flags: 0 },
     operationHandle,
     operationHandle,
     operationHandle,
@@ -1008,6 +1040,23 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     flags: 0,
     bodyBytes: 1,
   }, one);
+  const inactiveTrace = await assertRejects(
+    () =>
+      session.sendTraceContext(
+        {
+          traceId: 2n,
+          spanId: 3n,
+          parentSpanId: 0n,
+          stageCode: 5,
+          flags: 0,
+          bodyBytes: 0,
+        },
+        undefined,
+        999n,
+      ),
+    NnrpProtocolError,
+  );
+  assertEquals(inactiveTrace.diagnostic.code, "NNRP_RUNTIME_OPERATION_INACTIVE");
   await session.sendRecoverableError({
     errorCode: 1,
     errorScope: ErrorScope.Session,
@@ -1136,7 +1185,7 @@ Deno.test("@nnrp/native-server exposes frozen high-level response controls", asy
     NnrpMessageType.CacheMiss,
     NnrpMessageType.CacheInvalidate,
   ]);
-  assertEquals(seen.map(({ frameId }) => frameId), Array.from({ length: 13 }, (_, index) => index + 1));
+  assertEquals(seen.map(({ frameId }) => frameId), [1, 2, 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   assertEquals(
     decodeRuntimeObjectMetadata(
       NnrpMessageType.ObjectPatch,
@@ -1401,6 +1450,7 @@ function roleServerBinding(
       handle: { kind: number; id: bigint; generation: number; flags: number },
       messageType: number,
       payload: Uint8Array,
+      frameId: number,
     ) => void;
   } = {},
 ): NnrpNativeTransportBinding {
@@ -1430,7 +1480,7 @@ function roleServerBinding(
                   _frameId: number,
                   payload: Uint8Array,
                 ) => {
-                  callbacks.onRuntimeFrame?.(_handle, messageType, payload);
+                  callbacks.onRuntimeFrame?.(_handle, messageType, payload, _frameId);
                   return Promise.resolve();
                 },
                 close: () => Promise.resolve(),

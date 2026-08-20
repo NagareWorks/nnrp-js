@@ -12,8 +12,8 @@ const browserRoleIntegration = await Deno.readTextFile(
   "packages/browser-client/test/browser-role.integration.test.ts",
 );
 
-const DOC_REVISION = "3439ded0d318bd736f6485b17f2563fae77627bf";
-const CONFORMANCE_REVISION = "685505dc0624f68ff4d660c78d24ea7e9b1b0290";
+const DOC_REVISION = "4319692b4c0a697fe5d360e55bafa2b83f5bbb3d";
+const CONFORMANCE_REVISION = "efb0d965d5a18d0a86fd50cb69efccce0b43c089";
 
 Deno.test("commit policy preserves develop-to-main history without weakening feature PRs", () => {
   assertStringIncludes(ciWorkflow, 'base_ref="${{ github.base_ref }}"');
